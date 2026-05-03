@@ -1,31 +1,15 @@
-# Claude Code AI 模型网关项目指南
+# Claude Code 多模型网关 - 技术实现指南
 
-## 项目概述
+## 🤖 面向 AI 助手的使用说明
 
-这是一个基于 LiteLLM Proxy 的 AI 模型网关，让 Claude Code 能够同时接入智谱、小米、美团三家国产 AI 模型。项目支持自动 fallback 机制和手动模型切换。
+本文件专门为 AI 助手（Claude Code）编写，提供项目的技术实现细节、配置管理和扩展指南。
 
-## 核心功能
-
-- **智谱主力模型**：默认使用智谱 BigModel，自动 fallback 到小米 MiMo 和美团 LongCat
-- **手动切换**：支持 `/model` 命令在 Claude Code 中切换模型
-- **部署方式**：支持本地部署（仅本机）和服务器部署（多设备访问）
-- **API 兼容**：完全兼容 Anthropic API，无需修改 Claude Code
-
-## 支持模型
-
-| 命令 | 效果 |
-|------|------|
-| `/model coding` | fallback 组（智谱优先 → 小米 → 美团）|
-| `/model glm-sonnet` | 智谱主力（日常推荐）|
-| `/model mimo-sonnet` | 小米主力 |
-| `/model longcat` | 美团 LongCat |
-
-## 项目结构
+## 📁 项目结构
 
 ```
 litellm-gateway/
-├── .claude/                 # Claude 配置文件
-├── docs/                   # 部署文档
+├── .claude/                 # 本文件所在目录
+├── docs/                   # 用户文档
 │   ├── local-deploy.md    # 本地部署指南
 │   └── server-deploy.md   # 服务器部署指南
 ├── docker-compose.yaml     # 服务器部署编排
@@ -36,169 +20,272 @@ litellm-gateway/
 │   ├── config.yaml       # 模型路由配置
 │   ├── .env.example      # 环境变量模板
 │   └── longcat_auth.py   # 美团认证回调
-└── README.md              # 项目说明
+└── README.md              # 用户导向文档
 ```
 
-## 配置文件位置
+## ⚙️ 核心配置文件
 
-- **LiteLLM 配置**: `~/.litellm/config.yaml`
-- **认证回调**: `~/.litellm/longcat_auth.py`
-- **环境变量**: `~/.litellm/.env`
-- **Claude Code 配置**: `~/.claude/settings.json`
+### 1. LiteLLM 配置 (~/.litellm/config.yaml)
 
-## 关键配置说明
+**职责**: 模型路由、fallback 机制、认证配置
 
-### 1. 模型路由配置 (config.yaml)
-- 定义三家提供商的模型映射
-- 设置 fallback 机制（simple-shuffle 路由）
-- 配置认证回调处理美团 API
+**关键配置项**:
+```yaml
+model_list:
+  # 智谱 BigModel
+  - model_name: glm-sonnet
+    litellm_params:
+      model: anthropic/glm-5-turbo
+      api_base: https://open.bigmodel.cn/api/anthropic
+      api_key: os.environ/GLM_API_KEY
 
-### 2. 美团认证重写 (longcat_auth.py)
-- 使用 `async_pre_call_hook` 拦截请求
-- 将 `x-api-key` 转换为 `Authorization: Bearer`
-- 解决美团 API 认证兼容性问题
+router_settings:
+  routing: "simple-shuffle"
+  num_retries: 2
+  timeout: 120
+  fallbacks:
+    - {"coding": ["coding"]}
+  allowed_fails: 2
 
-### 3. Claude Code 配置 (settings.json)
-- `ANTHROPIC_BASE_URL`: 指向网关地址
-- `ANTHROPIC_AUTH_TOKEN`: 认证令牌
-- 默认模型映射配置
+litellm_settings:
+  callbacks: longcat_auth.longcat_auth_rewriter
+```
 
-## 部署方式
+### 2. 美团认证回调 (~/.litellm/longcat_auth.py)
 
-### 本地部署
-1. 安装 OrbStack 或 Docker Desktop
-2. 配置环境变量和认证文件
-3. 启动 LiteLLM 服务
-4. 配置 Claude Code 指向本地网关
+**问题**: 美团 API 只接受 `Authorization: Bearer`，LiteLLM 默认发送 `x-api-key`
 
-### 服务器部署
-1. 准备 Ubuntu 服务器和域名
-2. 使用 docker-compose 部署完整服务栈
-3. 配置 Nginx + HTTPS + Certbot
-4. 客户端配置指向服务器
+**解决方案**: 使用 `async_pre_call_hook` 拦截并重写 headers
 
-## 故障排除
+```python
+from litellm import CustomLogger
 
-### 常见错误
-- **missing_api_key**: 美团认证 header 不兼容，检查 longcat_auth.py
-- **model not found**: 模型名称大小写问题，确保使用小写
-- **404 error**: 检查 ANTHROPIC_BASE_URL 是否包含 /v1
+class CustomAuth(CustomLogger):
+    async def async_pre_call_hook(
+        self, kwargs, response, call_type
+    ):
+        if kwargs.get("model") == "longcat":
+            api_key = kwargs.get("api_key")
+            extra_headers = kwargs.get("extra_headers", {})
+            extra_headers["Authorization"] = f"Bearer {api_key}"
+            
+            if "x-api-key" in extra_headers:
+                del extra_headers["x-api-key"]
+                
+            kwargs["extra_headers"] = extra_headers
+        return kwargs
+```
 
-### 调试方法
-1. 检查 LiteLLM 日志：`docker logs litellm_proxy`
-2. 验证 API keys 有效性
-3. 测试单个模型连接
-4. 检查网络连接和防火墙
+### 3. Claude Code 配置 (~/.claude/settings.json)
 
-## 安全注意事项
+**关键配置**:
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-local-gateway-hwj123hwj",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-sonnet"
+  }
+}
+```
 
-- 永远不要提交 `.env` 文件
-- 使用环境变量或 `.env.example` 模板
-- 定期轮换 API keys
-- 服务器部署时启用 HTTPS
+## 🔧 部署管理
 
-## 敏感信息
+### 本地部署流程
 
-以下文件包含敏感信息，已添加到 `.gitignore`：
-- `~/.litellm/.env` - API keys 和数据库连接
-- `certbot/conf/` - SSL 证书配置
-- `certbot/www/` - Certbot 验证文件
+1. **环境准备**
+   ```bash
+   # 创建配置目录
+   mkdir -p ~/.litellm
+   
+   # 复制配置文件
+   cp litellm/config.yaml ~/.litellm/
+   cp litellm/longcat_auth.py ~/.litellm/
+   ```
 
-## 扩展新模型指南
+2. **环境变量配置**
+   ```bash
+   # 创建 .env 文件
+   GLM_API_KEY="your-glm-key"
+   MIMO_API_KEY="your-mimo-key"
+   LONGCAT_API_KEY="your-longcat-key"
+   LITELLM_MASTER_KEY="sk-local-gateway-hwj123hwj"
+   ```
 
-### 接入新提供商的标准流程
+3. **启动服务**
+   ```bash
+   docker run -d \
+     --name litellm-proxy \
+     -p 4000:4000 \
+     -v ~/.litellm/config.yaml:/app/config.yaml \
+     -v ~/.litellm/longcat_auth.py:/app/longcat_auth/longcat_auth.py \
+     -e LITELLM_MASTER_KEY=$LITELLM_MASTER_KEY \
+     -e GLM_API_KEY=$GLM_API_KEY \
+     -e MIMO_API_KEY=$MIMO_API_KEY \
+     -e LONGCAT_API_KEY=$LONGCAT_API_KEY \
+     ghcr.io/berriai/litellm:main-latest \
+     --config /app/config.yaml
+   ```
 
-1. **调研 API 兼容性**
-   - 确认是否支持 Anthropic API 格式
-   - 检查认证方式（x-api-key vs Authorization: Bearer）
-   - 验证模型名称和参数格式
+### 服务器部署流程
 
-2. **配置模型映射**
-   在 `~/.litellm/config.yaml` 的 `model_list` 中添加：
+1. **使用 docker-compose**
+   ```bash
+   # 配置域名
+   DOMAIN="your-domain.com"
+   
+   # 启动服务栈
+   docker-compose up -d
+   ```
+
+2. **Nginx 配置要点**
+   - HTTPS 强制跳转
+   - 速率限制 (100 req/min)
+   - 反向代理到 LiteLLM
+
+## 🧪 测试验证
+
+### 测试网关连接
+```bash
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-sonnet",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 100
+  }'
+```
+
+### 测试 fallback 机制
+1. 正常情况：智谱响应
+2. 关闭智谱 API：自动切换到小米
+3. 关闭小米 API：自动切换到美团
+
+## 🚀 扩展新模型指南
+
+### 标准接入流程
+
+1. **API 兼容性检查**
+   - ✅ 支持 Anthropic API 格式 (`/v1/messages`)
+   - ✅ 认证方式 (x-api-key vs Authorization: Bearer)
+   - ✅ 模型名称和参数支持
+
+2. **配置添加**
    ```yaml
+   # ~/.litellm/config.yaml
    - model_name: new-provider-sonnet
      litellm_params:
-       model: anthropic/new-provider-model-name
+       model: anthropic/new-provider-model
        api_base: https://api.new-provider.com/anthropic
        api_key: os.environ/NEW_PROVIDER_API_KEY
    ```
 
-3. **处理认证兼容性**
-   如果新提供商需要特殊的认证 header：
-   - 检查是否需要类似美团的 header 重写
-   - 在 `longcat_auth.py` 中添加新的处理逻辑
-   - 或使用独立的认证回调文件
+3. **认证兼容性处理**
+   - 标准 x-api-key：直接配置即可
+   - Bearer token：需要添加认证回调
+   - 自定义 header：修改 `longcat_auth.py`
 
-4. **测试连接**
-   ```bash
-   curl -X POST http://localhost:4000/v1/messages \
-     -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "model": "new-provider-sonnet",
-       "messages": [{"role": "user", "content": "Hello"}],
-       "max_tokens": 100
-     }'
-   ```
+4. **测试验证**
+   - 单元测试：验证单个模型连接
+   - 集成测试：验证网关路由
+   - Fallback 测试：验证容错机制
 
-### 美团模型接入经验总结
+### 美团接入经验总结
 
-美团 LongCat 的接入确实遇到了一些特殊挑战：
+**遇到的问题**:
+- ❌ LiteLLM 默认: `x-api-key` header
+- ❌ 美团要求: `Authorization: Bearer <token>`
+- ❌ 结果: `missing_api_key` 错误
 
-**问题分析：**
-- LiteLLM 默认发送 `x-api-key` header
-- 美团 API 只接受 `Authorization: Bearer <token>`
-- 直接配置会导致 `missing_api_key` 错误
+**解决方案**:
+- ✅ 使用 `CustomLogger.async_pre_call_hook`
+- ✅ 拦截请求，重写 headers
+- ✅ 保持认证逻辑模块化
 
-**解决方案：**
-1. 使用 `CustomLogger.async_pre_call_hook` 拦截请求
-2. 在请求发送到美团前重写 headers
-3. 将 `x-api-key` 转换为 `Authorization: Bearer`
-
-**代码实现：**
+**代码模式**:
 ```python
-async def async_pre_call_hook(
-    kwargs,                # 包含所有请求参数
-    response,             # 响应对象
-    call_type             # 调用类型
-):
-    if kwargs["model"] == "longcat":
-        # 获取原始 API key
-        api_key = kwargs.get("api_key")
-        
-        # 重写 headers
-        extra_headers = kwargs.get("extra_headers", {})
-        extra_headers["Authorization"] = f"Bearer {api_key}"
-        
-        # 移除 x-api-key
-        if "x-api-key" in extra_headers:
-            del extra_headers["x-api-key"]
-            
-        kwargs["extra_headers"] = extra_headers
+if kwargs["model"] == "longcat":
+    extra_headers["Authorization"] = f"Bearer {api_key}"
+    if "x-api-key" in extra_headers:
+        del extra_headers["x-api-key"]
 ```
-
-**经验教训：**
-- 先测试直接 API 调用确认兼容性
-- 查看 LiteLLM 文档了解认证机制
-- 利用 `async_pre_call_hook` 处理特殊认证需求
-- 保持认证逻辑的模块化，便于维护
 
 ### 通用扩展建议
 
-1. **配置分离**：将每个提供商的配置独立管理
-2. **错误处理**：添加适当的错误日志和 fallback 逻辑
-3. **性能监控**：监控新模型的响应时间和成功率
-4. **文档更新**：及时更新 README 和部署文档
-5. **测试覆盖**：为新模型添加完整的测试用例
+1. **配置管理**
+   - 每个提供商独立配置块
+   - 使用有意义的模型别名
+   - 保持配置文件格式统一
 
-## 项目状态
+2. **错误处理**
+   - 添加详细的错误日志
+   - 实现优雅的 fallback 逻辑
+   - 监控模型可用性
 
-✅ 已完成功能：
-- 三家模型接入和测试
-- Fallback 机制实现
-- 手动切换功能
-- 本地和服务器部署方案
-- 完整文档编写
-- 扩展指南编写
+3. **性能优化**
+   - 设置合适的超时时间
+   - 实现连接池复用
+   - 监控响应时间和错误率
 
-项目已准备就绪，可以直接提交开源。新模型接入现在有了清晰的指导流程。
+## 🔍 调试技巧
+
+### 常见错误诊断
+
+| 错误 | 原因 | 解决方案 |
+|------|------|----------|
+| `model not found` | 模型名称错误或大小写问题 | 检查 config.yaml 中的 model_name |
+| `missing_api_key` | 认证 header 不兼容 | 检查认证回调配置 |
+| `404 not found` | API base URL 错误 | 验证 api_base 地址 |
+| `timeout` | 网络或模型响应慢 | 调整 timeout 设置 |
+
+### 日志查看
+```bash
+# LiteLLM 日志
+docker logs litellm_proxy
+
+# Nginx 访问日志
+tail -f /var/log/nginx/access.log
+
+# 错误日志
+tail -f /var/log/nginx/error.log
+```
+
+## 🔒 安全最佳实践
+
+### 敏感信息管理
+- ✅ 永远不要提交 `.env` 文件
+- ✅ 使用 `.env.example` 作为模板
+- ✅ 定期轮换 API keys
+- ✅ 使用强密码作为网关认证令牌
+
+### 网络安全
+- ✅ 服务器部署强制 HTTPS
+- ✅ 启用 Nginx 速率限制
+- ✅ 防火墙限制访问 IP
+- ✅ 定期更新证书
+
+## 📊 项目状态
+
+✅ **已完成**:
+- [x] 三家模型接入和测试
+- [x] Fallback 机制实现
+- [x] 手动切换功能
+- [x] 本地部署方案
+- [x] 服务器部署方案
+- [x] 认证兼容性处理
+- [x] 完整文档编写
+- [x] 扩展指南
+
+🎯 **项目状态**: 生产就绪，可直接提交开源
+
+## 💡 AI 助手使用提示
+
+当处理此项目时，请记住：
+
+1. **配置优先级**: 环境变量 > config.yaml > 默认值
+2. **认证流程**: Claude Code → 网关认证 → 模型路由 → 提供商认证
+3. **错误排查**: 先检查配置，再检查网络，最后检查认证
+4. **扩展原则**: 保持向后兼容，模块化设计，详细文档
+
+如需修改任何配置，请确保同步更新相关文档和测试用例。
