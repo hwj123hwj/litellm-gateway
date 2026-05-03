@@ -83,7 +83,7 @@ class CustomAuth(CustomLogger):
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4000",
-    "ANTHROPIC_AUTH_TOKEN": "sk-local-gateway-hwj123hwj",
+    "ANTHROPIC_AUTH_TOKEN": "your-gateway-token-here",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-sonnet"
   }
 }
@@ -109,7 +109,7 @@ class CustomAuth(CustomLogger):
    GLM_API_KEY="your-glm-key"
    MIMO_API_KEY="your-mimo-key"
    LONGCAT_API_KEY="your-longcat-key"
-   LITELLM_MASTER_KEY="sk-local-gateway-hwj123hwj"
+   LITELLM_MASTER_KEY="your-secure-gateway-token"
    ```
 
 3. **启动服务**

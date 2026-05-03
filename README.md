@@ -61,7 +61,7 @@ Claude Code ──(Anthropic API)──▶ 网关 ──┬── 智谱 (主力
 
 ### 本地使用
 - 网关地址：`http://localhost:4000`
-- 认证令牌：自定义（如 `sk-local-gateway-hwj123hwj`）
+- 认证令牌：自定义安全令牌
 
 ### 服务器使用
 - 网关地址：`https://your-domain.com`
