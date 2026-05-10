@@ -28,11 +28,17 @@ MIMO_API_KEY=your_mimo_key
 # 美团 LongCat
 LONGCAT_API_KEY=your_longcat_key
 
+# EasyClaw
+EASYCLAW_API_KEY=your_easyclaw_key
+
 # 网关认证 key
 LITELLM_MASTER_KEY=sk-local-gateway-xxx
 
 # 数据库（PostgreSQL 容器）
 DATABASE_URL=postgresql://litellm:litellm123@litellm-db:5432/litellm
+
+# 强制 LiteLLM 对 Anthropic Messages 请求使用 /v1/chat/completions
+LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=true
 EOF
 ```
 
@@ -82,11 +88,24 @@ model_list:
       api_key: os.environ/MIMO_API_KEY
 
   # ==================== 美团 LongCat（备用 2） ====================
-  - model_name: longcat
+  - model_name: longcat-sonnet
     litellm_params:
       model: anthropic/LongCat-Flash-Chat
       api_base: https://api.longcat.chat/anthropic
       api_key: os.environ/LONGCAT_API_KEY
+  - model_name: longcat-opus
+    litellm_params:
+      model: anthropic/LongCat-2.0-Preview
+      api_base: https://api.longcat.chat/anthropic
+      api_key: os.environ/LONGCAT_API_KEY
+
+  # ==================== EasyClaw（OpenAI 格式，需要格式转换） ====================
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: openai/claude-sonnet-4-6
+      api_base: https://api.easyclaw.work
+      api_key: os.environ/EASYCLAW_API_KEY
+      drop_params: true
 
   # ==================== 通用别名（支持 fallback） ====================
   # "coding" 组：智谱优先 → 小米 → 美团
@@ -118,7 +137,7 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 
 litellm_settings:
-  callbacks: longcat_auth.longcat_auth_rewriter
+  callbacks: longcat_auth.longcat_auth.longcat_auth_rewriter
 EOF
 ```
 
@@ -135,12 +154,10 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
 
 
-LONGCAT_MODELS = {"longcat"}
+LONGCAT_MODELS = {"longcat-sonnet", "longcat-opus"}
 
 
 class LongCatAuthRewriter(CustomLogger):
-    """Rewrite x-api-key to Authorization: Bearer for longcat provider."""
-
     async def async_pre_call_hook(
         self,
         user_api_key_dict: UserAPIKeyAuth,
@@ -156,21 +173,11 @@ class LongCatAuthRewriter(CustomLogger):
         if not api_key:
             return None
 
-        psh = data.get("provider_specific_header")
-        if psh and isinstance(psh, dict):
-            extra = dict(psh.get("extra_headers", {}))
-            extra["authorization"] = f"Bearer {api_key}"
-            extra["x-api-key"] = ""
-            psh["extra_headers"] = extra
-            data["provider_specific_header"] = psh
-        else:
-            data["provider_specific_header"] = {
-                "extra_headers": {
-                    "authorization": f"Bearer {api_key}",
-                    "x-api-key": "",
-                }
-            }
-
+        extra_headers = data.get("extra_headers", {})
+        extra_headers["Authorization"] = f"Bearer {api_key}"
+        if "x-api-key" in extra_headers:
+            del extra_headers["x-api-key"]
+        data["extra_headers"] = extra_headers
         return data
 
 
@@ -178,45 +185,29 @@ longcat_auth_rewriter = LongCatAuthRewriter()
 PYEOF
 ```
 
-### 5. 创建 Docker 网络
-
-LiteLLM 需要 PostgreSQL 数据库，两个容器需要在同一网络中通信。
+### 5. 一键启动网关
 
 ```bash
-docker network create litellm-net
+./scripts/start-local.sh
 ```
 
-### 6. 启动 PostgreSQL
+脚本会自动：
+- 检查/启动 Docker
+- 检查配置文件
+- 启动 PostgreSQL 数据库（如已存在）
+- 启动 LiteLLM 网关
 
-```bash
-docker run -d \
-  --name litellm-db \
-  --restart unless-stopped \
-  --network litellm-net \
-  -e POSTGRES_USER=litellm \
-  -e POSTGRES_PASSWORD=litellm123 \
-  -e POSTGRES_DB=litellm \
-  -v litellm-pgdata:/var/lib/postgresql/data \
-  postgres:16-alpine
+启动成功后显示：
+```
+=========================================
+  网关已启动
+=========================================
+
+  访问地址: http://localhost:4000
+  认证 Token: sk-local-gateway-xxx
 ```
 
-### 7. 启动网关
-
-```bash
-docker run -d \
-  --name litellm \
-  --restart unless-stopped \
-  --network litellm-net \
-  -p 4000:4000 \
-  -v ~/.litellm/config.yaml:/app/config.yaml \
-  -v ~/.litellm/.env:/app/.env \
-  -v ~/.litellm/longcat_auth.py:/app/longcat_auth.py \
-  --env-file ~/.litellm/.env \
-  ghcr.io/berriai/litellm:main-latest \
-  --config /app/config.yaml --port 4000
-```
-
-### 8. 配置 Claude Code
+### 6. 配置 Claude Code
 
 编辑 `~/.claude/settings.json`：
 
@@ -235,31 +226,33 @@ docker run -d \
 
 ```bash
 # 测试智谱
-curl http://localhost:4000/v1/messages \
-  -H "x-api-key: sk-local-gateway-xxx" \
-  -H "content-type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
   -d '{"model":"glm-sonnet","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
 
 # 测试小米
-curl http://localhost:4000/v1/messages \
-  -H "x-api-key: sk-local-gateway-xxx" \
-  -H "content-type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
   -d '{"model":"mimo-sonnet","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
 
 # 测试美团
-curl http://localhost:4000/v1/messages \
-  -H "x-api-key: sk-local-gateway-xxx" \
-  -H "content-type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{"model":"longcat","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"longcat-sonnet","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+
+# 测试 EasyClaw（OpenAI 格式）
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
 
 # 测试 fallback 组
-curl http://localhost:4000/v1/messages \
-  -H "x-api-key: sk-local-gateway-xxx" \
-  -H "content-type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
   -d '{"model":"coding","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
@@ -268,19 +261,22 @@ curl http://localhost:4000/v1/messages \
 ## 日常管理
 
 ```bash
+# 一键启动（推荐）
+./scripts/start-local.sh
+
 # 查看日志
 docker logs -f litellm
 
-# 重启
+# 重启网关
 docker restart litellm
 
-# 停止
+# 停止网关
 docker stop litellm
 
-# 更新镜像（重建容器）
+# 更新镜像
 docker pull ghcr.io/berriai/litellm:main-latest
 docker stop litellm && docker rm litellm
-# 然后重新执行第 7 步
+./scripts/start-local.sh
 ```
 
 ## Fallback 机制

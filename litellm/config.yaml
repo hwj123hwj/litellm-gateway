@@ -37,10 +37,15 @@ model_list:
       api_base: https://token-plan-cn.xiaomimimo.com/anthropic
       api_key: os.environ/MIMO_API_KEY
 
-  # ==================== 美团 LongCat（备用 2） ====================
-  - model_name: longcat
+  # ==================== 美团 LongCat ====================
+  - model_name: longcat-sonnet
     litellm_params:
       model: anthropic/LongCat-Flash-Chat
+      api_base: https://api.longcat.chat/anthropic
+      api_key: os.environ/LONGCAT_API_KEY
+  - model_name: longcat-opus
+    litellm_params:
+      model: anthropic/LongCat-2.0-Preview
       api_base: https://api.longcat.chat/anthropic
       api_key: os.environ/LONGCAT_API_KEY
 
@@ -61,6 +66,12 @@ model_list:
       model: anthropic/LongCat-Flash-Chat
       api_base: https://api.longcat.chat/anthropic
       api_key: os.environ/LONGCAT_API_KEY
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: openai/claude-sonnet-4-6
+      api_base: https://api.easyclaw.work
+      api_key: os.environ/EASYCLAW_API_KEY
+      drop_params: true  # 丢弃 thinking、context_management 等不支持的参数
 
 router_settings:
   routing: "simple-shuffle"
@@ -74,4 +85,4 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 
 litellm_settings:
-  callbacks: longcat_auth.longcat_auth_rewriter
+  callbacks: longcat_auth.longcat_auth.longcat_auth_rewriter

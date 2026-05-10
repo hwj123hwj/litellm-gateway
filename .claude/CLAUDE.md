@@ -11,11 +11,13 @@ litellm-gateway/
 ├── .claude/                 # 本文件所在目录
 ├── docs/                   # 用户文档
 │   ├── local-deploy.md    # 本地部署指南
-│   └── server-deploy.md   # 服务器部署指南
+│   ├── server-deploy.md   # 服务器部署指南
+│   └── troubleshooting.md  # 问题排查指南
 ├── docker-compose.yaml     # 服务器部署编排
 ├── nginx/                  # Nginx 配置
 ├── scripts/                # 部署脚本
-│   └── init.sh           # 一键部署脚本
+│   ├── init.sh           # 服务器一键部署脚本
+│   └── start-local.sh    # 本地一键启动脚本
 ├── litellm/               # LiteLLM 配置
 │   ├── config.yaml       # 模型路由配置
 │   ├── .env.example      # 环境变量模板
@@ -48,7 +50,7 @@ router_settings:
   allowed_fails: 2
 
 litellm_settings:
-  callbacks: longcat_auth.longcat_auth_rewriter
+  callbacks: longcat_auth.longcat_auth.longcat_auth_rewriter
 ```
 
 ### 2. 美团认证回调 (~/.litellm/longcat_auth.py)
@@ -58,22 +60,31 @@ litellm_settings:
 **解决方案**: 使用 `async_pre_call_hook` 拦截并重写 headers
 
 ```python
-from litellm import CustomLogger
+LONGCAT_MODELS = {"longcat-sonnet", "longcat-opus"}
 
-class CustomAuth(CustomLogger):
+
+class LongCatAuthRewriter(CustomLogger):
     async def async_pre_call_hook(
-        self, kwargs, response, call_type
+        self,
+        user_api_key_dict: UserAPIKeyAuth,
+        cache,
+        data: dict,
+        call_type,
     ):
-        if kwargs.get("model") == "longcat":
-            api_key = kwargs.get("api_key")
-            extra_headers = kwargs.get("extra_headers", {})
-            extra_headers["Authorization"] = f"Bearer {api_key}"
-            
-            if "x-api-key" in extra_headers:
-                del extra_headers["x-api-key"]
-                
-            kwargs["extra_headers"] = extra_headers
-        return kwargs
+        model = data.get("model", "")
+        if model not in LONGCAT_MODELS:
+            return None
+
+        api_key = os.environ.get("LONGCAT_API_KEY", "")
+        if not api_key:
+            return None
+
+        extra_headers = data.get("extra_headers", {})
+        extra_headers["Authorization"] = f"Bearer {api_key}"
+        if "x-api-key" in extra_headers:
+            del extra_headers["x-api-key"]
+        data["extra_headers"] = extra_headers
+        return data
 ```
 
 ### 3. Claude Code 配置 (~/.claude/settings.json)

@@ -4,7 +4,7 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy._types import UserAPIKeyAuth
 
 
-LONGCAT_MODELS = {"longcat"}
+LONGCAT_MODELS = {"longcat-sonnet", "longcat-opus"}
 
 
 class LongCatAuthRewriter(CustomLogger):
@@ -29,20 +29,11 @@ class LongCatAuthRewriter(CustomLogger):
         if not api_key:
             return None
 
-        psh = data.get("provider_specific_header")
-        if psh and isinstance(psh, dict):
-            extra = dict(psh.get("extra_headers", {}))
-            extra["authorization"] = f"Bearer {api_key}"
-            extra["x-api-key"] = ""
-            psh["extra_headers"] = extra
-            data["provider_specific_header"] = psh
-        else:
-            data["provider_specific_header"] = {
-                "extra_headers": {
-                    "authorization": f"Bearer {api_key}",
-                    "x-api-key": "",
-                }
-            }
+        extra_headers = data.get("extra_headers", {})
+        extra_headers["Authorization"] = f"Bearer {api_key}"
+        if "x-api-key" in extra_headers:
+            del extra_headers["x-api-key"]
+        data["extra_headers"] = extra_headers
 
         litellm.verbose_logger.debug(
             f"LongCatAuthRewriter: injected Authorization header for model={model}"

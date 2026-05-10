@@ -22,7 +22,8 @@
 
 1. 安装 [OrbStack](https://orbstack.dev) 或 Docker Desktop
 2. 按 [本地部署指南](docs/local-deploy.md) 配置
-3. 修改 `~/.claude/settings.json` 指向网关
+3. 运行一键启动：`./scripts/start-local.sh`
+4. 修改 `~/.claude/settings.json` 指向网关
 
 ### 服务器部署（多设备共享）
 
