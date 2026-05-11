@@ -1,0 +1,25 @@
+{
+    "dbcode.connections": [
+        {
+            "connectionId": "n1vfE3HBCnVKsowjAcabc",
+            "name": "litellm",
+            "driver": "postgres",
+            "connectionType": "host",
+            "host": "127.0.0.1",
+            "port": 5432,
+            "ssl": false,
+            "authMethod": "password",
+            "username": "litellm",
+            "password": "litellm123",
+            "savePassword": "secretStorage",
+            "database": "litellm",
+            "readOnly": false,
+            "postConnectionSqlType": "inline",
+            "connectionTimeout": 30,
+            "pinnedConnectionTimeout": "0",
+            "introspection": {
+                "progressive": false
+            }
+        }
+    ]
+}

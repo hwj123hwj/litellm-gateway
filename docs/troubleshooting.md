@@ -31,6 +31,52 @@ docker run -d \
 
 ---
 
+## 问题 7：EasyClaw 模型参数不兼容
+
+### 症状
+Claude Code 请求 EasyClaw 时报错：
+```
+litellm.UnsupportedParamsError: openai does not support parameters: ['thinking', 'context_management']
+```
+
+### 原因
+Claude Code 发送请求时包含 Anthropic 特有参数（`thinking`、`context_management`），这些在 OpenAI 格式中不被识别。
+
+### 解决方案
+
+EasyClaw 实际上**接受但忽略**这些参数，只需启用 `drop_params`：
+
+```yaml
+- model_name: claude-sonnet-4-6
+  litellm_params:
+    model: openai/claude-sonnet-4-6
+    api_base: https://api.easyclaw.work
+    api_key: os.environ/EASYCLAW_API_KEY
+    drop_params: true
+```
+
+### 功能影响
+
+| 功能 | 影响 | 说明 |
+|------|------|------|
+| Extended Thinking | ❌ 不可用 | EasyClaw 不支持 |
+| 上下文管理 | ✅ 正常 | EasyClaw 有自己的机制 |
+| Streaming | ✅ 正常 | 完全支持 |
+| Tool Use | ✅ 正常 | 完全支持 |
+
+### 验证
+```bash
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-hwj123hwj" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 50}'
+```
+
+重启容器生效：`docker restart litellm`
+
+
+---
+
 ## 问题 6：美团 LongCat 返回 missing_api_key
 
 ### 症状

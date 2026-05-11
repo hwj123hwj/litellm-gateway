@@ -1,0 +1,58 @@
+package provider
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestRequestMarshal(t *testing.T) {
+	req := &Request{
+		Model:     "glm-sonnet",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 1000,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	var decoded Request
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal request: %v", err)
+	}
+
+	if decoded.Model != req.Model {
+		t.Errorf("Marshaling roundtrip failed: got %s, want %s", decoded.Model, req.Model)
+	}
+}
+
+func TestResponseContentIsSlice(t *testing.T) {
+	// 验证 Response.Content 是数组（对齐 Anthropic 真实格式）
+	raw := `{"id":"msg_1","type":"message","role":"assistant","model":"glm-5-turbo","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`
+	var resp Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+	if len(resp.Content) != 1 {
+		t.Errorf("Expected 1 content block, got %d", len(resp.Content))
+	}
+	if resp.Content[0].Text != "hi" {
+		t.Errorf("Expected text 'hi', got %s", resp.Content[0].Text)
+	}
+}
+
+func TestConfigValidation(t *testing.T) {
+	cfg := &Config{
+		Name:      "test",
+		URL:       "https://api.example.com",
+		APIKey:    "key123",
+		UseBearer: true,
+	}
+	if cfg.Name != "test" {
+		t.Errorf("Config name mismatch")
+	}
+	if !cfg.UseBearer {
+		t.Errorf("UseBearer should be true")
+	}
+}

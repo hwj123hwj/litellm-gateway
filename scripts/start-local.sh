@@ -32,19 +32,10 @@ fi
 echo "✅ 环境变量文件存在"
 
 echo ""
-echo "=== 3. 启动 PostgreSQL 数据库 ==="
-if docker ps -a --format '{{.Names}}' | grep -q "^litellm-db$"; then
-    if docker ps --format '{{.Names}}' | grep -q "^litellm-db$"; then
-        echo "✅ PostgreSQL 已在运行"
-    else
-        echo "📦 启动已停止的 PostgreSQL 容器..."
-        docker start litellm-db
-        sleep 2
-        echo "✅ PostgreSQL 已启动"
-    fi
-else
-    echo "⚠️  未找到 litellm-db 容器，将跳过数据库（如需数据库请先使用 docker-compose 创建）"
-fi
+echo "=== 3. 数据库配置 ==="
+echo "⚠️  本地开发模式：无需 PostgreSQL 数据库"
+echo "    LiteLLM 将使用内存存储，适合开发测试"
+echo "    （如需持久化日志和统计，请使用 docker-compose）"
 
 echo ""
 echo "=== 4. 检查 LiteLLM 容器状态 ==="
