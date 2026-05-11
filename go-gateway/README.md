@@ -132,11 +132,39 @@ curl -X POST http://localhost:4001/v1/messages \
 
 > EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换（无需手动处理）。
 
+### 智谱免费模型
+
+| 模型名 | 实际模型 | 说明 |
+|--------|---------|------|
+| `glm-flash` | glm-4.7-flash | 智谱免费模型 |
+
+> 复用 `GLM_API_KEY`，无需额外 key。
+
+### OpenRouter 免费模型
+
+网关启动时自动从 OpenRouter 拉取当前可用的免费模型列表（按 context_length 降序取 top 5），缓存 6 小时（`~/Library/Caches/go-llm-gateway/openrouter-models.json`）。
+
+| 模型名 | 说明 |
+|--------|------|
+| `free` | 自动 fallback 链，依次尝试全部免费模型（**推荐**） |
+| `openrouter-free` | 同 `free` |
+| `owl` / `nemotron` / `ring` / ... | 各免费模型的简称别名，启动时动态生成 |
+
+> **查看当前可用别名**：启动日志里会打印每个注册的 chain，例如：
+> ```
+> [0] openrouter/owl-alpha (ctx=1048K)
+> [3] nvidia/nemotron-3-super-120b-a12b:free (ctx=262K)
+> ```
+> 对应别名为 `/model owl`、`/model nemotron`。
+
+> **注意**：免费模型随时可能被限流（429），`free` chain 会自动 fallback 到下一个，单独指定别名则会直接报错。生产使用建议始终用 `free`。
+
 ### Fallback 链
 
 | 模型名 | Fallback 顺序 | 说明 |
 |--------|-------------|------|
 | `coding` | GLM → MiMo → LongCat | **日常推荐**，自动容错 |
+| `free` | OpenRouter top-5 免费模型 | 零成本，自动容错 |
 
 ---
 
@@ -149,6 +177,7 @@ curl -X POST http://localhost:4001/v1/messages \
 | `MIMO_API_KEY` | 否 | — | 小米 API key |
 | `LONGCAT_API_KEY` | 否 | — | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | — | EasyClaw API key |
+| `OPENROUTER_API_KEY` | 否 | — | OpenRouter key，启用免费模型 (`/model free`) |
 | `PORT` | 否 | 4000 | 监听端口 |
 | `LOG_LEVEL` | 否 | info | 日志级别 |
 

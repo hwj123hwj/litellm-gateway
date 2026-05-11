@@ -74,7 +74,11 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 	var lastErr error
 	for i, p := range providerChain {
 		h.logger.Printf("Stream: trying provider %d/%d: %s", i+1, len(providerChain), p.Name())
-		req.Model = h.router.MapModel(originalModel, p.Name())
+		if bmp, ok := p.(provider.BoundModelProvider); ok {
+			req.Model = bmp.BoundModel()
+		} else {
+			req.Model = h.router.MapModel(originalModel, p.Name())
+		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
 			return
 		} else {

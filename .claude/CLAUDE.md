@@ -87,7 +87,11 @@ mimo-opus   → mimo-v2.5-pro
 longcat-sonnet → LongCat-Flash-Chat
 easyclaw-sonnet → claude-sonnet-4-6（发给 EasyClaw）
 coding      → glm-5-turbo / mimo-v2.5 / LongCat-Flash-Chat（fallback 链）
+glm-flash   → glm-4.7-flash（智谱免费，复用 GLM_API_KEY）
+free        → OpenRouter top-5 免费模型 fallback 链（启动时动态构建）
 ```
+
+> **特别说明**：OpenRouter 免费模型由 `OpenRouterProvider` 实现 `BoundModelProvider` 接口，模型名已在构造时绑定，不过 `mapModelName`。每个免费模型的简称（如 `nemotron`、`owl`）在启动时动态注册为独立 chain。
 
 ### 环境变量
 
@@ -98,6 +102,7 @@ coding      → glm-5-turbo / mimo-v2.5 / LongCat-Flash-Chat（fallback 链）
 | `MIMO_API_KEY` | 否 | 小米 API key |
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
+| `OPENROUTER_API_KEY` | 否 | OpenRouter key，启用免费模型（`/model free`），启动时自动拉取模型列表 |
 | `PORT` | 否 | 监听端口，默认 4000 |
 | `LOG_LEVEL` | 否 | 日志级别，默认 info |
 

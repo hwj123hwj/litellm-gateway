@@ -16,8 +16,9 @@ type Config struct {
 	GLMAPIKey       string
 	MIMOAPIKey      string
 	LongcatAPIKey   string
-	EasyClawAPIKey  string
-	Env             string
+	EasyClawAPIKey   string
+	OpenRouterAPIKey string // OpenRouter 免费模型网关
+	Env              string
 }
 
 // Load 从环境变量加载配置
@@ -31,8 +32,9 @@ func Load() (*Config, error) {
 		GLMAPIKey:      getEnv("GLM_API_KEY", ""),
 		MIMOAPIKey:     getEnv("MIMO_API_KEY", ""),
 		LongcatAPIKey:  getEnv("LONGCAT_API_KEY", ""),
-		EasyClawAPIKey: getEnv("EASYCLAW_API_KEY", ""),
-		Env:            getEnv("ENV", "development"),
+		EasyClawAPIKey:   getEnv("EASYCLAW_API_KEY", ""),
+		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
+		Env:              getEnv("ENV", "development"),
 	}
 
 	if cfg.MasterKey == "" {

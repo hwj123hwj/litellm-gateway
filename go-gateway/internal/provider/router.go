@@ -77,7 +77,11 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 	var lastErr error
 	for i, p := range providers {
 		r.logger.Printf("Attempting provider %d/%d: %s", i+1, len(providers), p.Name())
-		req.Model = r.mapModelName(modelName, p.Name())
+		if bmp, ok := p.(BoundModelProvider); ok {
+			req.Model = bmp.BoundModel()
+		} else {
+			req.Model = r.mapModelName(modelName, p.Name())
+		}
 
 		resp, err := p.ForwardRequest(ctx, req)
 		req.Model = originalModel
@@ -113,6 +117,9 @@ func (r *Router) mapModelName(modelName, providerName string) string {
 		"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
 		"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
 		"claude-sonnet-4-6": {"easyclaw": "claude-sonnet-4-6"},
+		// 免费/极低成本模型
+		"free":      {"glm-free": "glm-4.7-flash"},
+		"glm-flash": {"glm-free": "glm-4.7-flash"},
 	}
 
 	if mapping, ok := mappings[modelName]; ok {

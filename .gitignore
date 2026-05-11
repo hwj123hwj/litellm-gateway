@@ -7,3 +7,4 @@ __pycache__/
 # Certbot (generated at runtime)
 certbot/conf/
 certbot/www/
+.DS_Store

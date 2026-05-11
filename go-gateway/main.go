@@ -57,6 +57,36 @@ func main() {
 			APIKey: cfg.EasyClawAPIKey,
 		}))
 	}
+	if cfg.GLMAPIKey != "" {
+		// GLM 免费模型（OpenAI 兼容接口，复用智谱 key，不同路径）
+		router.RegisterProvider("glm-free", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "glm-free",
+			URL:    "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+			APIKey: cfg.GLMAPIKey,
+		}))
+	}
+
+	// OpenRouter 免费模型（启动时动态拉取，fallback 链自动构建）
+	var openRouterChain []string
+	if cfg.OpenRouterAPIKey != "" {
+		freeModels, err := provider.FetchFreeModels(cfg.OpenRouterAPIKey, 5)
+		if err != nil {
+			logger.Printf("Warning: failed to fetch OpenRouter free models: %v", err)
+		} else {
+			logger.Printf("OpenRouter: loaded %d free models", len(freeModels))
+			for i, m := range freeModels {
+				name := fmt.Sprintf("openrouter-free-%d", i)
+				p := provider.NewOpenRouterProvider(name, m.ID, cfg.OpenRouterAPIKey)
+				router.RegisterProvider(name, p)
+				openRouterChain = append(openRouterChain, name)
+				// 为每个模型注册简称 chain，如 "nemotron" "qwen3-coder"
+				if alias := provider.ModelAlias(m.ID); alias != "" {
+					router.RegisterChain(alias, []string{name})
+				}
+				logger.Printf("  [%d] %s (ctx=%dK)", i, m.ID, m.ContextLength/1000)
+			}
+		}
+	}
 
 	// 注册 fallback 链（对齐 config.yaml 模型别名）
 	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
@@ -72,6 +102,16 @@ func main() {
 		router.RegisterChain("easyclaw-sonnet", []string{"easyclaw"})
 		router.RegisterChain("easyclaw-opus", []string{"easyclaw"})
 		router.RegisterChain("claude-sonnet-4-6", []string{"easyclaw"})
+	}
+	if cfg.GLMAPIKey != "" {
+		// 免费/极低成本模型入口
+		router.RegisterChain("free", []string{"glm-free"})
+		router.RegisterChain("glm-flash", []string{"glm-free"})
+	}
+	if len(openRouterChain) > 0 {
+		// OpenRouter 免费模型链，覆盖 glm-free 成为 free 的主链
+		router.RegisterChain("free", openRouterChain)
+		router.RegisterChain("openrouter-free", openRouterChain)
 	}
 
 	// 创建 Gin 引擎

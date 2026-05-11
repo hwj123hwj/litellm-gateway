@@ -78,9 +78,18 @@ type openAIResponse struct {
 
 // ─── OpenAI 流式 SSE 结构 ──────────────────────────────────────────────────────
 
+// openAIStreamToolCall 是流式 tool_calls 中的单个增量片段
+type openAIStreamToolCall struct {
+	Index    int                `json:"index"`
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIToolFunction `json:"function"`
+}
+
 type openAIStreamDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role      string                 `json:"role,omitempty"`
+	Content   string                 `json:"content,omitempty"`
+	ToolCalls []openAIStreamToolCall `json:"tool_calls,omitempty"`
 }
 
 type openAIStreamChoice struct {
@@ -180,17 +189,33 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		return fmt.Errorf("openai stream error %d: %s", resp.StatusCode, string(b))
 	}
 
-	// 发送 Anthropic 流式开场事件
 	msgID := "msg_oai_" + time.Now().Format("20060102150405")
+
+	// 用于拼装流式 tool_calls（key = index）
+	type toolCallAccum struct {
+		id        string
+		name      string
+		arguments strings.Builder
+	}
+	toolCalls := map[int]*toolCallAccum{}
+
+	// 文本内容 block 是否已开始
+	textBlockStarted := false
+	// tool_use block 的当前 Anthropic index（文本占 0，每个工具往后排）
+	toolBlockIndex := 1
+
 	writeSSE(w, "message_start", fmt.Sprintf(
 		`{"type":"message_start","message":{"id":%q,"type":"message","role":"assistant","model":%q,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}`,
 		msgID, req.Model,
 	))
 	writeSSE(w, "ping", `{"type":"ping"}`)
-	writeSSE(w, "content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
 
-	// 逐行读取 OpenAI SSE，转换成 Anthropic SSE
 	scanner := bufio.NewScanner(resp.Body)
+	// 增大 scanner buffer，防止超长行截断
+	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+
+	finishReason := ""
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -209,28 +234,95 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 			continue
 		}
 
-		delta := chunk.Choices[0].Delta
+		choice := chunk.Choices[0]
+		delta := choice.Delta
+
+		// --- 文本内容 ---
 		if delta.Content != "" {
-			deltaJSON := fmt.Sprintf(
+			if !textBlockStarted {
+				textBlockStarted = true
+				writeSSE(w, "content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+			}
+			writeSSE(w, "content_block_delta", fmt.Sprintf(
 				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%s}}`,
 				jsonString(delta.Content),
-			)
-			writeSSE(w, "content_block_delta", deltaJSON)
+			))
 		}
 
-		// 收到 finish_reason 表示结束
-		if chunk.Choices[0].FinishReason != nil {
-			stopReason := mapFinishReason(*chunk.Choices[0].FinishReason)
-			writeSSE(w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
-			writeSSE(w, "message_delta", fmt.Sprintf(
-				`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"output_tokens":0}}`,
-				stopReason,
-			))
-			writeSSE(w, "message_stop", `{"type":"message_stop"}`)
+		// --- 工具调用（增量拼装）---
+		for _, tc := range delta.ToolCalls {
+			idx := tc.Index
+			if _, ok := toolCalls[idx]; !ok {
+				toolCalls[idx] = &toolCallAccum{}
+			}
+			acc := toolCalls[idx]
+			if tc.ID != "" {
+				acc.id = tc.ID
+			}
+			if tc.Function.Name != "" {
+				acc.name = tc.Function.Name
+			}
+			acc.arguments.WriteString(tc.Function.Arguments)
+		}
+
+		// --- finish_reason ---
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = *choice.FinishReason
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// 关闭文本 block
+	if textBlockStarted {
+		writeSSE(w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
+	}
+
+	// 输出拼装完整的 tool_use blocks（按 index 顺序）
+	for i := 0; i < len(toolCalls); i++ {
+		acc, ok := toolCalls[i]
+		if !ok {
+			continue
+		}
+		blockIdx := toolBlockIndex
+		if !textBlockStarted {
+			// 没有文本块时，tool_use 从 index 0 开始
+			blockIdx = i
+		} else {
+			blockIdx = 1 + i
+		}
+
+		// 把 arguments 字符串解析为 JSON object（确保合法）
+		var inputRaw json.RawMessage
+		if err := json.Unmarshal([]byte(acc.arguments.String()), &inputRaw); err != nil {
+			inputRaw = json.RawMessage(`{}`)
+		}
+		inputJSON, _ := json.Marshal(inputRaw)
+
+		writeSSE(w, "content_block_start", fmt.Sprintf(
+			`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":%s,"name":%s,"input":{}}}`,
+			blockIdx, jsonString(acc.id), jsonString(acc.name),
+		))
+		writeSSE(w, "content_block_delta", fmt.Sprintf(
+			`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%s}}`,
+			blockIdx, jsonString(string(inputJSON)),
+		))
+		writeSSE(w, "content_block_stop", fmt.Sprintf(
+			`{"type":"content_block_stop","index":%d}`, blockIdx,
+		))
+		_ = toolBlockIndex
+	}
+
+	stopReason := mapFinishReason(finishReason)
+	writeSSE(w, "message_delta", fmt.Sprintf(
+		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"output_tokens":0}}`,
+		stopReason,
+	))
+	writeSSE(w, "message_stop", `{"type":"message_stop"}`)
+
+	return nil
 }
 
 func (p *OpenAIProvider) IsHealthy(ctx context.Context) bool {
@@ -246,9 +338,69 @@ func (p *OpenAIProvider) setHeaders(req *http.Request) {
 // ─── 格式转换辅助函数 ──────────────────────────────────────────────────────────
 
 func toOpenAIRequest(req *Request) *openAIRequest {
-	msgs := make([]openAIMessage, len(req.Messages))
-	for i, m := range req.Messages {
-		msgs[i] = openAIMessage{Role: m.Role, Content: m.Content.String()}
+	var msgs []openAIMessage
+	for _, m := range req.Messages {
+		switch m.Role {
+		case "user":
+			// user 消息：可能是普通文本，也可能包含 tool_result block
+			// 把所有 text 和 tool_result content 拼成字符串
+			text := m.Content.String()
+			if text == "" {
+				// content 是数组但 String() 为空，说明全是 tool_result 或其他非 text block
+				// 把 tool_result 的文字内容拼出来
+				for _, b := range m.Content.blocks {
+					if b.Type == "tool_result" {
+						// tool_result.content 可能是字符串或数组
+						for _, inner := range b.ContentBlocks {
+							if inner.Type == "text" {
+								text += inner.Text
+							}
+						}
+						if b.ContentStr != "" {
+							text += b.ContentStr
+						}
+					}
+				}
+			}
+			if text == "" {
+				text = "(tool result)"
+			}
+			msgs = append(msgs, openAIMessage{Role: "user", Content: text})
+		case "assistant":
+			// assistant 消息：可能含 text 和 tool_use block
+			// OpenAI 格式：tool_use 写进 ToolCalls，text 写进 Content
+			var content string
+			var toolCalls []openAIToolCall
+			for _, b := range m.Content.blocks {
+				switch b.Type {
+				case "text":
+					content += b.Text
+				case "tool_use":
+					args := "{}"
+					if b.Input != nil {
+						args = string(b.Input)
+					}
+					toolCalls = append(toolCalls, openAIToolCall{
+						ID:   b.ID,
+						Type: "function",
+						Function: openAIToolFunction{
+							Name:      b.Name,
+							Arguments: args,
+						},
+					})
+				}
+			}
+			if len(m.Content.blocks) == 0 {
+				content = m.Content.String()
+			}
+			msgs = append(msgs, openAIMessage{
+				Role:      "assistant",
+				Content:   content,
+				ToolCalls: toolCalls,
+			})
+		default:
+			msgs = append(msgs, openAIMessage{Role: m.Role, Content: m.Content.String()})
+		}
 	}
 
 	oaiReq := &openAIRequest{

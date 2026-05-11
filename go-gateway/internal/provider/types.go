@@ -114,6 +114,50 @@ type ContentBlock struct {
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// tool_result 字段
+	ToolUseID     string         `json:"tool_use_id,omitempty"`
+	ContentStr    string         `json:"-"` // 当 content 是字符串时
+	ContentBlocks []ContentBlock `json:"-"` // 当 content 是数组时
+	IsError       bool           `json:"is_error,omitempty"`
+}
+
+func (c *ContentBlock) UnmarshalJSON(data []byte) error {
+	// 用 alias 类型避免递归
+	type Alias struct {
+		Type      string          `json:"type"`
+		Text      string          `json:"text"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Input     json.RawMessage `json:"input"`
+		ToolUseID string          `json:"tool_use_id"`
+		IsError   bool            `json:"is_error"`
+		Content   json.RawMessage `json:"content"`
+	}
+	var a Alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	c.Type = a.Type
+	c.Text = a.Text
+	c.ID = a.ID
+	c.Name = a.Name
+	c.Input = a.Input
+	c.ToolUseID = a.ToolUseID
+	c.IsError = a.IsError
+
+	// 处理 tool_result 的 content 字段（字符串或数组）
+	if a.Content != nil {
+		var s string
+		if err := json.Unmarshal(a.Content, &s); err == nil {
+			c.ContentStr = s
+		} else {
+			var blocks []ContentBlock
+			if err := json.Unmarshal(a.Content, &blocks); err == nil {
+				c.ContentBlocks = blocks
+			}
+		}
+	}
+	return nil
 }
 
 // Response 是 Anthropic API 响应体（对齐真实 Anthropic 格式）
@@ -155,6 +199,14 @@ type Provider interface {
 type StreamProvider interface {
 	Provider
 	ForwardStream(ctx context.Context, req *Request, w io.Writer) error
+}
+
+// BoundModelProvider 是可选接口：Provider 自身绑定了特定模型名。
+// handler 在路由时检查此接口，若实现则直接使用 BoundModel() 替代 MapModel() 的结果。
+// 用于 OpenRouterProvider 等动态绑定模型名的场景。
+type BoundModelProvider interface {
+	Provider
+	BoundModel() string
 }
 
 // Config 提供商配置
