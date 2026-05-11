@@ -60,6 +60,9 @@ go build -o gateway . && ./gateway
 | `longcat-opus` | 美团 LongCat-2.0 | 长上下文旗舰 |
 | `easyclaw-sonnet` | EasyClaw → Claude Sonnet | 真实 Claude |
 | `claude-sonnet-4-6` | EasyClaw → Claude Sonnet | 同上（兼容别名） |
+| `glm-flash` | 智谱 GLM-4.7-flash | 免费，复用 GLM key |
+| `free` | OpenRouter 免费模型 fallback 链 | **零成本**，启动时动态拉取 top-5 |
+| `nemotron` / `owl` / ... | OpenRouter 各免费模型 | 启动时动态生成别名 |
 
 ### 测试
 
