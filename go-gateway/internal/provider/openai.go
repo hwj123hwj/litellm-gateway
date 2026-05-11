@@ -17,18 +17,43 @@ import (
 
 // ─── OpenAI 请求/响应结构 ──────────────────────────────────────────────────────
 
+type openAIToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type openAIToolCall struct {
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIToolFunction `json:"function"`
+}
+
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
 }
 
 type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature float64         `json:"temperature,omitempty"`
-	TopP        float64         `json:"top_p,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
+	Model       string           `json:"model"`
+	Messages    []openAIMessage  `json:"messages"`
+	MaxTokens   int              `json:"max_tokens,omitempty"`
+	Temperature float64          `json:"temperature,omitempty"`
+	TopP        float64          `json:"top_p,omitempty"`
+	Stream      bool             `json:"stream,omitempty"`
+	Tools       []openAITool     `json:"tools,omitempty"`
+}
+
+// openAITool 是 OpenAI 格式的工具定义
+type openAITool struct {
+	Type     string           `json:"type"` // "function"
+	Function openAIToolSchema `json:"function"`
+}
+
+type openAIToolSchema struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 type openAIChoice struct {
@@ -223,33 +248,79 @@ func (p *OpenAIProvider) setHeaders(req *http.Request) {
 func toOpenAIRequest(req *Request) *openAIRequest {
 	msgs := make([]openAIMessage, len(req.Messages))
 	for i, m := range req.Messages {
-		msgs[i] = openAIMessage{Role: m.Role, Content: m.Content}
+		msgs[i] = openAIMessage{Role: m.Role, Content: m.Content.String()}
 	}
-	return &openAIRequest{
-		Model:       req.Model,
-		Messages:    msgs,
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
+
+	oaiReq := &openAIRequest{
+		Model:     req.Model,
+		Messages:  msgs,
+		MaxTokens: req.MaxTokens,
 	}
+
+	// 转换 tools：Anthropic input_schema → OpenAI parameters
+	if toolsRaw, ok := req.raw["tools"]; ok {
+		var anthropicTools []struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		}
+		if err := json.Unmarshal(toolsRaw, &anthropicTools); err == nil {
+			for _, t := range anthropicTools {
+				oaiReq.Tools = append(oaiReq.Tools, openAITool{
+					Type: "function",
+					Function: openAIToolSchema{
+						Name:        t.Name,
+						Description: t.Description,
+						Parameters:  t.InputSchema,
+					},
+				})
+			}
+		}
+	}
+
+	return oaiReq
 }
 
 func fromOpenAIResponse(oai *openAIResponse) *Response {
-	var text string
+	var blocks []ContentBlock
 	var stopReason string
+
 	if len(oai.Choices) > 0 {
-		text = oai.Choices[0].Message.Content
-		stopReason = mapFinishReason(oai.Choices[0].FinishReason)
+		choice := oai.Choices[0]
+		stopReason = mapFinishReason(choice.FinishReason)
+
+		// 文本内容
+		if choice.Message.Content != "" {
+			blocks = append(blocks, ContentBlock{Type: "text", Text: choice.Message.Content})
+		}
+
+		// 工具调用：OpenAI tool_calls → Anthropic tool_use
+		for _, tc := range choice.Message.ToolCalls {
+			var input json.RawMessage
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+				// arguments 不是合法 JSON，包成字符串
+				input, _ = json.Marshal(tc.Function.Arguments)
+			}
+			blocks = append(blocks, ContentBlock{
+				Type:  "tool_use",
+				ID:    tc.ID,
+				Name:  tc.Function.Name,
+				Input: input,
+			})
+		}
 	}
+
+	if len(blocks) == 0 {
+		blocks = []ContentBlock{{Type: "text", Text: ""}}
+	}
+
 	resp := &Response{
 		ID:         oai.ID,
 		Type:       "message",
 		Role:       "assistant",
 		Model:      oai.Model,
 		StopReason: stopReason,
-		Content: []ContentBlock{
-			{Type: "text", Text: text},
-		},
+		Content:    blocks,
 	}
 	resp.Usage.InputTokens = oai.Usage.PromptTokens
 	resp.Usage.OutputTokens = oai.Usage.CompletionTokens

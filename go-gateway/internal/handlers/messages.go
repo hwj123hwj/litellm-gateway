@@ -25,8 +25,15 @@ func NewMessageHandler(router *provider.Router, logger *log.Logger) *MessageHand
 
 // Handle 处理消息请求，支持流式和非流式
 func (h *MessageHandler) Handle(c *gin.Context) {
+	// 先读原始 body，用于调试
+	rawBody, _ := io.ReadAll(c.Request.Body)
+	h.logger.Printf("Raw request body: %s", string(rawBody))
+	// 把 body 放回去供 BindJSON 使用
+	c.Request.Body = io.NopCloser(bytes.NewReader(rawBody))
+
 	var req provider.Request
 	if err := c.BindJSON(&req); err != nil {
+		h.logger.Printf("BindJSON error: %v, body was: %s", err, string(rawBody))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}

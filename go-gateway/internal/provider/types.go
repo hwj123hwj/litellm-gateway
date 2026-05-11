@@ -2,29 +2,118 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 )
 
-// Message 表示一条消息
+// MessageContent 支持两种格式：
+//   - 字符串：{"role":"user","content":"hello"}
+//   - 数组：{"role":"user","content":[{"type":"text","text":"hello"}]}
+//
+// Claude Code 发出的是数组格式，部分测试工具发字符串格式，两种都要支持。
+type MessageContent struct {
+	str    string
+	blocks []ContentBlock
+	isStr  bool
+}
+
+func (c MessageContent) MarshalJSON() ([]byte, error) {
+	if c.isStr {
+		return json.Marshal(c.str)
+	}
+	return json.Marshal(c.blocks)
+}
+
+func (c *MessageContent) UnmarshalJSON(data []byte) error {
+	// 尝试字符串
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		c.str = s
+		c.isStr = true
+		return nil
+	}
+	// 尝试数组
+	var blocks []ContentBlock
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return err
+	}
+	c.blocks = blocks
+	c.isStr = false
+	return nil
+}
+
+// String 返回纯文本内容（合并所有 text block）
+func (c MessageContent) String() string {
+	if c.isStr {
+		return c.str
+	}
+	var result string
+	for _, b := range c.blocks {
+		if b.Type == "text" {
+			result += b.Text
+		}
+	}
+	return result
+}
+
+// Message 表示一条消息，content 兼容字符串和数组两种格式
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string         `json:"role"`
+	Content MessageContent `json:"content"`
 }
 
-// Request 是 Anthropic API 请求体
+// Request 是 Anthropic API 请求体。
+// 所有字段保留为原始 JSON（raw map），仅解出 model/messages/stream/max_tokens
+// 用于路由和分发，其余字段（system数组、thinking、tools、context_management 等）原样透传。
 type Request struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	MaxTokens   int       `json:"max_tokens"`
-	Temperature float64   `json:"temperature,omitempty"`
-	TopP        float64   `json:"top_p,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
+	Model     string    // 路由用，可能被改写
+	Messages  []Message // 路由用
+	MaxTokens int       // 路由用
+	Stream    bool      // 路由用
+	raw       map[string]json.RawMessage // 完整原始字段
 }
 
-// ContentBlock 是 Anthropic 响应中的内容块（数组元素）
+func (r *Request) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.raw = raw
+	if v, ok := raw["model"]; ok {
+		_ = json.Unmarshal(v, &r.Model)
+	}
+	if v, ok := raw["max_tokens"]; ok {
+		_ = json.Unmarshal(v, &r.MaxTokens)
+	}
+	if v, ok := raw["stream"]; ok {
+		_ = json.Unmarshal(v, &r.Stream)
+	}
+	if v, ok := raw["messages"]; ok {
+		_ = json.Unmarshal(v, &r.Messages)
+	}
+	return nil
+}
+
+// MarshalJSON 透传所有原始字段，但用改写后的 model 覆盖原值
+func (r *Request) MarshalJSON() ([]byte, error) {
+	out := make(map[string]json.RawMessage, len(r.raw))
+	for k, v := range r.raw {
+		out[k] = v
+	}
+	if b, err := json.Marshal(r.Model); err == nil {
+		out["model"] = b
+	}
+	return json.Marshal(out)
+}
+
+// ContentBlock 是 Anthropic content 数组中的一个元素，支持 text / tool_use / tool_result 等类型
 type ContentBlock struct {
-	Type string `json:"type"` // "text"
-	Text string `json:"text"`
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	// tool_use 字段
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 // Response 是 Anthropic API 响应体（对齐真实 Anthropic 格式）
