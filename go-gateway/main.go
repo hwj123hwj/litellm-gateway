@@ -128,6 +128,9 @@ func main() {
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.GET("/v1/models", modelHandler.Handle)
 	engine.GET("/health", healthHandler.Handle)
+	// 兼容不带 /v1 前缀的客户端
+	engine.POST("/messages", msgHandler.Handle)
+	engine.GET("/models", modelHandler.Handle)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	logger.Printf("Server listening on %s", addr)

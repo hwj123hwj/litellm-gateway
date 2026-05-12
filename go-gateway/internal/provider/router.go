@@ -145,3 +145,14 @@ func (r *Router) ListProviders() []string {
 	}
 	return names
 }
+
+// ListChains 列出所有已注册的 chain 名称（即可用模型名）
+func (r *Router) ListChains() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.chains))
+	for name := range r.chains {
+		names = append(names, name)
+	}
+	return names
+}

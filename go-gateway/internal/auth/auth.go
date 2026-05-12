@@ -17,22 +17,27 @@ func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
 			return
 		}
 
+		// 支持多种 auth 方式：Authorization: Bearer xxx 或 x-api-key: xxx
+		token := ""
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				token = parts[1]
+			}
+		}
+		if token == "" {
+			token = c.GetHeader("x-api-key")
+		}
+
+		if token == "" {
 			logger.Printf("Missing Authorization header from %s", c.ClientIP())
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing Authorization header"})
 			c.Abort()
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format"})
-			c.Abort()
-			return
-		}
-
-		if parts[1] != masterKey {
+		if token != masterKey {
 			logger.Printf("Invalid token from %s", c.ClientIP())
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 			c.Abort()
