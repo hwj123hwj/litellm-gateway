@@ -56,6 +56,24 @@ func (c MessageContent) String() string {
 	return result
 }
 
+func NewStringContent(s string) MessageContent {
+	return MessageContent{str: s, isStr: true}
+}
+
+func NewBlocksContent(blocks []ContentBlock) MessageContent {
+	return MessageContent{blocks: blocks}
+}
+
+func (c MessageContent) Blocks() []ContentBlock {
+	if c.isStr {
+		if c.str == "" {
+			return nil
+		}
+		return []ContentBlock{{Type: "text", Text: c.str}}
+	}
+	return c.blocks
+}
+
 // Message 表示一条消息，content 兼容字符串和数组两种格式
 type Message struct {
 	Role    string         `json:"role"`
@@ -104,6 +122,26 @@ func (r *Request) MarshalJSON() ([]byte, error) {
 		out["model"] = b
 	}
 	return json.Marshal(out)
+}
+
+func (r *Request) SetRawField(key string, value any) error {
+	if r.raw == nil {
+		r.raw = make(map[string]json.RawMessage)
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	r.raw[key] = b
+	return nil
+}
+
+func (r *Request) RawField(key string) (json.RawMessage, bool) {
+	if r.raw == nil {
+		return nil, false
+	}
+	v, ok := r.raw[key]
+	return v, ok
 }
 
 // ContentBlock 是 Anthropic content 数组中的一个元素，支持 text / tool_use / tool_result 等类型

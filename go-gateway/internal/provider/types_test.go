@@ -8,8 +8,14 @@ import (
 func TestRequestMarshal(t *testing.T) {
 	req := &Request{
 		Model:     "glm-sonnet",
-		Messages:  []Message{{Role: "user", Content: "hello"}},
+		Messages:  []Message{{Role: "user", Content: NewStringContent("hello")}},
 		MaxTokens: 1000,
+	}
+	if err := req.SetRawField("messages", req.Messages); err != nil {
+		t.Fatalf("Failed to set raw messages: %v", err)
+	}
+	if err := req.SetRawField("max_tokens", req.MaxTokens); err != nil {
+		t.Fatalf("Failed to set raw max_tokens: %v", err)
 	}
 
 	data, err := json.Marshal(req)

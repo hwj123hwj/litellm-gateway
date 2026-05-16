@@ -38,6 +38,8 @@ make run
 
 ### 3. 配置 Claude Code
 
+#### Anthropic 兼容客户端
+
 编辑 `~/.claude/settings.json`：
 
 ```json
@@ -49,6 +51,16 @@ make run
 }
 ```
 
+#### OpenAI 兼容客户端
+
+将 base URL 指向：
+
+- `http://localhost:4001/v1`
+
+聊天接口完整地址为：
+
+- `http://localhost:4001/v1/chat/completions`
+
 ---
 
 ## API 端点
@@ -57,7 +69,10 @@ make run
 |------|------|------|------|
 | `/health` | GET | 无需 | 健康检查 |
 | `/v1/models` | GET | Bearer | 列出可用模型 |
-| `/v1/messages` | POST | Bearer | 发送消息（支持流式） |
+| `/v1/chat/completions` | POST | Bearer | OpenAI 兼容接口，支持流式 |
+| `/v1/messages` | POST | Bearer | Anthropic 兼容接口，支持流式 |
+| `/chat/completions` | POST | Bearer | `/v1/chat/completions` 的短路径兼容别名 |
+| `/messages` | POST | Bearer | `/v1/messages` 的短路径兼容别名 |
 
 ### 健康检查
 
@@ -66,27 +81,58 @@ curl http://localhost:4001/health
 # {"status":"ok"}
 ```
 
-### 发送消息（非流式）
+### OpenAI 兼容：chat completions（非流式）
+
+```bash
+curl -X POST http://localhost:4001/v1/chat/completions \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "coding",
+    "messages": [
+      {"role": "system", "content": "You are helpful"},
+      {"role": "user", "content": "你好"}
+    ],
+    "max_tokens": 100
+  }'
+```
+
+### OpenAI 兼容：chat completions（流式）
+
+```bash
+curl -N -X POST http://localhost:4001/v1/chat/completions \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "coding",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ]
+  }'
+```
+
+### Anthropic 兼容：messages（非流式）
 
 ```bash
 curl -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-sonnet",
+    "model": "coding-anthropic",
     "max_tokens": 100,
     "messages": [{"role": "user", "content": "你好"}]
   }'
 ```
 
-### 发送消息（流式）
+### Anthropic 兼容：messages（流式）
 
 ```bash
-curl -X POST http://localhost:4001/v1/messages \
+curl -N -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-sonnet",
+    "model": "coding-anthropic",
     "max_tokens": 100,
     "stream": true,
     "messages": [{"role": "user", "content": "你好"}]
@@ -97,30 +143,37 @@ curl -X POST http://localhost:4001/v1/messages \
 
 ## 可用模型
 
-### 智谱 BigModel
+### OpenAI 主链（推荐）
 
-| 模型名 | 实际模型 | 说明 |
+以下模型链优先走 OpenAI 风格上游：
+
+| 模型名 | 上游顺序 | 说明 |
 |--------|---------|------|
-| `glm-haiku` | glm-4.7 | 轻量快速 |
-| `glm-sonnet` | glm-5-turbo | 主力模型 |
-| `glm-opus` | glm-5.1 | 旗舰模型 |
+| `coding` | GLM coding plan → MiMo → LongCat | 日常推荐，自动 fallback |
+| `glm-haiku` | GLM coding plan | 轻量快速 |
+| `glm-sonnet` | GLM coding plan | 主力模型 |
+| `glm-opus` | GLM coding plan | 旗舰模型 |
+| `mimo-haiku` | MiMo OpenAI | 思考模型 |
+| `mimo-sonnet` | MiMo OpenAI | 思考模型 |
+| `mimo-opus` | MiMo OpenAI | 思考旗舰 |
+| `longcat-sonnet` | LongCat OpenAI | 长上下文 |
+| `longcat-opus` | LongCat OpenAI | 长上下文旗舰 |
 
-### 小米 MiMo
+### Anthropic 兼容链
 
-| 模型名 | 实际模型 | 说明 |
+以下模型链用于 `/v1/messages`，走 Anthropic 风格上游：
+
+| 模型名 | 上游顺序 | 说明 |
 |--------|---------|------|
-| `mimo-haiku` | mimo-v2.5 | 思考模型 |
-| `mimo-sonnet` | mimo-v2.5 | 思考模型 |
-| `mimo-opus` | mimo-v2.5-pro | 思考旗舰 |
-
-> **注意**：MiMo 是思考模型，响应中包含 `thinking` 类型的内容块。`max_tokens` 需设置足够大（建议 200+），否则 token 可能被思考过程耗尽。
-
-### 美团 LongCat
-
-| 模型名 | 实际模型 | 说明 |
-|--------|---------|------|
-| `longcat-sonnet` | LongCat-Flash-Chat | 长上下文 |
-| `longcat-opus` | LongCat-2.0-Preview | 长上下文旗舰 |
+| `coding-anthropic` | GLM Anthropic → MiMo Anthropic → LongCat Anthropic | Anthropic 兼容推荐链 |
+| `glm-haiku-anthropic` | GLM Anthropic | 轻量快速 |
+| `glm-sonnet-anthropic` | GLM Anthropic | 主力模型 |
+| `glm-opus-anthropic` | GLM Anthropic | 旗舰模型 |
+| `mimo-haiku-anthropic` | MiMo Anthropic | 思考模型 |
+| `mimo-sonnet-anthropic` | MiMo Anthropic | 思考模型 |
+| `mimo-opus-anthropic` | MiMo Anthropic | 思考旗舰 |
+| `longcat-sonnet-anthropic` | LongCat Anthropic | 长上下文 |
+| `longcat-opus-anthropic` | LongCat Anthropic | 长上下文旗舰 |
 
 ### EasyClaw（真实 Claude）
 
@@ -130,7 +183,7 @@ curl -X POST http://localhost:4001/v1/messages \
 | `easyclaw-opus` | claude-opus-4-6 | 真实 Claude 旗舰 |
 | `claude-sonnet-4-6` | claude-sonnet-4-6 | 兼容别名 |
 
-> EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换（无需手动处理）。
+> EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换。
 
 ### 智谱免费模型
 
@@ -159,13 +212,6 @@ curl -X POST http://localhost:4001/v1/messages \
 
 > **注意**：免费模型随时可能被限流（429），`free` chain 会自动 fallback 到下一个，单独指定别名则会直接报错。生产使用建议始终用 `free`。
 
-### Fallback 链
-
-| 模型名 | Fallback 顺序 | 说明 |
-|--------|-------------|------|
-| `coding` | GLM → MiMo → LongCat | **日常推荐**，自动容错 |
-| `free` | OpenRouter top-5 免费模型 | 零成本，自动容错 |
-
 ---
 
 ## 环境变量
@@ -187,15 +233,19 @@ curl -X POST http://localhost:4001/v1/messages \
 
 ## 架构
 
-```
-Claude Code
-    │ Anthropic API 格式
-    ▼
+```text
+OpenAI / Anthropic 客户端
+            │
+            ▼
 ┌─────────────────────────────┐
 │        Go Gateway           │
 │                             │
 │  Auth Middleware            │
 │  Logging Middleware         │
+│                             │
+│  Handlers                   │
+│  ├── /v1/chat/completions   │
+│  └── /v1/messages           │
 │                             │
 │  Router                     │
 │  ┌──────────────────────┐   │
@@ -204,17 +254,17 @@ Claude Code
 │  └──────────────────────┘   │
 │                             │
 │  Providers                  │
-│  ├── AnthropicProvider      │──▶ GLM / MiMo / LongCat
-│  └── OpenAIProvider         │──▶ EasyClaw（含格式转换）
+│  ├── OpenAIProvider         │──▶ GLM coding / MiMo / LongCat / EasyClaw
+│  └── AnthropicProvider      │──▶ GLM / MiMo / LongCat Anthropic
 └─────────────────────────────┘
 ```
 
-**核心设计**：`Provider` 接口 + 可选 `StreamProvider` 接口。
+**当前设计**：
 
-- `AnthropicProvider`：直接透传 SSE 流
-- `OpenAIProvider`：实现 `StreamProvider`，把 OpenAI SSE 转为 Anthropic SSE
-
-Handler 通过 Go interface type assertion 自动区分，调用方无感知。
+- 对外同时提供 OpenAI 与 Anthropic 两套接口
+- OpenAI 主链优先直连支持 OpenAI 的上游
+- Anthropic 兼容链保留给 `/v1/messages`
+- `OpenAIProvider` 会把上游 OpenAI SSE 转为内部可复用流，再由 handler 输出对应协议
 
 ---
 
@@ -241,8 +291,8 @@ make docker-run    # Docker Compose 启动
 ### 新增 Provider
 
 1. 在 `internal/provider/` 新建文件（如 `baidu.go`）
-2. 实现 `Provider` 接口（参考 `anthropic.go`）
-3. 如果是 OpenAI 格式，实现 `StreamProvider`（参考 `openai.go`）
+2. 实现 `Provider` 接口（参考 `anthropic.go` 或 `openai.go`）
+3. 如果需要流式，确保支持 `StreamProvider`
 4. 在 `internal/config/config.go` 加新字段
 5. 在 `main.go` 注册 provider 和 chain
 6. 在 `router.go` 的 `mapModelName` 加模型映射

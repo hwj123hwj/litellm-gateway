@@ -1,6 +1,6 @@
 # LLM Gateway
 
-让 Claude Code 统一接入多家国产 AI 模型的网关。支持智谱、小米、美团、EasyClaw 四家提供商，自动 fallback，100% Anthropic API 兼容。
+让 Claude Code 统一接入多家国产 AI 模型的网关。支持智谱、小米、美团、EasyClaw 四家提供商，支持 OpenAI 与 Anthropic 两套对外接口，并支持自动 fallback。
 
 ## 两套方案
 
@@ -33,6 +33,34 @@ go build -o gateway . && ./gateway
 
 网关默认监听 `:4001`。
 
+### 对外接口
+
+Go 网关现在同时提供两套兼容接口：
+
+#### 1. OpenAI 兼容
+
+- Base URL: `http://localhost:4001/v1`
+- Chat Completions: `http://localhost:4001/v1/chat/completions`
+
+推荐模型链：
+
+- `coding`
+- `glm-sonnet`
+- `mimo-sonnet`
+- `longcat-sonnet`
+
+#### 2. Anthropic 兼容
+
+- Base URL: `http://localhost:4001/v1`
+- Messages: `http://localhost:4001/v1/messages`
+
+推荐模型链：
+
+- `coding-anthropic`
+- `glm-sonnet-anthropic`
+- `mimo-sonnet-anthropic`
+- `longcat-sonnet-anthropic`
+
 ### 配置 Claude Code
 
 编辑 `~/.claude/settings.json`：
@@ -48,21 +76,36 @@ go build -o gateway . && ./gateway
 
 ### 可用模型
 
+#### OpenAI 主链
+
 | 模型名 | 提供商 | 说明 |
 |--------|--------|------|
-| `coding` | GLM → MiMo → LongCat | **推荐**，自动 fallback |
-| `glm-sonnet` | 智谱 GLM-5-Turbo | 主力模型 |
-| `glm-haiku` | 智谱 GLM-4.7 | 轻量快速 |
-| `glm-opus` | 智谱 GLM-5.1 | 旗舰模型 |
-| `mimo-sonnet` | 小米 MiMo-v2.5 | 思考模型 |
-| `mimo-opus` | 小米 MiMo-v2.5-Pro | 思考旗舰 |
-| `longcat-sonnet` | 美团 LongCat-Flash | 长上下文 |
-| `longcat-opus` | 美团 LongCat-2.0 | 长上下文旗舰 |
+| `coding` | GLM coding plan → MiMo → LongCat | **推荐**，自动 fallback |
+| `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
+| `glm-haiku` | 智谱 GLM coding plan | 轻量快速 |
+| `glm-opus` | 智谱 GLM coding plan | 旗舰模型 |
+| `mimo-sonnet` | 小米 MiMo OpenAI | 思考模型 |
+| `mimo-opus` | 小米 MiMo OpenAI | 思考旗舰 |
+| `longcat-sonnet` | 美团 LongCat OpenAI | 长上下文 |
+| `longcat-opus` | 美团 LongCat OpenAI | 长上下文旗舰 |
 | `easyclaw-sonnet` | EasyClaw → Claude Sonnet | 真实 Claude |
 | `claude-sonnet-4-6` | EasyClaw → Claude Sonnet | 同上（兼容别名） |
 | `glm-flash` | 智谱 GLM-4.7-flash | 免费，复用 GLM key |
 | `free` | OpenRouter 免费模型 fallback 链 | **零成本**，启动时动态拉取 top-5 |
 | `nemotron` / `owl` / ... | OpenRouter 各免费模型 | 启动时动态生成别名 |
+
+#### Anthropic 兼容链
+
+| 模型名 | 提供商 | 说明 |
+|--------|--------|------|
+| `coding-anthropic` | GLM → MiMo → LongCat | Anthropic 兼容推荐链 |
+| `glm-sonnet-anthropic` | 智谱 Anthropic | 主力模型 |
+| `glm-haiku-anthropic` | 智谱 Anthropic | 轻量快速 |
+| `glm-opus-anthropic` | 智谱 Anthropic | 旗舰模型 |
+| `mimo-sonnet-anthropic` | 小米 Anthropic | 思考模型 |
+| `mimo-opus-anthropic` | 小米 Anthropic | 思考旗舰 |
+| `longcat-sonnet-anthropic` | 美团 Anthropic | 长上下文 |
+| `longcat-opus-anthropic` | 美团 Anthropic | 长上下文旗舰 |
 
 ### 测试
 
@@ -70,11 +113,17 @@ go build -o gateway . && ./gateway
 # Health check
 curl http://localhost:4001/health
 
-# 发送消息
+# OpenAI 风格
+curl -X POST http://localhost:4001/v1/chat/completions \
+  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"coding","messages":[{"role":"user","content":"hi"}]}'
+
+# Anthropic 风格
 curl -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"model":"glm-sonnet","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"coding-anthropic","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 详细文档见 [go-gateway/README.md](go-gateway/README.md)。
@@ -115,7 +164,7 @@ mkdir -p ~/.litellm
 
 ## 项目结构
 
-```
+```text
 litellm-gateway/
 ├── go-gateway/              # Go 网关（推荐）
 │   ├── main.go              # 启动入口
@@ -141,7 +190,8 @@ litellm-gateway/
 │   ├── local-deploy.md      # LiteLLM 本地部署指南
 │   ├── server-deploy.md     # LiteLLM 服务器部署指南
 │   ├── easyclaw-setup.md    # EasyClaw 接入说明
-│   └── troubleshooting.md   # 故障排查
+│   ├── troubleshooting.md   # 故障排查
+│   └── openai-compatible-providers.md # OpenAI 兼容上游整理
 │
 └── docker-compose.yaml      # LiteLLM 完整栈（含 PostgreSQL）
 ```
@@ -153,6 +203,7 @@ litellm-gateway/
 | 文档 | 说明 |
 |------|------|
 | [go-gateway/README.md](go-gateway/README.md) | Go 网关完整文档（架构、开发、部署） |
+| [docs/openai-compatible-providers.md](docs/openai-compatible-providers.md) | 智谱 / 小米 / 美团 OpenAI 兼容接口整理 |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | 面向 agent 的技术指南 |
 | [docs/local-deploy.md](docs/local-deploy.md) | LiteLLM 本地部署步骤 |
 | [docs/server-deploy.md](docs/server-deploy.md) | LiteLLM 服务器部署步骤 |

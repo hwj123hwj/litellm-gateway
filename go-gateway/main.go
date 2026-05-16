@@ -27,27 +27,42 @@ func main() {
 
 	// 注册提供商
 	if cfg.GLMAPIKey != "" {
-		router.RegisterProvider("glm", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "glm",
+		router.RegisterProvider("glm-anthropic", provider.NewAnthropicProvider(&provider.Config{
+			Name:      "glm-anthropic",
 			URL:       "https://open.bigmodel.cn/api/anthropic/v1/messages",
 			APIKey:    cfg.GLMAPIKey,
 			UseBearer: false,
 		}))
+		router.RegisterProvider("glm", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "glm",
+			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+			APIKey: cfg.GLMAPIKey,
+		}))
 	}
 	if cfg.MIMOAPIKey != "" {
-		router.RegisterProvider("mimo", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "mimo",
+		router.RegisterProvider("mimo-anthropic", provider.NewAnthropicProvider(&provider.Config{
+			Name:      "mimo-anthropic",
 			URL:       "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages",
 			APIKey:    cfg.MIMOAPIKey,
 			UseBearer: false,
 		}))
+		router.RegisterProvider("mimo", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "mimo",
+			URL:    "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+			APIKey: cfg.MIMOAPIKey,
+		}))
 	}
 	if cfg.LongcatAPIKey != "" {
-		router.RegisterProvider("longcat", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "longcat",
+		router.RegisterProvider("longcat-anthropic", provider.NewAnthropicProvider(&provider.Config{
+			Name:      "longcat-anthropic",
 			URL:       "https://api.longcat.chat/anthropic/v1/messages",
 			APIKey:    cfg.LongcatAPIKey,
 			UseBearer: true,
+		}))
+		router.RegisterProvider("longcat", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "longcat",
+			URL:    "https://api.longcat.chat/openai/chat/completions",
+			APIKey: cfg.LongcatAPIKey,
 		}))
 	}
 	if cfg.EasyClawAPIKey != "" {
@@ -58,10 +73,10 @@ func main() {
 		}))
 	}
 	if cfg.GLMAPIKey != "" {
-		// GLM 免费模型（OpenAI 兼容接口，复用智谱 key，不同路径）
+		// GLM coding plan（OpenAI 兼容接口，复用智谱 key）
 		router.RegisterProvider("glm-free", provider.NewOpenAIProvider(&provider.Config{
 			Name:   "glm-free",
-			URL:    "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
 			APIKey: cfg.GLMAPIKey,
 		}))
 	}
@@ -98,6 +113,15 @@ func main() {
 	router.RegisterChain("mimo-opus", []string{"mimo"})
 	router.RegisterChain("longcat-sonnet", []string{"longcat"})
 	router.RegisterChain("longcat-opus", []string{"longcat"})
+	router.RegisterChain("coding-anthropic", []string{"glm-anthropic", "mimo-anthropic", "longcat-anthropic"})
+	router.RegisterChain("glm-haiku-anthropic", []string{"glm-anthropic"})
+	router.RegisterChain("glm-sonnet-anthropic", []string{"glm-anthropic"})
+	router.RegisterChain("glm-opus-anthropic", []string{"glm-anthropic"})
+	router.RegisterChain("mimo-haiku-anthropic", []string{"mimo-anthropic"})
+	router.RegisterChain("mimo-sonnet-anthropic", []string{"mimo-anthropic"})
+	router.RegisterChain("mimo-opus-anthropic", []string{"mimo-anthropic"})
+	router.RegisterChain("longcat-sonnet-anthropic", []string{"longcat-anthropic"})
+	router.RegisterChain("longcat-opus-anthropic", []string{"longcat-anthropic"})
 	if cfg.EasyClawAPIKey != "" {
 		router.RegisterChain("easyclaw-sonnet", []string{"easyclaw"})
 		router.RegisterChain("easyclaw-opus", []string{"easyclaw"})
@@ -122,14 +146,17 @@ func main() {
 
 	// 注册路由
 	msgHandler := handlers.NewMessageHandler(router, logger)
+	chatHandler := handlers.NewChatCompletionsHandler(router, logger)
 	modelHandler := handlers.NewModelHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
 
 	engine.POST("/v1/messages", msgHandler.Handle)
+	engine.POST("/v1/chat/completions", chatHandler.Handle)
 	engine.GET("/v1/models", modelHandler.Handle)
 	engine.GET("/health", healthHandler.Handle)
 	// 兼容不带 /v1 前缀的客户端
 	engine.POST("/messages", msgHandler.Handle)
+	engine.POST("/chat/completions", chatHandler.Handle)
 	engine.GET("/models", modelHandler.Handle)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
