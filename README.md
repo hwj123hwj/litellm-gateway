@@ -33,6 +33,8 @@ go build -o gateway . && ./gateway
 
 网关默认监听 `:4001`。
 
+> **服务器部署**: 生产环境目标地址 `http://115.190.82.67:8080`，通过 GitHub Actions 自动部署（`.github/workflows/deploy.yml`）。详见 [go-gateway/README.md](go-gateway/README.md) 部署章节。
+
 ### 对外接口
 
 Go 网关现在同时提供两套兼容接口：

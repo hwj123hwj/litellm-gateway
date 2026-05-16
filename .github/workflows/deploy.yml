@@ -1,0 +1,146 @@
+name: Build and Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  # ── 以下变量需要在 GitHub Secrets 中配置 ──
+  # DEPLOY_HOST: 115.190.82.67
+  # DEPLOY_USER: root
+  # SSH_PRIVATE_KEY: 您的服务器 SSH 私钥
+
+  # ── 固定值 ──
+  CONTAINER_NAME: go-gateway
+  HOST_PORT: 8080
+  CONTAINER_PORT: 8080
+
+jobs:
+  test:
+    name: Run Go tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-gateway
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -v ./...
+
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      # ── 构建 .env 文件并上传 ──────────────────────
+      - name: Prepare .env
+        env:
+          LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
+          LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
+          EASYCLAW_API_KEY: ${{ secrets.EASYCLAW_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          mkdir -p deploy
+          cat > deploy/.env << 'ENVEOF'
+          LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+          GLM_API_KEY=${GLM_API_KEY}
+          MIMO_API_KEY=${MIMO_API_KEY}
+          LONGCAT_API_KEY=${LONGCAT_API_KEY}
+          EASYCLAW_API_KEY=${EASYCLAW_API_KEY}
+          OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+          PORT=${CONTAINER_PORT}
+          LOG_LEVEL=info
+          ENV=production
+          ENVEOF
+
+          # 用 envsubst 替换变量占位符
+          # 先拷贝，再用 envsubst 替换所有 ${VAR} 引用
+          cp deploy/.env deploy/.env.tmp
+          envsubst < deploy/.env > deploy/.env.tmp && mv deploy/.env.tmp deploy/.env
+
+          # 确保权限安全
+          chmod 600 deploy/.env
+
+      - name: Upload .env to server
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /opt/go-gateway"
+          scp deploy/.env ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/go-gateway/.env
+
+      # ── 上传项目文件到服务器 ─────────────────────
+      - name: Upload project to server
+        run: |
+          rsync -avz --exclude '.git' \
+            --exclude 'go-gateway/node_modules' \
+            go-gateway/ \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/go-gateway/
+
+      # ── 构建并启动 ───────────────────────────────
+      - name: Build and Start container
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} /bin/bash -s << 'REMOTE_SCRIPT'
+          set -e
+
+          cd /opt/go-gateway
+
+          # 构建镜像
+          docker build -t go-llm-gateway:latest .
+
+          # 停止旧容器
+          docker stop go-gateway 2>/dev/null || true
+          docker rm go-gateway 2>/dev/null || true
+
+          # 启动新容器
+          docker run -d \
+            --name go-gateway \
+            --restart unless-stopped \
+            -p 8080:8080 \
+            --env-file /opt/go-gateway/.env \
+            go-llm-gateway:latest
+
+          # 等待启动
+          sleep 2
+
+          # 健康检查
+          if curl -sf http://localhost:8080/health; then
+            echo "✅ Deploy OK"
+          else
+            echo "⚠️  Health check failed"
+            docker logs --tail 20 go-gateway
+            exit 1
+          fi
+          REMOTE_SCRIPT
+
+      - name: Post-deploy summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "  部署完成"
+          echo "=========================================="
+          echo "  健康检查: http://${{ secrets.DEPLOY_HOST }}:8080/health"
+          echo "  OpenAI:   http://${{ secrets.DEPLOY_HOST }}:8080/v1/chat/completions"
+          echo "  Anthropic: http://${{ secrets.DEPLOY_HOST }}:8080/v1/messages"
+          echo "=========================================="

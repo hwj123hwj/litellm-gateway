@@ -299,6 +299,145 @@ make docker-run    # Docker Compose 启动
 
 ---
 
+## 服务器部署
+
+### 完整地址
+
+- 对外地址: `http://115.190.82.67:8080`
+- OpenAI 接口: `http://115.190.82.67:8080/v1/chat/completions`
+- Anthropic 接口: `http://115.190.82.67:8080/v1/messages`
+
+### 方式一：GitHub Actions（推荐）
+
+本仓库已包含 GitHub Actions 配置（`.github/workflows/deploy.yml`）：
+
+- 自动运行 `go vet` 和 `go test`
+- SSH 到服务器，上传代码构建 Docker 镜像并启动容器
+
+#### 需要在 GitHub 配置的 Secrets
+
+进入仓库 `Settings → Secrets and variables → Actions`，添加以下 Secrets：
+
+| Secret | 说明 |
+|--------|------|
+| `DEPLOY_HOST` | 服务器 IP，如 `115.190.82.67` |
+| `DEPLOY_USER` | SSH 用户名，如 `root` |
+| `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（完整内容，含换行） |
+| `LITELLM_MASTER_KEY` | 网关认证 token |
+| `GLM_API_KEY` | 智谱 API key |
+| `MIMO_API_KEY` | 小米 API key |
+| `LONGCAT_API_KEY` | 美团 API key |
+| `EASYCLAW_API_KEY` | EasyClaw API key |
+| `OPENROUTER_API_KEY` | OpenRouter key（启用免费模型） |
+
+**优势**：
+- API keys 通过 Secrets 传入，部署时自动写入 `.env` 并传到服务器
+- 不需要在服务器上手动管理 `.env` 文件
+- 每次 push 到 `main` 分支自动部署
+
+#### 部署步骤
+
+1. 在 GitHub 仓库 Settings 中配置上述 Secrets
+2. 把代码推送到 `main` 分支
+3. GitHub Actions 自动触发部署
+4. 在 Actions 页面查看部署进度和健康检查结果
+5. 部署完成后访问 `http://115.190.82.67:8080/health` 验证
+
+### 方式二：手动部署
+
+#### 1. 构建镜像
+
+```bash
+cd go-gateway
+docker build -t go-llm-gateway:latest .
+```
+
+#### 2. 传到服务器
+
+```bash
+# SSH 到服务器
+ssh user@115.190.82.67
+
+# 创建 .env
+mkdir -p /opt/go-gateway
+cat > /opt/go-gateway/.env << 'EOF'
+LITELLM_MASTER_KEY=sk-local-gateway-xxx
+GLM_API_KEY=
+MIMO_API_KEY=
+LONGCAT_API_KEY=
+EASYCLAW_API_KEY=
+OPENROUTER_API_KEY=
+PORT=8080
+LOG_LEVEL=info
+EOF
+
+# 启动
+docker run -d \
+  --name go-gateway \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  --env-file /opt/go-gateway/.env \
+  go-llm-gateway:latest
+```
+
+### 服务器防火墙
+
+确保服务器开放 8080 端口：
+
+```bash
+# ufw
+ufw allow 8080/tcp
+
+# iptables
+iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+```
+
+### 验证
+
+```bash
+# 健康检查
+curl http://115.190.82.67:8080/health
+# {"status":"ok"}
+
+# OpenAI 风格
+curl -X POST http://115.190.82.67:8080/v1/chat/completions \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"coding","messages":[{"role":"user","content":"hi"}]}'
+
+# Anthropic 风格
+curl -X POST http://115.190.82.67:8080/v1/messages \
+  -H "Authorization: Bearer sk-local-gateway-xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"coding-anthropic","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+### 配置 Claude Code（远程）
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://115.190.82.67:8080/v1",
+    "ANTHROPIC_AUTH_TOKEN": "sk-local-gateway-xxx"
+  }
+}
+```
+
+### 查看日志
+
+```bash
+docker logs -f go-gateway
+```
+
+### 停止服务
+
+```bash
+docker stop go-gateway
+docker rm go-gateway
+```
+
+---
+
 ## Docker 部署
 
 ```bash
