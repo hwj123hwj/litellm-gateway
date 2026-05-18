@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -406,4 +407,134 @@ func (p *DeepVProvider) IsHealthy(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+// ForwardStream 实现流式请求（StreamProvider 接口）
+func (p *DeepVProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {
+	// 1. 转换请求格式
+	deepVReq, err := p.convertRequest(req)
+	if err != nil {
+		return fmt.Errorf("convert request: %w", err)
+	}
+
+	reqBody, err := json.Marshal(deepVReq)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	// 2. 使用流式端点
+	streamURL := strings.Replace(p.config.URL, "/messages", "/stream", 1)
+
+	// 3. 创建 HTTP 请求
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, streamURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	// 4. 设置 headers
+	if err := p.setHeaders(httpReq); err != nil {
+		return fmt.Errorf("set headers: %w", err)
+	}
+
+	// 5. 发送请求
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("deepv stream error %d: %s", resp.StatusCode, string(body))
+	}
+
+	// 6. 转换 SSE 流：GenAI 格式 -> Anthropic 格式
+	return p.convertStream(resp.Body, w, req.Model)
+}
+
+// convertStream 转换 GenAI SSE 流为 Anthropic SSE 流
+func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) error {
+	scanner := bufio.NewScanner(r)
+	writer := bufio.NewWriter(w)
+	defer writer.Flush()
+
+	var textBuffer strings.Builder
+	_ = fmt.Sprintf("deepv-%d", time.Now().UnixNano()) // message ID for future use
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// 跳过空行
+		if line == "" {
+			continue
+		}
+
+		// 解析 GenAI SSE
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				// 发送 Anthropic 结束事件
+				p.writeAnthropicEvent(writer, "message_stop", map[string]interface{}{})
+				break
+			}
+
+			var genaiResp deepVResponse
+			if err := json.Unmarshal([]byte(data), &genaiResp); err != nil {
+				continue
+			}
+
+			// 提取文本
+			for _, candidate := range genaiResp.Candidates {
+				for _, part := range candidate.Content.Parts {
+					if part.Text != "" {
+						textBuffer.WriteString(part.Text)
+
+						// 发送 content_block_delta 事件
+						p.writeAnthropicEvent(writer, "content_block_delta", map[string]interface{}{
+							"index": 0,
+							"delta": map[string]interface{}{
+								"type": "text_delta",
+								"text": part.Text,
+							},
+						})
+					}
+
+					// 处理 function call
+					if part.FunctionCall != nil {
+						inputJSON, _ := json.Marshal(part.FunctionCall.Args)
+						p.writeAnthropicEvent(writer, "content_block_start", map[string]interface{}{
+							"index": 0,
+							"content_block": map[string]interface{}{
+								"type":  "tool_use",
+								"id":    part.FunctionCall.ID,
+								"name":  part.FunctionCall.Name,
+								"input": json.RawMessage(inputJSON),
+							},
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 发送最终消息
+	p.writeAnthropicEvent(writer, "message_delta", map[string]interface{}{
+		"delta": map[string]interface{}{
+			"stop_reason": "end_turn",
+		},
+		"usage": map[string]interface{}{
+			"output_tokens": len(textBuffer.String()) / 4, // 粗略估算
+		},
+	})
+
+	return scanner.Err()
+}
+
+// writeAnthropicEvent 写入 Anthropic SSE 事件
+func (p *DeepVProvider) writeAnthropicEvent(w *bufio.Writer, eventType string, data map[string]interface{}) {
+	data["type"] = eventType
+	jsonData, _ := json.Marshal(data)
+	w.WriteString("event: " + eventType + "\n")
+	w.WriteString("data: " + string(jsonData) + "\n\n")
+	w.Flush()
 }
