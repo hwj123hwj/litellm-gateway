@@ -271,7 +271,8 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 // setHeaders 设置请求头，包括认证和 Git 信息
 func (p *DeepVProvider) setHeaders(req *http.Request) error {
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "go-llm-gateway/1.0")
+	req.Header.Set("User-Agent", "DeepVCode/CLI/1.0.316 (darwin; arm64)")
+	req.Header.Set("X-Client-Version", "1.0.316")
 
 	// 1. 设置认证 token
 	token, err := p.getAccessToken()
