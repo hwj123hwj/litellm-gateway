@@ -120,9 +120,6 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 			"deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
 			"glm-5":          {"deepv-glm5": "glm-5"},
 			"claude-sonnet-4-6": {"deepv-claude": "claude-sonnet-4-6"},
-			// SmartAll GPT-5.x 模型
-			"gpt-5.5": {"smartall": "gpt-5.5"},
-			"gpt-5":   {"smartall": "gpt-5.5"},
 			// 免费/极低成本模型
 			"free":      {"glm-free": "glm-4.7-flash"},
 			"glm-flash": {"glm-free": "glm-4.7-flash"},
