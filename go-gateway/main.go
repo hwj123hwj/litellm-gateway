@@ -129,6 +129,16 @@ func main() {
 		}
 	}
 
+	// SmartAll GPT-5.x 模型
+	if cfg.SmartAllAPIKey != "" {
+		router.RegisterProvider("smartall", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "smartall",
+			URL:    "https://ai.smartall.cloud/v1/chat/completions",
+			APIKey: cfg.SmartAllAPIKey,
+		}))
+		logger.Printf("SmartAll provider registered (gpt-5.5)")
+	}
+
 	// 注册 fallback 链（对齐 config.yaml 模型别名）
 	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
 	router.RegisterChain("glm-haiku", []string{"glm"})
@@ -169,6 +179,12 @@ func main() {
 		router.RegisterChain("glm-5", []string{"deepv-glm5"})
 		router.RegisterChain("claude-sonnet-4.6", []string{"deepv-claude"})
 		router.RegisterChain("claude-sonnet-4-6", []string{"deepv-claude"}) // 别名，兼容连字符格式
+	}
+
+	// SmartAll GPT-5.x 模型链
+	if cfg.SmartAllAPIKey != "" {
+		router.RegisterChain("gpt-5.5", []string{"smartall"})
+		router.RegisterChain("gpt-5", []string{"smartall"}) // 别名
 	}
 
 	// 创建 Gin 引擎

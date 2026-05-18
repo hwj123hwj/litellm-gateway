@@ -97,33 +97,36 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 	return nil, fmt.Errorf("all providers failed, last error: %w", lastErr)
 }
 
-// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 config.yaml）
-func (r *Router) mapModelName(modelName, providerName string) string {
-	mappings := map[string]map[string]string{
-		"coding": {
-			"glm":      "glm-5-turbo",
-			"mimo":     "mimo-v2.5",
-			"longcat":  "LongCat-Flash-Chat",
-			"easyclaw": "claude-sonnet-4-6",
-		},
-		"glm-haiku":  {"glm": "glm-4.7"},
-		"glm-sonnet": {"glm": "glm-5-turbo"},
-		"glm-opus":   {"glm": "glm-5.1"},
-		"mimo-haiku":  {"mimo": "mimo-v2.5"},
-		"mimo-sonnet": {"mimo": "mimo-v2.5"},
-		"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
-		"longcat-sonnet": {"longcat": "LongCat-Flash-Chat"},
-		"longcat-opus":   {"longcat": "LongCat-2.0-Preview"},
-		"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
-		"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
-		// DeepV Server 模型
-		"deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
-		"glm-5":          {"deepv-glm5": "glm-5"},
-		"claude-sonnet-4-6": {"deepv-claude": "claude-sonnet-4-6"},
-		// 免费/极低成本模型
-		"free":      {"glm-free": "glm-4.7-flash"},
-		"glm-flash": {"glm-free": "glm-4.7-flash"},
-	}
+	// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 config.yaml）
+	func (r *Router) mapModelName(modelName, providerName string) string {
+		mappings := map[string]map[string]string{
+			"coding": {
+				"glm":      "glm-5-turbo",
+				"mimo":     "mimo-v2.5",
+				"longcat":  "LongCat-Flash-Chat",
+				"easyclaw": "claude-sonnet-4-6",
+			},
+			"glm-haiku":  {"glm": "glm-4.7"},
+			"glm-sonnet": {"glm": "glm-5-turbo"},
+			"glm-opus":   {"glm": "glm-5.1"},
+			"mimo-haiku":  {"mimo": "mimo-v2.5"},
+			"mimo-sonnet": {"mimo": "mimo-v2.5"},
+			"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
+			"longcat-sonnet": {"longcat": "LongCat-Flash-Chat"},
+			"longcat-opus":   {"longcat": "LongCat-2.0-Preview"},
+			"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
+			"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
+			// DeepV Server 模型
+			"deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
+			"glm-5":          {"deepv-glm5": "glm-5"},
+			"claude-sonnet-4-6": {"deepv-claude": "claude-sonnet-4-6"},
+			// SmartAll GPT-5.x 模型
+			"gpt-5.5": {"smartall": "gpt-5.5"},
+			"gpt-5":   {"smartall": "gpt-5.5"},
+			// 免费/极低成本模型
+			"free":      {"glm-free": "glm-4.7-flash"},
+			"glm-flash": {"glm-free": "glm-4.7-flash"},
+		}
 
 	if mapping, ok := mappings[modelName]; ok {
 		if actualModel, ok := mapping[providerName]; ok {

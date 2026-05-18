@@ -19,6 +19,7 @@ type Config struct {
 	LongcatAPIKey    string
 	EasyClawAPIKey   string
 	OpenRouterAPIKey string // OpenRouter 免费模型网关
+	SmartAllAPIKey   string // SmartAll GPT-5.x 模型
 	DeepVEnabled     bool   // DeepV Server 是否启用
 	DeepVWorkDir     string // DeepV 工作目录（用于获取 Git 信息）
 	Env              string
@@ -37,6 +38,7 @@ func Load() (*Config, error) {
 		LongcatAPIKey:    getEnv("LONGCAT_API_KEY", ""),
 		EasyClawAPIKey:   getEnv("EASYCLAW_API_KEY", ""),
 		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
+		SmartAllAPIKey:   getEnv("SMARTALL_API_KEY", ""),
 		DeepVEnabled:     getEnvBool("DEEPV_ENABLED", false),
 		DeepVWorkDir:     getEnv("DEEPV_WORK_DIR", ""),
 		Env:              getEnv("ENV", "development"),

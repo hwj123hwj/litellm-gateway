@@ -45,6 +45,13 @@ go build -o gateway . && ./gateway
 | `glm-5` | `glm-5` | ✅ |
 | `claude-sonnet-4-6` | `claude-sonnet-4-6` | ✅ |
 
+### SmartAll（GPT-5.x）
+
+| 模型别名 | 实际模型 | 工具调用 |
+|----------|----------|----------|
+| `gpt-5.5` | `gpt-5.5` | ✅ |
+| `gpt-5` | `gpt-5.5` | ✅ |
+
 ### EasyClaw（真实 Claude）
 
 | 模型别名 | 实际模型 | 工具调用 |
@@ -136,6 +143,7 @@ litellm-gateway/
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
 | `OPENROUTER_API_KEY` | 否 | OpenRouter key（启用免费模型） |
+| `SMARTALL_API_KEY` | 否 | SmartAll key（启用 GPT-5.x） |
 | `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
 | `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |
 | `PORT` | 否 | 监听端口（默认 4000） |
