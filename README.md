@@ -45,6 +45,13 @@ go build -o gateway . && ./gateway
 | `glm-5` | `glm-5` | ✅ |
 | `claude-sonnet-4-6` | `claude-sonnet-4-6` | ✅ |
 
+### EasyClaw（真实 Claude）
+
+| 模型别名 | 实际模型 | 工具调用 |
+|----------|----------|----------|
+| `easyclaw-sonnet` | `claude-sonnet-4-6` | ✅ |
+| `easyclaw-opus` | `claude-opus-4-6` | ✅ |
+
 ### 外部提供商
 
 | 模型名 | 提供商 | 说明 |
