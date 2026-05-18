@@ -168,6 +168,7 @@ func main() {
 		router.RegisterChain("deepseek-flash", []string{"deepv-deepseek"})
 		router.RegisterChain("glm-5", []string{"deepv-glm5"})
 		router.RegisterChain("claude-sonnet-4.6", []string{"deepv-claude"})
+		router.RegisterChain("claude-sonnet-4-6", []string{"deepv-claude"}) // 别名，兼容连字符格式
 	}
 
 	// 创建 Gin 引擎
