@@ -206,6 +206,11 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 		// 处理消息内容
 		blocks := msg.Content.Blocks()
 		for _, block := range blocks {
+			// 跳过空内容
+			if block.Text == "" && block.Type == "text" {
+				continue
+			}
+
 			switch block.Type {
 			case "text":
 				content.Parts = append(content.Parts, deepVPart{Text: block.Text})
@@ -255,19 +260,34 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 
 		// 确保 Parts 不为空（DeepV Server 要求每个 content 必须有 parts）
 		if len(content.Parts) == 0 {
-			content.Parts = append(content.Parts, deepVPart{Text: ""})
+			continue // 跳过完全空的消息
 		}
 
 		result.Contents = append(result.Contents, content)
 	}
 
-	// 转换 system（从 raw 字段获取）
+	// 转换 system（支持字符串和数组格式）
 	if systemRaw, ok := req.RawField("system"); ok {
+		var systemParts []deepVPart
+
+		// 尝试解析为字符串
 		var systemStr string
 		if err := json.Unmarshal(systemRaw, &systemStr); err == nil && systemStr != "" {
-			result.SystemInstruction = &deepVContent{
-				Parts: []deepVPart{{Text: systemStr}},
+			systemParts = append(systemParts, deepVPart{Text: systemStr})
+		} else {
+			// 尝试解析为数组
+			var systemArray []map[string]interface{}
+			if err := json.Unmarshal(systemRaw, &systemArray); err == nil {
+				for _, item := range systemArray {
+					if text, ok := item["text"].(string); ok && text != "" {
+						systemParts = append(systemParts, deepVPart{Text: text})
+					}
+				}
 			}
+		}
+
+		if len(systemParts) > 0 {
+			result.SystemInstruction = &deepVContent{Parts: systemParts}
 		}
 	}
 
