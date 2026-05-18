@@ -174,8 +174,14 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 
 	// 转换 contents
 	for _, msg := range req.Messages {
+		// GenAI 使用 "model" 而不是 "assistant"
+		role := msg.Role
+		if role == "assistant" {
+			role = "model"
+		}
+
 		content := deepVContent{
-			Role: msg.Role,
+			Role: role,
 		}
 
 		// 处理消息内容
@@ -184,6 +190,11 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 			if block.Type == "text" {
 				content.Parts = append(content.Parts, deepVPart{Text: block.Text})
 			}
+		}
+
+		// 确保 Parts 不为空（DeepV Server 要求每个 content 必须有 parts）
+		if len(content.Parts) == 0 {
+			content.Parts = append(content.Parts, deepVPart{Text: ""})
 		}
 
 		result.Contents = append(result.Contents, content)
