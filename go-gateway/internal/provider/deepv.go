@@ -54,7 +54,23 @@ type deepVContent struct {
 
 // deepVPart GenAI part 格式
 type deepVPart struct {
-	Text string `json:"text,omitempty"`
+	Text            string                  `json:"text,omitempty"`
+	FunctionCall    *deepVFunctionCall      `json:"functionCall,omitempty"`
+	FunctionResponse *deepVFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+// deepVFunctionCall GenAI function call 格式
+type deepVFunctionCall struct {
+	ID   string                 `json:"id,omitempty"`
+	Name string                 `json:"name,omitempty"`
+	Args map[string]interface{} `json:"args,omitempty"`
+}
+
+// deepVFunctionResponse GenAI function response 格式
+type deepVFunctionResponse struct {
+	ID       string                 `json:"id,omitempty"`
+	Name     string                 `json:"name,omitempty"`
+	Response map[string]interface{} `json:"response,omitempty"`
 }
 
 // deepVConfig GenAI config 格式
@@ -173,6 +189,9 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 	}
 
 	// 转换 contents
+	// 需要记录 tool_use_id 到 name 的映射，用于 tool_result
+	toolUseIDToName := make(map[string]string)
+
 	for _, msg := range req.Messages {
 		// GenAI 使用 "model" 而不是 "assistant"
 		role := msg.Role
@@ -187,8 +206,50 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 		// 处理消息内容
 		blocks := msg.Content.Blocks()
 		for _, block := range blocks {
-			if block.Type == "text" {
+			switch block.Type {
+			case "text":
 				content.Parts = append(content.Parts, deepVPart{Text: block.Text})
+			case "tool_use":
+				// 记录 id -> name 映射
+				toolUseIDToName[block.ID] = block.Name
+				// 解析 input
+				var args map[string]interface{}
+				if len(block.Input) > 0 {
+					json.Unmarshal(block.Input, &args)
+				}
+				if args == nil {
+					args = make(map[string]interface{})
+				}
+				content.Parts = append(content.Parts, deepVPart{
+					FunctionCall: &deepVFunctionCall{
+						ID:block.ID,
+						Name: block.Name,
+						Args: args,
+					},
+				})
+			case "tool_result":
+				// 获取 tool name
+				toolName := toolUseIDToName[block.ToolUseID]
+				if toolName == ""{
+					toolName = block.ToolUseID
+				}
+				// 处理 content - ContentBlock 已经解析好了
+				resultStr := block.ContentStr
+				if resultStr == "" && len(block.ContentBlocks) > 0{
+					// 如果是数组，提取文本
+					for _, cb := range block.ContentBlocks {
+						if cb.Type == "text" {
+							resultStr += cb.Text
+						}
+					}
+				}
+				content.Parts = append(content.Parts, deepVPart{
+					FunctionResponse: &deepVFunctionResponse{
+						ID:block.ToolUseID,
+						Name: toolName,
+						Response: map[string]interface{}{"result": resultStr},
+					},
+				})
 			}
 		}
 
