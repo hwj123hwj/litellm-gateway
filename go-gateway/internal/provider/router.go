@@ -116,7 +116,10 @@ func (r *Router) mapModelName(modelName, providerName string) string {
 		"longcat-opus":   {"longcat": "LongCat-2.0-Preview"},
 		"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
 		"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
-		"claude-sonnet-4-6": {"easyclaw": "claude-sonnet-4-6"},
+		// DeepV Server 模型
+		"deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
+		"glm-5":          {"deepv-glm5": "glm-5"},
+		"claude-sonnet-4-6": {"deepv-claude": "claude-sonnet-4-6"},
 		// 免费/极低成本模型
 		"free":      {"glm-free": "glm-4.7-flash"},
 		"glm-flash": {"glm-free": "glm-4.7-flash"},

@@ -81,6 +81,32 @@ func main() {
 		}))
 	}
 
+	// DeepV Server 提供商（支持 deepseek-v4-flash, glm-5, claude-sonnet-4.6）
+	if cfg.DeepVEnabled {
+		workDir := cfg.DeepVWorkDir
+		if workDir == "" {
+			workDir, _ = os.Getwd()
+		}
+		// DeepV Server URL (非流式)
+		deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
+
+		// 注册各个模型（每个 provider 绑定特定模型）
+		router.RegisterProvider("deepv-deepseek", provider.NewDeepVProvider(&provider.Config{
+			Name:   "deepv-deepseek",
+			URL:    deepvURL,
+		}, workDir, "deepseek-v4-flash"))
+		router.RegisterProvider("deepv-glm5", provider.NewDeepVProvider(&provider.Config{
+			Name:   "deepv-glm5",
+			URL:    deepvURL,
+		}, workDir, "glm-5"))
+		router.RegisterProvider("deepv-claude", provider.NewDeepVProvider(&provider.Config{
+			Name:   "deepv-claude",
+			URL:    deepvURL,
+		}, workDir, "claude-sonnet-4-6"))
+
+		logger.Printf("DeepV Server enabled, workdir=%s", workDir)
+	}
+
 	// OpenRouter 免费模型（启动时动态拉取，fallback 链自动构建）
 	var openRouterChain []string
 	if cfg.OpenRouterAPIKey != "" {
@@ -125,7 +151,6 @@ func main() {
 	if cfg.EasyClawAPIKey != "" {
 		router.RegisterChain("easyclaw-sonnet", []string{"easyclaw"})
 		router.RegisterChain("easyclaw-opus", []string{"easyclaw"})
-		router.RegisterChain("claude-sonnet-4-6", []string{"easyclaw"})
 	}
 	if cfg.GLMAPIKey != "" {
 		// 免费/极低成本模型入口
@@ -136,6 +161,13 @@ func main() {
 		// OpenRouter 免费模型链，覆盖 glm-free 成为 free 的主链
 		router.RegisterChain("free", openRouterChain)
 		router.RegisterChain("openrouter-free", openRouterChain)
+	}
+
+	// DeepV Server 模型链
+	if cfg.DeepVEnabled {
+		router.RegisterChain("deepseek-flash", []string{"deepv-deepseek"})
+		router.RegisterChain("glm-5", []string{"deepv-glm5"})
+		router.RegisterChain("claude-sonnet-4.6", []string{"deepv-claude"})
 	}
 
 	// 创建 Gin 引擎

@@ -1,6 +1,6 @@
 # LLM Gateway
 
-轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团、EasyClaw 四家提供商，支持 OpenAI 与 Anthropic 两套对外接口，并支持自动 fallback。
+轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团、EasyClaw、DeepV 五家提供商，支持 OpenAI 与 Anthropic 两套对外接口，并支持自动 fallback。
 
 ## 快速启动
 
@@ -21,23 +21,31 @@ go build -o gateway . && ./gateway
 
 ### 服务器部署
 
-生产环境：`http://115.190.82.67:8080`
-
-通过 GitHub Actions 自动部署（`.github/workflows/deploy.yml`），推送到 `main` 分支即可触发。
+通过 GitHub Actions 自动部署，推送到 `main` 分支即可触发。
 
 ## 对外接口
 
 ### OpenAI 兼容
 
-- Base URL: `http://localhost:4001/v1`（本地）或 `http://115.190.82.67:8080/v1`（云端）
+- Base URL: `http://localhost:4001/v1`（本地）
 - Chat Completions: `POST /v1/chat/completions`
 
 ### Anthropic 兼容
 
-- Base URL: `http://localhost:4001/v1`（本地）或 `http://115.190.82.67:8080/v1`（云端）
+- Base URL: `http://localhost:4001/v1`（本地）
 - Messages: `POST /v1/messages`
 
-## 推荐模型
+## 支持的模型
+
+### DeepV Server（内部）
+
+| 模型别名 | 实际模型 | 工具调用 |
+|----------|----------|----------|
+| `deepseek-flash` | `deepseek-v4-flash` | ✅ |
+| `glm-5` | `glm-5` | ✅ |
+| `claude-sonnet-4-6` | `claude-sonnet-4-6` | ✅ |
+
+### 外部提供商
 
 | 模型名 | 提供商 | 说明 |
 |--------|--------|------|
@@ -55,7 +63,7 @@ go build -o gateway . && ./gateway
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://115.190.82.67:8080/v1",
+    "ANTHROPIC_BASE_URL": "http://localhost:4001/v1",
     "ANTHROPIC_AUTH_TOKEN": "你的 LITELLM_MASTER_KEY"
   }
 }
@@ -66,7 +74,7 @@ go build -o gateway . && ./gateway
 ### OpenAI 风格
 
 ```bash
-curl -X POST http://115.190.82.67:8080/v1/chat/completions \
+curl -X POST http://localhost:4001/v1/chat/completions \
   -H "Authorization: Bearer sk-xxx" \
   -H "Content-Type: application/json" \
   -d '{"model":"coding","messages":[{"role":"user","content":"hi"}]}'
@@ -75,7 +83,7 @@ curl -X POST http://115.190.82.67:8080/v1/chat/completions \
 ### Anthropic 风格
 
 ```bash
-curl -X POST http://115.190.82.67:8080/v1/messages \
+curl -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-xxx" \
   -H "Content-Type: application/json" \
   -d '{"model":"coding-anthropic","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
@@ -107,6 +115,7 @@ litellm-gateway/
 | 文档 | 说明 |
 |------|------|
 | [go-gateway/README.md](go-gateway/README.md) | Go 网关完整文档（架构、模型列表、部署） |
+| [docs/deepv-integration-plan.md](docs/deepv-integration-plan.md) | DeepV Server 接入文档 |
 | [docs/openai-compatible-providers.md](docs/openai-compatible-providers.md) | 上游提供商 OpenAI 兼容接口整理 |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | 面向 agent 的技术指南 |
 
@@ -120,6 +129,8 @@ litellm-gateway/
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
 | `OPENROUTER_API_KEY` | 否 | OpenRouter key（启用免费模型） |
+| `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
+| `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |
 | `PORT` | 否 | 监听端口（默认 4000） |
 
 ## 资源占用

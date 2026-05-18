@@ -303,9 +303,9 @@ make docker-run    # Docker Compose 启动
 
 ### 完整地址
 
-- 对外地址: `http://115.190.82.67:8080`
-- OpenAI 接口: `http://115.190.82.67:8080/v1/chat/completions`
-- Anthropic 接口: `http://115.190.82.67:8080/v1/messages`
+- 对外地址: `http://localhost:4001`
+- OpenAI 接口: `http://localhost:4001/v1/chat/completions`
+- Anthropic 接口: `http://localhost:4001/v1/messages`
 
 ### 方式一：GitHub Actions（推荐）
 
@@ -320,7 +320,7 @@ make docker-run    # Docker Compose 启动
 
 | Secret | 说明 |
 |--------|------|
-| `DEPLOY_HOST` | 服务器 IP，如 `115.190.82.67` |
+| `DEPLOY_HOST` | 服务器 IP，如 `your-server-ip` |
 | `DEPLOY_USER` | SSH 用户名，如 `root` |
 | `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（完整内容，含换行） |
 | `LITELLM_MASTER_KEY` | 网关认证 token |
@@ -341,7 +341,7 @@ make docker-run    # Docker Compose 启动
 2. 把代码推送到 `main` 分支
 3. GitHub Actions 自动触发部署
 4. 在 Actions 页面查看部署进度和健康检查结果
-5. 部署完成后访问 `http://115.190.82.67:8080/health` 验证
+5. 部署完成后访问 `http://localhost:4001/health` 验证
 
 ### 方式二：手动部署
 
@@ -356,7 +356,7 @@ docker build -t go-llm-gateway:latest .
 
 ```bash
 # SSH 到服务器
-ssh user@115.190.82.67
+ssh user@your-server-ip
 
 # 创建 .env
 mkdir -p /opt/go-gateway
@@ -396,17 +396,17 @@ iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
 
 ```bash
 # 健康检查
-curl http://115.190.82.67:8080/health
+curl http://localhost:4001/health
 # {"status":"ok"}
 
 # OpenAI 风格
-curl -X POST http://115.190.82.67:8080/v1/chat/completions \
+curl -X POST http://localhost:4001/v1/chat/completions \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
   -d '{"model":"coding","messages":[{"role":"user","content":"hi"}]}'
 
 # Anthropic 风格
-curl -X POST http://115.190.82.67:8080/v1/messages \
+curl -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
   -d '{"model":"coding-anthropic","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
@@ -417,7 +417,7 @@ curl -X POST http://115.190.82.67:8080/v1/messages \
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://115.190.82.67:8080/v1",
+    "ANTHROPIC_BASE_URL": "http://localhost:4001/v1",
     "ANTHROPIC_AUTH_TOKEN": "sk-local-gateway-xxx"
   }
 }
