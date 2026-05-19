@@ -29,9 +29,10 @@ type openAIToolCall struct {
 }
 
 type openAIMessage struct {
-	Role      string           `json:"role"`
-	Content   string           `json:"content"`
-	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"` // for tool result messages
 }
 
 type openAIRequest struct {
@@ -343,29 +344,48 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 		switch m.Role {
 		case "user":
 			// user 消息：可能是普通文本，也可能包含 tool_result block
-			// 把所有 text 和 tool_result content 拼成字符串
-			text := m.Content.String()
-			if text == "" {
-				// content 是数组但 String() 为空，说明全是 tool_result 或其他非 text block
-				// 把 tool_result 的文字内容拼出来
-				for _, b := range m.Content.blocks {
-					if b.Type == "tool_result" {
-						// tool_result.content 可能是字符串或数组
-						for _, inner := range b.ContentBlocks {
-							if inner.Type == "text" {
-								text += inner.Text
-							}
-						}
-						if b.ContentStr != "" {
-							text += b.ContentStr
-						}
-					}
+			// 先检查是否有 tool_result
+			var toolResults []ContentBlock
+			var textContent string
+
+			for _, b := range m.Content.blocks {
+				if b.Type == "tool_result" {
+					toolResults = append(toolResults, b)
+				} else if b.Type == "text" {
+					textContent += b.Text
 				}
 			}
-			if text == "" {
-				text = "(tool result)"
+
+			// 如果有 tool_result，需要生成 role: "tool" 的消息
+			if len(toolResults) > 0 {
+				for _, tr := range toolResults {
+					// tool_result 的内容
+					var resultContent string
+					for _, inner := range tr.ContentBlocks {
+						if inner.Type == "text" {
+							resultContent += inner.Text
+						}
+					}
+					if tr.ContentStr != "" {
+						resultContent = tr.ContentStr
+					}
+					if resultContent == "" {
+						resultContent = "(tool result)"
+					}
+
+					msgs = append(msgs, openAIMessage{
+						Role:       "tool",
+						Content:    resultContent,
+						ToolCallID: tr.ToolUseID, // 关联到 tool_use 的 ID
+					})
+				}
+			} else if textContent != "" {
+				// 普通文本消息
+				msgs = append(msgs, openAIMessage{Role: "user", Content: textContent})
+			} else {
+				// 空内容
+				msgs = append(msgs, openAIMessage{Role: "user", Content: m.Content.String()})
 			}
-			msgs = append(msgs, openAIMessage{Role: "user", Content: text})
 		case "assistant":
 			// assistant 消息：可能含 text 和 tool_use block
 			// OpenAI 格式：tool_use 写进 ToolCalls，text 写进 Content
