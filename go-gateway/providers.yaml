@@ -2,6 +2,15 @@
 # 支持两种类型：openai（OpenAI 兼容格式）和 anthropic（Anthropic 兼容格式）
 
 providers:
+  # Artizan Cloud（GPT-5.5）
+  - name: artizan
+    type: openai
+    url: https://artizancloud.com/v1/chat/completions
+    api_key_env: ARTIZAN_API_KEY
+    models:
+      - id: gpt-5.5
+        aliases: [gpt-5, artizan-gpt]
+
   # 智谱 GLM
   - name: glm
     type: openai
