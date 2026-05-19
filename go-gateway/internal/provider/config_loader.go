@@ -123,26 +123,35 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 
 	// 注册提供商
 	for _, pc := range cfg.Providers {
-		p, err := registry.Create(&pc)
+		// 创建基础 provider
+		baseProvider, err := registry.Create(&pc)
 		if err != nil {
 			logger.Printf("Warning: failed to create provider %s: %v", pc.Name, err)
 			continue
 		}
 
-		router.RegisterProvider(pc.Name, p)
-		logger.Printf("Registered provider: %s (type=%s, url=%s)", pc.Name, pc.Type, pc.URL)
-
-		// 为每个模型注册链
+		// 为每个模型创建独立的 provider 实例（绑定模型 ID）
 		for _, mc := range pc.Models {
-			router.RegisterChain(mc.ID, []string{pc.Name})
-			modelToProvider[mc.ID] = pc.Name
+			providerName := fmt.Sprintf("%s-%s", pc.Name, mc.ID)
+
+			// 创建绑定模型的 provider
+			boundProvider := NewBoundModelProviderWrapper(baseProvider, mc.ID)
+			router.RegisterProvider(providerName, boundProvider)
+
+			// 注册模型 ID 到 provider 的映射
+			router.RegisterChain(mc.ID, []string{providerName})
+			modelToProvider[mc.ID] = providerName
 
 			// 注册别名
 			for _, alias := range mc.Aliases {
-				router.RegisterChain(alias, []string{pc.Name})
-				modelToProvider[alias] = pc.Name
+				router.RegisterChain(alias, []string{providerName})
+				modelToProvider[alias] = providerName
 			}
+
+			logger.Printf("Registered model: %s -> %s (provider=%s)", mc.ID, mc.ID, providerName)
 		}
+
+		logger.Printf("Registered provider: %s (type=%s, url=%s)", pc.Name, pc.Type, pc.URL)
 	}
 
 	// 注册 fallback 链
@@ -152,4 +161,23 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 	}
 
 	return modelToProvider, nil
+}
+
+// BoundModelProviderWrapper 包装一个 provider 并绑定特定模型
+type BoundModelProviderWrapper struct {
+	Provider
+	boundModel string
+}
+
+// NewBoundModelProviderWrapper 创建绑定模型的 provider 包装器
+func NewBoundModelProviderWrapper(p Provider, model string) *BoundModelProviderWrapper {
+	return &BoundModelProviderWrapper{
+		Provider:p,
+		boundModel: model,
+	}
+}
+
+// BoundModel 返回绑定的模型名
+func (w *BoundModelProviderWrapper) BoundModel() string {
+	return w.boundModel
 }
