@@ -26,8 +26,8 @@ providers:
 
   # 小米 MiMo
   - name: mimo
-    type: openai
-    url: https://token-plan-cn.xiaomimimo.com/v1/chat/completions
+    type: anthropic
+    url: https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages
     api_key_env: MIMO_API_KEY
     models:
       - id: mimo-v2.5
