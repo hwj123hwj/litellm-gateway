@@ -19,6 +19,30 @@ go build -o gateway . && ./gateway
 
 网关默认监听 `:4001`。
 
+### 添加新提供商
+
+无需修改代码！只需编辑 `providers.yaml` 文件：
+
+```yaml
+providers:
+  # 添加新的 OpenAI 兼容提供商
+  - name: my-provider
+    type: openai  # 或 anthropic
+    url: https://api.example.com/v1/chat/completions
+    api_key_env: MY_PROVIDER_API_KEY  # 环境变量名
+    models:
+      - id: gpt-5.5
+        aliases: [gpt-5]  # 模型别名
+```
+
+然后在 `.env` 中添加 API key：
+
+```
+MY_PROVIDER_API_KEY=sk-xxx
+```
+
+重启 gateway 即可使用新模型。
+
 ### 服务器部署
 
 通过 GitHub Actions 自动部署，推送到 `main` 分支即可触发。

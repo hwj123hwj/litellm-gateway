@@ -25,7 +25,58 @@ func main() {
 	// 初始化路由器
 	router := provider.NewRouter(logger)
 
-	// 注册提供商
+	// 尝试从 providers.yaml 加载配置
+	configPath := "providers.yaml"
+	if _, err := os.Stat(configPath); err == nil {
+		logger.Printf("Loading providers from %s", configPath)
+		if _, err := provider.SetupProvidersFromConfig(router, configPath, logger); err != nil {
+			logger.Printf("Warning: failed to load providers.yaml: %v, using defaults", err)
+		}
+	} else {
+		logger.Printf("providers.yaml not found, using default providers")
+		setupDefaultProviders(router, cfg, logger)
+	}
+
+	// DeepV Server 提供商（需要特殊认证，始终在代码中处理）
+	if cfg.DeepVEnabled {
+		setupDeepVProviders(router, cfg, logger)
+	}
+
+	// OpenRouter 免费模型（动态拉取）
+	if cfg.OpenRouterAPIKey != "" {
+		setupOpenRouterProviders(router, cfg, logger)
+	}
+
+	// 创建 Gin 引擎
+	gin.SetMode(gin.ReleaseMode)
+	engine := gin.New()
+	engine.Use(middleware.Logging(logger))
+	engine.Use(auth.BearerAuth(cfg.MasterKey, logger))
+
+	// 注册路由
+	msgHandler := handlers.NewMessageHandler(router, logger)
+	chatHandler := handlers.NewChatCompletionsHandler(router, logger)
+	modelHandler := handlers.NewModelHandler(router, logger)
+	healthHandler := handlers.NewHealthHandler(router, logger)
+
+	engine.POST("/v1/messages", msgHandler.Handle)
+	engine.POST("/v1/chat/completions", chatHandler.Handle)
+	engine.GET("/v1/models", modelHandler.Handle)
+	engine.GET("/health", healthHandler.Handle)
+	// 兼容不带 /v1 前缀的客户端
+	engine.POST("/messages", msgHandler.Handle)
+	engine.POST("/chat/completions", chatHandler.Handle)
+	engine.GET("/models", modelHandler.Handle)
+
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	logger.Printf("Server listening on %s", addr)
+	if err := engine.Run(addr); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
+}
+
+// setupDefaultProviders 设置默认提供商（当 providers.yaml 不存在时使用）
+func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
 	if cfg.GLMAPIKey != "" {
 		router.RegisterProvider("glm-anthropic", provider.NewAnthropicProvider(&provider.Config{
 			Name:      "glm-anthropic",
@@ -73,7 +124,6 @@ func main() {
 		}))
 	}
 	if cfg.GLMAPIKey != "" {
-		// GLM coding plan（OpenAI 兼容接口，复用智谱 key）
 		router.RegisterProvider("glm-free", provider.NewOpenAIProvider(&provider.Config{
 			Name:   "glm-free",
 			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
@@ -81,120 +131,70 @@ func main() {
 		}))
 	}
 
-	// DeepV Server 提供商（支持 deepseek-v4-flash, glm-5, claude-sonnet-4.6）
-	if cfg.DeepVEnabled {
-		workDir := cfg.DeepVWorkDir
-		if workDir == "" {
-			workDir, _ = os.Getwd()
-		}
-		// DeepV Server URL (非流式)
-		deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
-
-		// 注册各个模型（每个 provider 绑定特定模型）
-		router.RegisterProvider("deepv-deepseek", provider.NewDeepVProvider(&provider.Config{
-			Name:   "deepv-deepseek",
-			URL:    deepvURL,
-		}, workDir, "deepseek-v4-flash"))
-		router.RegisterProvider("deepv-glm5", provider.NewDeepVProvider(&provider.Config{
-			Name:   "deepv-glm5",
-			URL:    deepvURL,
-		}, workDir, "glm-5"))
-		router.RegisterProvider("deepv-claude", provider.NewDeepVProvider(&provider.Config{
-			Name:   "deepv-claude",
-			URL:    deepvURL,
-		}, workDir, "claude-sonnet-4-6"))
-
-		logger.Printf("DeepV Server enabled, workdir=%s", workDir)
-	}
-
-	// OpenRouter 免费模型（启动时动态拉取，fallback 链自动构建）
-	var openRouterChain []string
-	if cfg.OpenRouterAPIKey != "" {
-		freeModels, err := provider.FetchFreeModels(cfg.OpenRouterAPIKey, 5)
-		if err != nil {
-			logger.Printf("Warning: failed to fetch OpenRouter free models: %v", err)
-		} else {
-			logger.Printf("OpenRouter: loaded %d free models", len(freeModels))
-			for i, m := range freeModels {
-				name := fmt.Sprintf("openrouter-free-%d", i)
-				p := provider.NewOpenRouterProvider(name, m.ID, cfg.OpenRouterAPIKey)
-				router.RegisterProvider(name, p)
-				openRouterChain = append(openRouterChain, name)
-				// 为每个模型注册简称 chain，如 "nemotron" "qwen3-coder"
-				if alias := provider.ModelAlias(m.ID); alias != "" {
-					router.RegisterChain(alias, []string{name})
-				}
-				logger.Printf("  [%d] %s (ctx=%dK)", i, m.ID, m.ContextLength/1000)
-			}
-		}
-	}
-
-	// 注册 fallback 链（对齐 config.yaml 模型别名）
+	// 注册 fallback 链
 	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
-	router.RegisterChain("glm-haiku", []string{"glm"})
-	router.RegisterChain("glm-sonnet", []string{"glm"})
-	router.RegisterChain("glm-opus", []string{"glm"})
-	router.RegisterChain("mimo-haiku", []string{"mimo"})
-	router.RegisterChain("mimo-sonnet", []string{"mimo"})
-	router.RegisterChain("mimo-opus", []string{"mimo"})
-	router.RegisterChain("longcat-sonnet", []string{"longcat"})
-	router.RegisterChain("longcat-opus", []string{"longcat"})
 	router.RegisterChain("coding-anthropic", []string{"glm-anthropic", "mimo-anthropic", "longcat-anthropic"})
-	router.RegisterChain("glm-haiku-anthropic", []string{"glm-anthropic"})
-	router.RegisterChain("glm-sonnet-anthropic", []string{"glm-anthropic"})
-	router.RegisterChain("glm-opus-anthropic", []string{"glm-anthropic"})
-	router.RegisterChain("mimo-haiku-anthropic", []string{"mimo-anthropic"})
-	router.RegisterChain("mimo-sonnet-anthropic", []string{"mimo-anthropic"})
-	router.RegisterChain("mimo-opus-anthropic", []string{"mimo-anthropic"})
-	router.RegisterChain("longcat-sonnet-anthropic", []string{"longcat-anthropic"})
-	router.RegisterChain("longcat-opus-anthropic", []string{"longcat-anthropic"})
 	if cfg.EasyClawAPIKey != "" {
 		router.RegisterChain("easyclaw-sonnet", []string{"easyclaw"})
 		router.RegisterChain("easyclaw-opus", []string{"easyclaw"})
 	}
 	if cfg.GLMAPIKey != "" {
-		// 免费/极低成本模型入口
 		router.RegisterChain("free", []string{"glm-free"})
-		router.RegisterChain("glm-flash", []string{"glm-free"})
 	}
+}
+
+// setupDeepVProviders 设置 DeepV Server 提供商
+func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
+	workDir := cfg.DeepVWorkDir
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
+
+	router.RegisterProvider("deepv-deepseek", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-deepseek",
+		URL:  deepvURL,
+	}, workDir, "deepseek-v4-flash"))
+	router.RegisterProvider("deepv-glm5", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-glm5",
+		URL:  deepvURL,
+	}, workDir, "glm-5"))
+	router.RegisterProvider("deepv-claude", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-claude",
+		URL:  deepvURL,
+	}, workDir, "claude-sonnet-4-6"))
+
+	router.RegisterChain("deepseek-flash", []string{"deepv-deepseek"})
+	router.RegisterChain("glm-5", []string{"deepv-glm5"})
+	router.RegisterChain("claude-sonnet-4.6", []string{"deepv-claude"})
+	router.RegisterChain("claude-sonnet-4-6", []string{"deepv-claude"})
+
+	logger.Printf("DeepV Server enabled, workdir=%s", workDir)
+}
+
+// setupOpenRouterProviders 设置 OpenRouter 免费模型
+func setupOpenRouterProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
+	freeModels, err := provider.FetchFreeModels(cfg.OpenRouterAPIKey, 5)
+	if err != nil {
+		logger.Printf("Warning: failed to fetch OpenRouter free models: %v", err)
+		return
+	}
+
+	logger.Printf("OpenRouter: loaded %d free models", len(freeModels))
+	var openRouterChain []string
+	for i, m := range freeModels {
+		name := fmt.Sprintf("openrouter-free-%d", i)
+		p := provider.NewOpenRouterProvider(name, m.ID, cfg.OpenRouterAPIKey)
+		router.RegisterProvider(name, p)
+		openRouterChain = append(openRouterChain, name)
+		if alias := provider.ModelAlias(m.ID); alias != "" {
+			router.RegisterChain(alias, []string{name})
+		}
+		logger.Printf("  [%d] %s (ctx=%dK)", i, m.ID, m.ContextLength/1000)
+	}
+
 	if len(openRouterChain) > 0 {
-		// OpenRouter 免费模型链，覆盖 glm-free 成为 free 的主链
 		router.RegisterChain("free", openRouterChain)
 		router.RegisterChain("openrouter-free", openRouterChain)
-	}
-
-	// DeepV Server 模型链
-	if cfg.DeepVEnabled {
-		router.RegisterChain("deepseek-flash", []string{"deepv-deepseek"})
-		router.RegisterChain("glm-5", []string{"deepv-glm5"})
-		router.RegisterChain("claude-sonnet-4.6", []string{"deepv-claude"})
-		router.RegisterChain("claude-sonnet-4-6", []string{"deepv-claude"}) // 别名，兼容连字符格式
-	}
-
-	// 创建 Gin 引擎
-	gin.SetMode(gin.ReleaseMode)
-	engine := gin.New()
-	engine.Use(middleware.Logging(logger))
-	engine.Use(auth.BearerAuth(cfg.MasterKey, logger))
-
-	// 注册路由
-	msgHandler := handlers.NewMessageHandler(router, logger)
-	chatHandler := handlers.NewChatCompletionsHandler(router, logger)
-	modelHandler := handlers.NewModelHandler(router, logger)
-	healthHandler := handlers.NewHealthHandler(router, logger)
-
-	engine.POST("/v1/messages", msgHandler.Handle)
-	engine.POST("/v1/chat/completions", chatHandler.Handle)
-	engine.GET("/v1/models", modelHandler.Handle)
-	engine.GET("/health", healthHandler.Handle)
-	// 兼容不带 /v1 前缀的客户端
-	engine.POST("/messages", msgHandler.Handle)
-	engine.POST("/chat/completions", chatHandler.Handle)
-	engine.GET("/models", modelHandler.Handle)
-
-	addr := fmt.Sprintf(":%d", cfg.Port)
-	logger.Printf("Server listening on %s", addr)
-	if err := engine.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
 	}
 }
