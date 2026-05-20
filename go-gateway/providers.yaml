@@ -2,14 +2,14 @@
 # 支持两种类型：openai（OpenAI 兼容格式）和 anthropic（Anthropic 兼容格式）
 
 providers:
-  # Artizan Cloud（GPT-5.5）
-  - name: artizan
-    type: openai
-    url: https://artizancloud.com/v1/chat/completions
-    api_key_env: ARTIZAN_API_KEY
-    models:
-      - id: gpt-5.5
-        aliases: [gpt-5, artizan-gpt]
+  # Artizan Cloud（GPT-5.5）- 额度已用完，注释掉改用 SmartAll
+  # - name: artizan
+  #   type: openai
+  #   url: https://artizancloud.com/v1/chat/completions
+  #   api_key_env: ARTIZAN_API_KEY
+  #   models:
+  #     - id: gpt-5.5
+  #       aliases: [gpt-5, artizan-gpt]
 
   # 智谱 GLM
   - name: glm
@@ -58,6 +58,18 @@ providers:
         aliases: [easyclaw-opus]
 
   # DeepV Server（需要特殊认证，在代码中单独处理）
+
+  # SmartAll（GPT-5.5 & DeepSeek）
+  - name: smartall
+    type: openai
+    url: https://ai.smartall.cloud/v1/chat/completions
+    api_key_env: SMARTALL_API_KEY
+    models:
+      - id: gpt-5.5
+        aliases: [gpt-5, sm-gpt55, sm-gpt5]
+      - id: deepseek-ai/deepseek-v4-flash
+        aliases: [ds, sm-ds, deepseek-flash, deepseek-v4-flash]
+
   # 如果要添加新的 OpenAI 兼容提供商，只需在这里添加：
 
   # 示例：添加一个新的提供商

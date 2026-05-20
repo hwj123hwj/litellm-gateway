@@ -89,10 +89,17 @@ type openAIStreamChunkChoice struct {
 	FinishReason *string           `json:"finish_reason"`
 }
 
+type openAIStreamToolCallDelta struct {
+	Index    int                    `json:"index"`
+	ID       string                 `json:"id,omitempty"`
+	Type     string                 `json:"type,omitempty"`
+	Function openAIChatToolFunction `json:"function,omitempty"`
+}
+
 type openAIStreamDelta struct {
-	Role      string               `json:"role,omitempty"`
-	Content   string               `json:"content,omitempty"`
-	ToolCalls []openAIChatToolCall `json:"tool_calls,omitempty"`
+	Role      string                      `json:"role,omitempty"`
+	Content   string                      `json:"content,omitempty"`
+	ToolCalls []openAIStreamToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 func NewChatCompletionsHandler(router *provider.Router, logger *log.Logger) *openAIChatCompletionsHandler {
@@ -358,6 +365,8 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 			}
 		}
 		if done {
+			eventType = ""
+			dataLines = nil
 			_, err := fmt.Fprint(w, "data: [DONE]\n\n")
 			return err
 		}
@@ -440,7 +449,23 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 				},
 			}
 		}
-		return nil, false, nil
+		return &openAIStreamChunkResponse{
+			ID:      currentID,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   currentModel,
+			Choices: []openAIStreamChunkChoice{{
+				Index: 0,
+				Delta: openAIStreamDelta{ToolCalls: []openAIStreamToolCallDelta{{
+					Index: evt.Index,
+					ID:    evt.Block.ID,
+					Type:  "function",
+					Function: openAIChatToolFunction{
+						Name: evt.Block.Name,
+					},
+				}}},
+			}},
+		}, false, nil
 	case "content_block_delta":
 		var meta struct {
 			Delta struct {
@@ -492,7 +517,12 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 				Model:   currentModel,
 				Choices: []openAIStreamChunkChoice{{
 					Index: 0,
-					Delta: openAIStreamDelta{ToolCalls: []openAIChatToolCall{*call}},
+					Delta: openAIStreamDelta{ToolCalls: []openAIStreamToolCallDelta{{
+						Index: evt.Index,
+						Function: openAIChatToolFunction{
+							Arguments: evt.Delta.PartialJSON,
+						},
+					}}},
 				}},
 			}, false, nil
 		default:

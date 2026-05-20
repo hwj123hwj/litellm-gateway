@@ -29,6 +29,41 @@ func (p *AnthropicProvider) URL() string       { return p.config.URL }
 func (p *AnthropicProvider) APIKey() string    { return p.config.APIKey }
 func (p *AnthropicProvider) UseBearer() bool   { return p.config.UseBearer }
 
+// ForwardStream 转发流式请求到提供商（Anthropic SSE 直接透传）
+func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {
+	req.Stream = true
+	_ = req.SetRawField("stream", true)
+
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal stream request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.URL, bytes.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("create stream request: %w", err)
+	}
+	p.setHeaders(httpReq)
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("send stream request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		var errResp ErrorResponse
+		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error.Message != "" {
+			return fmt.Errorf("provider error: %s", errResp.Error.Message)
+		}
+		return fmt.Errorf("provider error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	_, err = io.Copy(w, resp.Body)
+	return err
+}
+
 // ForwardRequest 转发请求到提供商（非流式）
 func (p *AnthropicProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
 	reqBody, err := json.Marshal(req)

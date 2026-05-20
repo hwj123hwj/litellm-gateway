@@ -343,32 +343,41 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "user":
-			// user 消息：可能是普通文本，也可能包含 tool_result block
-			// 先检查是否有 tool_result
-			var toolResults []ContentBlock
-			var textContent string
-
-			for _, b := range m.Content.blocks {
-				if b.Type == "tool_result" {
-					toolResults = append(toolResults, b)
-				} else if b.Type == "text" {
-					textContent += b.Text
-				}
+			blocks := m.Content.Blocks()
+			if len(blocks) == 0 {
+				msgs = append(msgs, openAIMessage{Role: "user", Content: m.Content.String()})
+				continue
 			}
 
-			// 如果有 tool_result，需要生成 role: "tool" 的消息
-			if len(toolResults) > 0 {
-				for _, tr := range toolResults {
-					// tool_result 的内容
-					var resultContent string
-					for _, inner := range tr.ContentBlocks {
+			var textParts []string
+			flushUserText := func() {
+				if len(textParts) == 0 {
+					return
+				}
+				msgs = append(msgs, openAIMessage{
+					Role:    "user",
+					Content: strings.Join(textParts, ""),
+				})
+				textParts = nil
+			}
+
+			for _, b := range blocks {
+				switch b.Type {
+				case "text":
+					textParts = append(textParts, b.Text)
+				case "tool_result":
+					flushUserText()
+
+					var resultParts []string
+					for _, inner := range b.ContentBlocks {
 						if inner.Type == "text" {
-							resultContent += inner.Text
+							resultParts = append(resultParts, inner.Text)
 						}
 					}
-					if tr.ContentStr != "" {
-						resultContent = tr.ContentStr
+					if b.ContentStr != "" {
+						resultParts = []string{b.ContentStr}
 					}
+					resultContent := strings.Join(resultParts, "")
 					if resultContent == "" {
 						resultContent = "(tool result)"
 					}
@@ -376,22 +385,18 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 					msgs = append(msgs, openAIMessage{
 						Role:       "tool",
 						Content:    resultContent,
-						ToolCallID: tr.ToolUseID, // 关联到 tool_use 的 ID
+						ToolCallID: b.ToolUseID,
 					})
 				}
-			} else if textContent != "" {
-				// 普通文本消息
-				msgs = append(msgs, openAIMessage{Role: "user", Content: textContent})
-			} else {
-				// 空内容
-				msgs = append(msgs, openAIMessage{Role: "user", Content: m.Content.String()})
 			}
+
+			flushUserText()
 		case "assistant":
 			// assistant 消息：可能含 text 和 tool_use block
 			// OpenAI 格式：tool_use 写进 ToolCalls，text 写进 Content
 			var content string
 			var toolCalls []openAIToolCall
-			for _, b := range m.Content.blocks {
+			for _, b := range m.Content.Blocks() {
 				switch b.Type {
 				case "text":
 					content += b.Text
@@ -410,7 +415,7 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 					})
 				}
 			}
-			if len(m.Content.blocks) == 0 {
+			if len(m.Content.Blocks()) == 0 {
 				content = m.Content.String()
 			}
 			msgs = append(msgs, openAIMessage{

@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -172,7 +174,7 @@ type BoundModelProviderWrapper struct {
 // NewBoundModelProviderWrapper 创建绑定模型的 provider 包装器
 func NewBoundModelProviderWrapper(p Provider, model string) *BoundModelProviderWrapper {
 	return &BoundModelProviderWrapper{
-		Provider:p,
+		Provider:   p,
 		boundModel: model,
 	}
 }
@@ -180,4 +182,13 @@ func NewBoundModelProviderWrapper(p Provider, model string) *BoundModelProviderW
 // BoundModel 返回绑定的模型名
 func (w *BoundModelProviderWrapper) BoundModel() string {
 	return w.boundModel
+}
+
+// ForwardStream 转发到底层支持流式的 provider
+func (w *BoundModelProviderWrapper) ForwardStream(ctx context.Context, req *Request, out io.Writer) error {
+	sp, ok := w.Provider.(StreamProvider)
+	if !ok {
+		return fmt.Errorf("provider %s does not support streaming", w.Provider.Name())
+	}
+	return sp.ForwardStream(ctx, req, out)
 }

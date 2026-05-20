@@ -74,6 +74,26 @@ make run
 | `/chat/completions` | POST | Bearer | `/v1/chat/completions` 的短路径兼容别名 |
 | `/messages` | POST | Bearer | `/v1/messages` 的短路径兼容别名 |
 
+### 日志查看
+
+```bash
+# 查看最新 50 行日志
+tail -50 /tmp/gw.log
+
+# 实时跟踪日志
+# 新开一个终端窗口，运行：
+tail -f /tmp/gw.log
+
+# 搜索特定模型的错误
+tail -100 /tmp/gw.log | grep -E "mimo|glm|longcat|artizan|smartall"
+
+# 只看错误
+tail -100 /tmp/gw.log | grep -E "error|Error|failed"
+```
+
+> 日志文件位置：`/tmp/gw.log`
+> 日志会被 `pkill` + 重启覆盖，如需保留历史日志请重定向到其他文件。
+
 ### 健康检查
 
 ```bash
