@@ -55,7 +55,7 @@ jobs:
           set -e
 
           cd /opt/go-gateway
-          docker build --no-cache -t go-gateway:latest .
+          docker build -t go-gateway:latest .
 
           docker stop go-gateway 2>/dev/null || true
           docker rm go-gateway 2>/dev/null || true
