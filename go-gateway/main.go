@@ -42,6 +42,11 @@ func main() {
 		setupDeepVProviders(router, cfg, logger)
 	}
 
+	// GitHub Copilot
+	if cfg.CopilotToken != "" {
+		setupCopilotProviders(router, cfg, logger)
+	}
+
 	// OpenRouter 免费模型（动态拉取）
 	if cfg.OpenRouterAPIKey != "" {
 		setupOpenRouterProviders(router, cfg, logger)
@@ -89,6 +94,11 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
 			APIKey: cfg.GLMAPIKey,
 		}))
+		router.RegisterProvider("glm-free", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "glm-free",
+			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+			APIKey: cfg.GLMAPIKey,
+		}))
 	}
 	if cfg.MIMOAPIKey != "" {
 		router.RegisterProvider("mimo-anthropic", provider.NewAnthropicProvider(&provider.Config{
@@ -123,23 +133,32 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			APIKey: cfg.EasyClawAPIKey,
 		}))
 	}
-	if cfg.GLMAPIKey != "" {
-		router.RegisterProvider("glm-free", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "glm-free",
-			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
-			APIKey: cfg.GLMAPIKey,
-		}))
-	}
 
-	// 注册 fallback 链
+	// 注册 fallback 链（与 providers.yaml 别名规则一致）
 	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
 	router.RegisterChain("coding-anthropic", []string{"glm-anthropic", "mimo-anthropic", "longcat-anthropic"})
+	// GLM 核心别名
+	if cfg.GLMAPIKey != "" {
+		router.RegisterChain("glm-sonnet", []string{"glm"})
+		router.RegisterChain("glm-haiku", []string{"glm"})
+		router.RegisterChain("glm-opus", []string{"glm"})
+		router.RegisterChain("glm-flash", []string{"glm-free"})
+		router.RegisterChain("free", []string{"glm-free"})
+	}
+	// MiMo 核心别名
+	if cfg.MIMOAPIKey != "" {
+		router.RegisterChain("mimo-sonnet", []string{"mimo"})
+		router.RegisterChain("mimo-opus", []string{"mimo"})
+	}
+	// LongCat 核心别名
+	if cfg.LongcatAPIKey != "" {
+		router.RegisterChain("longcat-sonnet", []string{"longcat"})
+		router.RegisterChain("longcat-opus", []string{"longcat"})
+	}
+	// EasyClaw
 	if cfg.EasyClawAPIKey != "" {
 		router.RegisterChain("easyclaw-sonnet", []string{"easyclaw"})
 		router.RegisterChain("easyclaw-opus", []string{"easyclaw"})
-	}
-	if cfg.GLMAPIKey != "" {
-		router.RegisterChain("free", []string{"glm-free"})
 	}
 }
 
@@ -155,6 +174,10 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 		Name: "deepv-deepseek",
 		URL:  deepvURL,
 	}, workDir, "deepseek-v4-flash"))
+	router.RegisterProvider("deepv-deepseek-pro", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-deepseek-pro",
+		URL:  deepvURL,
+	}, workDir, "deepseek-v4-pro"))
 	router.RegisterProvider("deepv-glm5", provider.NewDeepVProvider(&provider.Config{
 		Name: "deepv-glm5",
 		URL:  deepvURL,
@@ -163,38 +186,97 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 		Name: "deepv-claude",
 		URL:  deepvURL,
 	}, workDir, "claude-sonnet-4-6"))
+	router.RegisterProvider("deepv-kimi", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-kimi",
+		URL:  deepvURL,
+	}, workDir, "kimi-k2.6"))
 
-	router.RegisterChain("deepseek-flash", []string{"deepv-deepseek"})
-	router.RegisterChain("glm-5", []string{"deepv-glm5"})
-	router.RegisterChain("claude-sonnet-4.6", []string{"deepv-claude"})
-	router.RegisterChain("claude-sonnet-4-6", []string{"deepv-claude"})
+	router.RegisterChain("deepv-deepseek-flash", []string{"deepv-deepseek"})
+	router.RegisterChain("deepv-deepseek-pro", []string{"deepv-deepseek-pro"})
+	router.RegisterChain("deepv-glm5", []string{"deepv-glm5"})
+	router.RegisterChain("deepv-claude-sonnet", []string{"deepv-claude"})
+	router.RegisterChain("deepv-kimi", []string{"deepv-kimi"})
 
 	logger.Printf("DeepV Server enabled, workdir=%s", workDir)
 }
 
-// setupOpenRouterProviders 设置 OpenRouter 免费模型
+// setupOpenRouterProviders 设置 OpenRouter 免费模型（动态补充）
+// 固定模型已在 providers.yaml 中注册，此函数只补充新增的免费模型
 func setupOpenRouterProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
-	freeModels, err := provider.FetchFreeModels(cfg.OpenRouterAPIKey, 5)
+	freeModels, err := provider.FetchFreeModels(cfg.OpenRouterAPIKey, 10)
 	if err != nil {
 		logger.Printf("Warning: failed to fetch OpenRouter free models: %v", err)
 		return
 	}
 
-	logger.Printf("OpenRouter: loaded %d free models", len(freeModels))
-	var openRouterChain []string
-	for i, m := range freeModels {
-		name := fmt.Sprintf("openrouter-free-%d", i)
-		p := provider.NewOpenRouterProvider(name, m.ID, cfg.OpenRouterAPIKey)
-		router.RegisterProvider(name, p)
-		openRouterChain = append(openRouterChain, name)
-		if alias := provider.ModelAlias(m.ID); alias != "" {
-			router.RegisterChain(alias, []string{name})
-		}
-		logger.Printf("  [%d] %s (ctx=%dK)", i, m.ID, m.ContextLength/1000)
+	// 获取已注册的 chain，避免覆盖固定模型
+	existingChains := make(map[string]bool)
+	for _, name := range router.ListChains() {
+		existingChains[name] = true
 	}
 
-	if len(openRouterChain) > 0 {
-		router.RegisterChain("free", openRouterChain)
-		router.RegisterChain("openrouter-free", openRouterChain)
+	logger.Printf("OpenRouter: fetched %d free models", len(freeModels))
+	var openRouterChain []string
+	addedCount := 0
+	for i, m := range freeModels {
+		alias := provider.ModelAlias(m.ID)
+		freeAlias := ""
+		if alias != "" {
+			freeAlias = fmt.Sprintf("free-%s", alias)
+		}
+
+		// 如果该别名已注册（固定模型），跳过
+		if freeAlias != "" && existingChains[freeAlias] {
+			logger.Printf("  [%d] %s → %s (already fixed, skip)", i, m.ID, freeAlias)
+			continue
+		}
+
+		providerName := fmt.Sprintf("openrouter-extra-%d", addedCount)
+		p := provider.NewOpenRouterProvider(providerName, m.ID, cfg.OpenRouterAPIKey)
+		router.RegisterProvider(providerName, p)
+		openRouterChain = append(openRouterChain, providerName)
+		addedCount++
+
+		// 注册 free-别名 链
+		if freeAlias != "" {
+			router.RegisterChain(freeAlias, []string{providerName})
+			logger.Printf("  [%d] %s → %s (ctx=%dK)", i, m.ID, freeAlias, m.ContextLength/1000)
+		} else {
+			logger.Printf("  [%d] %s (ctx=%dK)", i, m.ID, m.ContextLength/1000)
+		}
 	}
+
+	// free 链：如果 providers.yaml 已注册了 free 链，不覆盖
+	if !existingChains["free"] && len(openRouterChain) > 0 {
+		router.RegisterChain("free", openRouterChain)
+	}
+
+	logger.Printf("OpenRouter: added %d extra free models", addedCount)
+}
+
+// setupCopilotProviders 设置 GitHub Copilot 提供商
+func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
+	// 可选：刷新 token
+	if cfg.CopilotGithubToken != "" {
+		newToken, expiresAt, err := provider.RefreshCopilotToken(cfg.CopilotGithubToken)
+		if err != nil {
+			logger.Printf("Warning: failed to refresh Copilot token: %v, using existing token", err)
+		} else {
+			cfg.CopilotToken = newToken
+			logger.Printf("Copilot token refreshed, expires at %d", expiresAt)
+		}
+	}
+
+	copilotConfig := &provider.Config{
+		Name:   "copilot",
+		URL:    "", // 会从 token 解析
+		APIKey: cfg.CopilotToken,
+	}
+
+	router.RegisterProvider("copilot", provider.NewCopilotProvider(copilotConfig, cfg.CopilotGithubToken))
+	router.RegisterChain("copilot-opus", []string{"copilot"})
+	router.RegisterChain("copilot-sonnet", []string{"copilot"})
+	router.RegisterChain("copilot-haiku", []string{"copilot"})
+
+	logger.Printf("GitHub Copilot enabled")
 }

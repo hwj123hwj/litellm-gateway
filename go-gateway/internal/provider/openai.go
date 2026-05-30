@@ -35,14 +35,21 @@ type openAIMessage struct {
 	ToolCallID string           `json:"tool_call_id,omitempty"` // for tool result messages
 }
 
+// chatTemplateKwargs 用于 skyclaw 等模型的 chat_template_kwargs 字段
+type chatTemplateKwargs struct {
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
+}
+
 type openAIRequest struct {
-	Model       string           `json:"model"`
-	Messages    []openAIMessage  `json:"messages"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Temperature float64          `json:"temperature,omitempty"`
-	TopP        float64          `json:"top_p,omitempty"`
-	Stream      bool             `json:"stream,omitempty"`
-	Tools       []openAITool     `json:"tools,omitempty"`
+	Model             string             `json:"model"`
+	Messages          []openAIMessage    `json:"messages"`
+	MaxTokens         int                `json:"max_tokens,omitempty"`
+	Temperature       float64            `json:"temperature,omitempty"`
+	TopP              float64            `json:"top_p,omitempty"`
+	TopK              int                `json:"top_k,omitempty"`
+	Stream            bool               `json:"stream,omitempty"`
+	Tools             []openAITool       `json:"tools,omitempty"`
+	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
 }
 
 // openAITool 是 OpenAI 格式的工具定义
@@ -432,6 +439,20 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 		Model:     req.Model,
 		Messages:  msgs,
 		MaxTokens: req.MaxTokens,
+	}
+
+	// 透传额外字段（例如 skyclaw 的 top_k、chat_template_kwargs 等）
+	if v, ok := req.raw["top_k"]; ok {
+		_ = json.Unmarshal(v, &oaiReq.TopK)
+	}
+	if v, ok := req.raw["chat_template_kwargs"]; ok {
+		_ = json.Unmarshal(v, &oaiReq.ChatTemplateKwargs)
+	}
+	if v, ok := req.raw["temperature"]; ok {
+		_ = json.Unmarshal(v, &oaiReq.Temperature)
+	}
+	if v, ok := req.raw["top_p"]; ok {
+		_ = json.Unmarshal(v, &oaiReq.TopP)
 	}
 
 	// 转换 tools：Anthropic input_schema → OpenAI parameters

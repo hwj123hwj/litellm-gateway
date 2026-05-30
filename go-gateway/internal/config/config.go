@@ -19,6 +19,8 @@ type Config struct {
 	LongcatAPIKey    string
 	EasyClawAPIKey   string
 	OpenRouterAPIKey string // OpenRouter 免费模型网关
+	CopilotToken     string // GitHub Copilot token（短期有效，需要定期刷新）
+	CopilotGithubToken string // GitHub OAuth token（用于刷新 Copilot token）
 	DeepVEnabled     bool   // DeepV Server 是否启用
 	DeepVWorkDir     string // DeepV 工作目录（用于获取 Git 信息）
 	Env              string
@@ -36,8 +38,10 @@ func Load() (*Config, error) {
 		MIMOAPIKey:       getEnv("MIMO_API_KEY", ""),
 		LongcatAPIKey:    getEnv("LONGCAT_API_KEY", ""),
 		EasyClawAPIKey:   getEnv("EASYCLAW_API_KEY", ""),
-		OpenRouterAPIKey: getEnv("OPENROUTER_API_KEY", ""),
-		DeepVEnabled:     getEnvBool("DEEPV_ENABLED", false),
+		OpenRouterAPIKey:   getEnv("OPENROUTER_API_KEY", ""),
+		CopilotToken:       getEnv("COPILOT_TOKEN", ""),
+		CopilotGithubToken: getEnv("COPILOT_GITHUB_TOKEN", ""),
+		DeepVEnabled:       getEnvBool("DEEPV_ENABLED", false),
 		DeepVWorkDir:     getEnv("DEEPV_WORK_DIR", ""),
 		Env:              getEnv("ENV", "development"),
 	}

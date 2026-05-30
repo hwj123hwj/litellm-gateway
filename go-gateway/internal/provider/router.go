@@ -97,32 +97,39 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 	return nil, fmt.Errorf("all providers failed, last error: %w", lastErr)
 }
 
-	// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 config.yaml）
+	// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 providers.yaml）
+	// 仅在默认 setup 路径（无 providers.yaml）下使用
 	func (r *Router) mapModelName(modelName, providerName string) string {
 		mappings := map[string]map[string]string{
-			"coding": {
-				"glm":      "glm-5-turbo",
-				"mimo":     "mimo-v2.5",
-				"longcat":  "LongCat-Flash-Chat",
-				"easyclaw": "claude-sonnet-4-6",
-			},
-			"glm-haiku":  {"glm": "glm-4.7"},
+			// GLM 核心：保留 haiku/sonnet/opus 别名
 			"glm-sonnet": {"glm": "glm-5-turbo"},
+			"glm-haiku":  {"glm": "glm-4.7"},
 			"glm-opus":   {"glm": "glm-5.1"},
-			"mimo-haiku":  {"mimo": "mimo-v2.5"},
+			"glm-flash":  {"glm": "glm-4.7-flash"},
+			// MiMo 核心：保留 haiku/sonnet/opus 别名
 			"mimo-sonnet": {"mimo": "mimo-v2.5"},
 			"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
+			// LongCat 核心：保留 sonnet/opus 别名
 			"longcat-sonnet": {"longcat": "LongCat-Flash-Chat"},
 			"longcat-opus":   {"longcat": "LongCat-2.0-Preview"},
+			// EasyClaw：供应商+模型名
 			"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
 			"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
-			// DeepV Server 模型
-			"deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
-			"glm-5":          {"deepv-glm5": "glm-5"},
-			"claude-sonnet-4-6": {"deepv-claude": "claude-sonnet-4-6"},
-			// 免费/极低成本模型
-			"free":      {"glm-free": "glm-4.7-flash"},
-			"glm-flash": {"glm-free": "glm-4.7-flash"},
+			// SkyClaw：独家模型，sky- 前缀好记
+			"sky-opus": {"apifree": "skywork-ai/skyclaw-v1"},
+			"sky-lite": {"apifree": "skywork-ai/skyclaw-v1-lite"},
+			// DeepV Server：供应商+模型名（加 deepv- 前缀）
+			"deepv-deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
+			"deepv-deepseek-pro":   {"deepv-deepseek-pro": "deepseek-v4-pro"},
+			"deepv-glm5":           {"deepv-glm5": "glm-5"},
+			"deepv-claude-sonnet":  {"deepv-claude": "claude-sonnet-4-6"},
+			"deepv-kimi":           {"deepv-kimi": "kimi-k2.6"},
+			// 免费/低成本
+			"free": {"glm-free": "glm-4.7-flash"},
+			// GitHub Copilot（免费套餐，Gemini 为主）
+			"copilot-opus":   {"copilot": "gemini-3.1-pro-preview"},
+			"copilot-sonnet": {"copilot": "gemini-3-flash-preview"},
+			"copilot-haiku":  {"copilot": "gpt-4o-2024-11-20"},
 		}
 
 	if mapping, ok := mappings[modelName]; ok {

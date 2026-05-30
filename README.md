@@ -43,6 +43,17 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 重启 gateway 即可使用新模型。
 
+> **注意：DeepV 模型需要重新编译**
+>
+> DeepV Server 模型（如 `deepseek-flash`、`deepseek-pro`、`kimi`、`glm-5` 等）在 `main.go` 的 `setupDeepVProviders` 函数中硬编码注册。
+>
+> 添加新的 DeepV 模型需要：
+> 1. 修改 `main.go` 中的 `setupDeepVProviders` 函数
+> 2. 重新编译：`go build -o gateway .`
+> 3. 重启服务：`pkill gateway; ./gateway &`
+>
+> 这与 `providers.yaml` 配置的普通提供商不同，因为 DeepV 需要特殊的认证机制。
+
 ### 服务器部署
 
 通过 GitHub Actions 自动部署，推送到 `main` 分支即可触发。

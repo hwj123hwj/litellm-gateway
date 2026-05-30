@@ -50,13 +50,22 @@ func TestRouterMapModelName(t *testing.T) {
 		providerName string
 		expected     string
 	}{
-		{"coding", "glm", "glm-5-turbo"},
-		{"coding", "mimo", "mimo-v2.5"},
-		{"coding", "longcat", "LongCat-Flash-Chat"},
 		{"glm-sonnet", "glm", "glm-5-turbo"},
 		{"glm-opus", "glm", "glm-5.1"},
+		{"glm-haiku", "glm", "glm-4.7"},
+		{"glm-flash", "glm", "glm-4.7-flash"},
+		{"mimo-sonnet", "mimo", "mimo-v2.5"},
 		{"mimo-opus", "mimo", "mimo-v2.5-pro"},
+		{"longcat-sonnet", "longcat", "LongCat-Flash-Chat"},
 		{"longcat-opus", "longcat", "LongCat-2.0-Preview"},
+		{"easyclaw-sonnet", "easyclaw", "claude-sonnet-4-6"},
+		{"deepv-deepseek-flash", "deepv-deepseek", "deepseek-v4-flash"},
+		{"deepv-glm5", "deepv-glm5", "glm-5"},
+		{"deepv-claude-sonnet", "deepv-claude", "claude-sonnet-4-6"},
+		{"deepv-kimi", "deepv-kimi", "kimi-k2.6"},
+		{"sky-opus", "apifree", "skywork-ai/skyclaw-v1"},
+		{"sky-lite", "apifree", "skywork-ai/skyclaw-v1-lite"},
+		{"free", "glm-free", "glm-4.7-flash"},
 	}
 
 	for _, tt := range tests {

@@ -1,30 +1,26 @@
 # 模型提供商配置
-# 支持两种类型：openai（OpenAI 兼容格式）和 anthropic（Anthropic 兼容格式）
+# 命名规则：
+#   - GLM / MiMo / LongCat 核心供应商保留分级别名 (haiku/sonnet/opus)
+#   - 其他供应商统一用 供应商-模型名 格式，不占用通用别名
+#   - chain 中引用 model-bound provider（格式：供应商名-模型ID）
 
 providers:
-  # Artizan Cloud（GPT-5.5）- 额度已用完，注释掉改用 SmartAll
-  # - name: artizan
-  #   type: openai
-  #   url: https://artizancloud.com/v1/chat/completions
-  #   api_key_env: ARTIZAN_API_KEY
-  #   models:
-  #     - id: gpt-5.5
-  #       aliases: [gpt-5, artizan-gpt]
-
-  # 智谱 GLM
+  # 智谱 GLM（核心供应商，保留 haiku/sonnet/opus 别名）
   - name: glm
     type: openai
     url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     api_key_env: GLM_API_KEY
     models:
       - id: glm-5-turbo
-        aliases: [glm-sonnet, glm-5]
+        aliases: [glm-sonnet]
       - id: glm-4.7
         aliases: [glm-haiku]
       - id: glm-5.1
         aliases: [glm-opus]
+      - id: glm-4.7-flash
+        aliases: [glm-flash]
 
-  # 小米 MiMo
+  # 小米 MiMo（核心供应商，保留 haiku/sonnet/opus 别名）
   - name: mimo
     type: anthropic
     url: https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages
@@ -35,7 +31,7 @@ providers:
       - id: mimo-v2.5-pro
         aliases: [mimo-opus]
 
-  # 美团 LongCat
+  # 美团 LongCat（核心供应商，保留 haiku/sonnet/opus 别名）
   - name: longcat
     type: openai
     url: https://api.longcat.chat/openai/chat/completions
@@ -46,7 +42,7 @@ providers:
       - id: LongCat-2.0-Preview
         aliases: [longcat-opus]
 
-  # EasyClaw（真实 Claude，Anthropic 格式）
+  # EasyClaw（Claude 代理）
   - name: easyclaw
     type: openai
     url: https://api.easyclaw.work/v1/chat/completions
@@ -57,8 +53,6 @@ providers:
       - id: claude-opus-4-6
         aliases: [easyclaw-opus]
 
-  # DeepV Server（需要特殊认证，在代码中单独处理）
-
   # SmartAll（GPT-5.5 & DeepSeek）
   - name: smartall
     type: openai
@@ -66,36 +60,48 @@ providers:
     api_key_env: SMARTALL_API_KEY
     models:
       - id: gpt-5.5
-        aliases: [gpt-5, sm-gpt55, sm-gpt5]
+        aliases: [smartall-gpt55]
       - id: deepseek-ai/deepseek-v4-flash
-        aliases: [ds, sm-ds, deepseek-flash, deepseek-v4-flash]
+        aliases: [smartall-deepseek-flash]
 
-  # 如果要添加新的 OpenAI 兼容提供商，只需在这里添加：
+  # APIFree（SkyClaw agent 模型 — 独家，用 sky- 前缀好记）
+  - name: apifree
+    type: openai
+    url: https://api.apifree.ai/agent/v1/chat/completions
+    api_key_env: APIFREE_API_KEY
+    models:
+      - id: skywork-ai/skyclaw-v1
+        aliases: [sky-opus]
+      - id: skywork-ai/skyclaw-v1-lite
+        aliases: [sky-lite]
 
-  # 示例：添加一个新的提供商
-  # - name: my-provider
-  #   type: openai
-  #   url: https://api.example.com/v1/chat/completions
-  #   api_key_env: MY_PROVIDER_API_KEY
-  #   models:
-  #     - id: gpt-5.5
-  #       aliases: [gpt-5]
-  #     - id: claude-sonnet-4-6
-  #       aliases: [claude-sonnet]
+  # OpenRouter 免费模型（固定 2 个核心免费模型）
+  - name: openrouter
+    type: openai
+    url: https://openrouter.ai/api/v1/chat/completions
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      - id: deepseek/deepseek-v4-flash:free
+        aliases: [free-deepseek]
+        provider_name: or-deepseek
+      - id: moonshotai/kimi-k2.6:free
+        aliases: [free-kimi]
+        provider_name: or-kimi
 
 # Fallback 链配置
 # 当第一个提供商失败时，自动尝试下一个
+# 引用格式：供应商名-模型ID（与 SetupProvidersFromConfig 注册的 provider 名一致）
 chains:
   coding:
-    - glm
-    - mimo
-    - longcat
+    - glm-glm-5-turbo
+    - mimo-mimo-v2.5
+    - longcat-LongCat-Flash-Chat
 
   coding-anthropic:
-    - glm
-    - mimo
-    - longcat
+    - mimo-mimo-v2.5
+    - longcat-LongCat-Flash-Chat
 
+  # free 兜底链：deepseek → kimi
   free:
-    - openrouter-free-0
-    - openrouter-free-1
+    - or-deepseek
+    - or-kimi

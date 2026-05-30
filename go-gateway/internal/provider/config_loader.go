@@ -21,8 +21,9 @@ type ProviderConfig struct {
 
 // ModelConfig 模型配置
 type ModelConfig struct {
-	ID      string   `yaml:"id"`
-	Aliases []string `yaml:"aliases"`
+	ID           string   `yaml:"id"`
+	Aliases      []string `yaml:"aliases"`
+	ProviderName string   `yaml:"provider_name,omitempty"` // 可选：自定义 provider 实例名，默认为 供应商名-模型ID
 }
 
 // ProvidersConfig 提供商配置文件
@@ -134,7 +135,10 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 
 		// 为每个模型创建独立的 provider 实例（绑定模型 ID）
 		for _, mc := range pc.Models {
-			providerName := fmt.Sprintf("%s-%s", pc.Name, mc.ID)
+			providerName := mc.ProviderName
+			if providerName == "" {
+				providerName = fmt.Sprintf("%s-%s", pc.Name, mc.ID)
+			}
 
 			// 创建绑定模型的 provider
 			boundProvider := NewBoundModelProviderWrapper(baseProvider, mc.ID)
