@@ -55,7 +55,7 @@ jobs:
           set -e
 
           cd /opt/go-gateway
-          docker build -t go-gateway:latest .
+          docker build --no-cache -t go-gateway:latest .
 
           docker stop go-gateway 2>/dev/null || true
           docker rm go-gateway 2>/dev/null || true
@@ -74,13 +74,13 @@ jobs:
             -e LOG_LEVEL=info \
             go-gateway:latest
 
-          sleep 2
+          sleep 5
 
           if curl -sf http://localhost:8080/health; then
             echo "✅ Deploy OK"
           else
             echo "⚠️  Health check failed"
-            docker logs --tail 20 go-gateway
+            docker logs --tail 50 go-gateway
             exit 1
           fi
           REMOTE_SCRIPT
