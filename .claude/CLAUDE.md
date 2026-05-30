@@ -13,6 +13,7 @@
 - 小米 MiMo — Anthropic 兼容格式（带思考块）
 - 美团 LongCat — Anthropic 兼容格式（需要 Bearer token）
 - EasyClaw — OpenAI 格式（需要格式转换）
+- GitHub Copilot — OpenAI 兼容格式（Gemini 模型为主）
 
 **两套实现：**
 1. `go-gateway/` — Go 实现，18 MB 内存，推荐
@@ -36,6 +37,7 @@ go-gateway/
 │   │   ├── types.go               # 公共类型：Request, Response, Provider 接口, StreamProvider 接口
 │   │   ├── anthropic.go           # Anthropic 兼容 provider（GLM/MiMo/LongCat）
 │   │   ├── openai.go              # OpenAI 格式 provider（EasyClaw），含格式转换
+│   │   ├── copilot.go             # GitHub Copilot provider（Gemini 模型为主）
 │   │   └── router.go              # 路由器：provider 注册、model→provider 映射、fallback
 │   ├── handlers/
 │   │   ├── messages.go            # POST /v1/messages，支持流式和非流式
@@ -89,9 +91,14 @@ easyclaw-sonnet → claude-sonnet-4-6（发给 EasyClaw）
 coding      → glm-5-turbo / mimo-v2.5 / LongCat-Flash-Chat（fallback 链）
 glm-flash   → glm-4.7-flash（智谱免费，复用 GLM_API_KEY）
 free        → OpenRouter top-5 免费模型 fallback 链（启动时动态构建）
+copilot-opus → gemini-3.1-pro-preview（GitHub Copilot，免费教育套餐）
+copilot-sonnet → gemini-3-flash-preview（GitHub Copilot，免费教育套餐）
+copilot-haiku → gpt-4o-2024-11-20（GitHub Copilot，免费教育套餐）
 ```
 
 > **特别说明**：OpenRouter 免费模型由 `OpenRouterProvider` 实现 `BoundModelProvider` 接口，模型名已在构造时绑定，不过 `mapModelName`。每个免费模型的简称（如 `nemotron`、`owl`）在启动时动态注册为独立 chain。
+
+> **Copilot 说明**：GitHub Copilot 使用 OAuth device code flow 认证，token 有效期约 30 分钟。代码支持自动刷新（需要 `COPILOT_GITHUB_TOKEN`）。免费教育套餐（`free_educational_quota`）可用的模型：Gemini 3.1 Pro Preview、Gemini 3 Flash Preview、GPT-4o 等。Codex 模型不支持 `/chat/completions` 端点。
 
 ### 环境变量
 
@@ -103,6 +110,8 @@ free        → OpenRouter top-5 免费模型 fallback 链（启动时动态构�
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
 | `OPENROUTER_API_KEY` | 否 | OpenRouter key，启用免费模型（`/model free`），启动时自动拉取模型列表 |
+| `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
+| `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `PORT` | 否 | 监听端口，默认 4000 |
 | `LOG_LEVEL` | 否 | 日志级别，默认 info |
 

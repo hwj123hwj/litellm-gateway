@@ -105,6 +105,9 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
 | `mimo-sonnet` | 小米 MiMo | 思考模型 |
 | `longcat-sonnet` | 美团 LongCat | 长上下文 |
+| `copilot-opus` | GitHub Copilot (Gemini 3.1 Pro) | 免费教育套餐 |
+| `copilot-sonnet` | GitHub Copilot (Gemini 3 Flash) | 免费教育套餐 |
+| `copilot-haiku` | GitHub Copilot (GPT-4o) | 免费教育套餐 |
 
 ## 配置 Claude Code
 
@@ -179,6 +182,8 @@ litellm-gateway/
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
 | `OPENROUTER_API_KEY` | 否 | OpenRouter key（启用免费模型） |
+| `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
+| `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `ARTIZAN_API_KEY` | 否 | Artizan Cloud key（启用 GPT-5.5） |
 | `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
 | `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |
