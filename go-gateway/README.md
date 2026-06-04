@@ -71,8 +71,10 @@ make run
 | `/v1/models` | GET | Bearer | 列出可用模型 |
 | `/v1/chat/completions` | POST | Bearer | OpenAI 兼容接口，支持流式 |
 | `/v1/messages` | POST | Bearer | Anthropic 兼容接口，支持流式 |
+| `/v1/responses` | POST | Bearer | OpenAI Responses API，Codex CLI 专用，支持流式 |
 | `/chat/completions` | POST | Bearer | `/v1/chat/completions` 的短路径兼容别名 |
 | `/messages` | POST | Bearer | `/v1/messages` 的短路径兼容别名 |
+| `/responses` | POST | Bearer | `/v1/responses` 的短路径兼容别名 |
 
 ### 日志查看
 
@@ -205,6 +207,22 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 > EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换。
 
+### ChatGPT Codex（GPT-5.5，OAuth）
+
+使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用 OpenAI Codex API，不需要额外 API key。
+
+| 模型名 | 实际模型 | 说明 |
+|--------|---------|------|
+| `gpt-5.5` | gpt-5.5 | ChatGPT Plus/Pro |
+| `gpt-5.5-pro` | gpt-5.5-pro | ChatGPT Pro |
+| `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
+| `o4-mini` | o4-mini | 推理模型 |
+
+> **前提条件**：
+> 1. 在 `.env` 中设置 `HTTP_PROXY=http://127.0.0.1:7890`（国内网络需要代理）
+> 2. 已通过 Codex Desktop 登录 ChatGPT，网关会自动读取 `~/.codex/auth.json` 中的 OAuth token
+> 3. 请求走 Responses API 透传（`/v1/responses`），不需要格式转换
+
 ### 智谱免费模型
 
 | 模型名 | 实际模型 | 说明 |
@@ -244,6 +262,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `LONGCAT_API_KEY` | 否 | — | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | — | EasyClaw API key |
 | `OPENROUTER_API_KEY` | 否 | — | OpenRouter key，启用免费模型 (`/model free`) |
+| `HTTP_PROXY` | 否 | — | HTTP 代理地址（如 `http://127.0.0.1:7890`），启用 ChatGPT Codex |
 | `PORT` | 否 | 4000 | 监听端口 |
 | `LOG_LEVEL` | 否 | info | 日志级别 |
 
@@ -254,7 +273,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 ## 架构
 
 ```text
-OpenAI / Anthropic 客户端
+OpenAI / Anthropic / Codex CLI 客户端
             │
             ▼
 ┌─────────────────────────────┐
@@ -265,7 +284,8 @@ OpenAI / Anthropic 客户端
 │                             │
 │  Handlers                   │
 │  ├── /v1/chat/completions   │
-│  └── /v1/messages           │
+│  ├── /v1/messages           │
+│  └── /v1/responses          │
 │                             │
 │  Router                     │
 │  ┌──────────────────────┐   │
@@ -275,7 +295,8 @@ OpenAI / Anthropic 客户端
 │                             │
 │  Providers                  │
 │  ├── OpenAIProvider         │──▶ GLM coding / MiMo / LongCat / EasyClaw
-│  └── AnthropicProvider      │──▶ GLM / MiMo / LongCat Anthropic
+│  ├── AnthropicProvider      │──▶ GLM / MiMo / LongCat Anthropic
+│  └── ChatGPTProvider        │──▶ ChatGPT Codex (OAuth token + proxy)
 └─────────────────────────────┘
 ```
 

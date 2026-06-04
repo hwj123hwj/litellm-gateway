@@ -1,6 +1,6 @@
 # LLM Gateway
 
-轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团、EasyClaw、DeepV 五家提供商，支持 OpenAI 与 Anthropic 两套对外接口，并支持自动 fallback。
+轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团、EasyClaw、DeepV 五家提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
 
 ## 快速启动
 
@@ -64,6 +64,7 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 - Base URL: `http://localhost:4001/v1`（本地）
 - Chat Completions: `POST /v1/chat/completions`
+- Responses API: `POST /v1/responses`（Codex CLI 专用）
 
 ### Anthropic 兼容
 
@@ -79,6 +80,16 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `gpt-5.5` | `gpt-5.5` | ✅ |
 | `gpt-5` | `gpt-5.5` | ✅ |
 | `artizan-gpt` | `gpt-5.5` | ✅ |
+
+### ChatGPT Codex（GPT-5.5，OAuth）
+
+使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用，不需要额外 API key。
+
+| 模型别名 | 实际模型 | 说明 |
+|----------|----------|------|
+| `gpt-5.5` | gpt-5.5 | ChatGPT Plus/Pro（需 HTTP_PROXY） |
+| `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
+| `o4-mini` | o4-mini | 推理模型 |
 
 ### DeepV Server（内部）
 
@@ -185,6 +196,7 @@ litellm-gateway/
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `ARTIZAN_API_KEY` | 否 | Artizan Cloud key（启用 GPT-5.5） |
+| `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
 | `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
 | `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |
 | `PORT` | 否 | 监听端口（默认 4000） |

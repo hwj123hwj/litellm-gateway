@@ -2,7 +2,28 @@
 
 ## 项目简介
 
-LLM API 网关，支持多家提供商（GLM、MiMo、LongCat、EasyClaw、Copilot）。技术细节见 [go-gateway/README.md](go-gateway/README.md)。
+LLM API 网关，支持多家提供商（GLM、MiMo、LongCat、EasyClaw、Copilot、ChatGPT）。技术细节见 [go-gateway/README.md](go-gateway/README.md)。
+
+## Codex CLI 集成
+
+网关支持 Codex CLI（`wire_api = "responses"`），通过 `/v1/responses` 端点提供 OpenAI Responses API 格式。
+
+### 模型切换脚本
+
+`~/.local/bin/codex-model` 用于快速切换 Codex 使用的模型：
+
+```bash
+codex-model gpt      # GPT-5.5 (ChatGPT OAuth，走网关+代理)
+codex-model glm      # GLM Sonnet (智谱)
+codex-model haiku    # GLM Haiku (智谱快速)
+codex-model mimo     # MiMo Sonnet (小米)
+codex-model longcat  # LongCat Sonnet (美团)
+codex-model claude   # Claude Sonnet (EasyClaw)
+codex-model coding   # Auto Fallback (智谱→小米→美团)
+codex-model status   # 查看当前配置
+```
+
+所有模型统一走网关 `localhost:4001`，不需要 Codex 直连外部 API。
 
 ## 开发准则
 
@@ -52,4 +73,5 @@ gh run list --limit 3
 | LongCat | OpenAI | LONGCAT_API_KEY |
 | EasyClaw | OpenAI | EASYCLAW_API_KEY |
 | Copilot | OpenAI | COPILOT_TOKEN + COPILOT_GITHUB_TOKEN |
+| ChatGPT | Responses API (透传) | HTTP_PROXY + ~/.codex/auth.json |
 | OpenRouter | OpenAI | OPENROUTER_API_KEY |
