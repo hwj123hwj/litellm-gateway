@@ -11,19 +11,20 @@ import (
 
 // Config 应用全局配置
 type Config struct {
-	Port             int
-	LogLevel         string
-	MasterKey        string
-	GLMAPIKey        string
-	MIMOAPIKey       string
-	LongcatAPIKey    string
-	EasyClawAPIKey   string
-	OpenRouterAPIKey string // OpenRouter 免费模型网关
-	CopilotToken     string // GitHub Copilot token（短期有效，需要定期刷新）
+	Port               int
+	LogLevel           string
+	MasterKey          string
+	GLMAPIKey          string
+	MIMOAPIKey         string
+	LongcatAPIKey      string
+	EasyClawAPIKey     string
+	OpenRouterAPIKey   string // OpenRouter 免费模型网关
+	CopilotToken       string // GitHub Copilot token（短期有效，需要定期刷新）
 	CopilotGithubToken string // GitHub OAuth token（用于刷新 Copilot token）
-	DeepVEnabled     bool   // DeepV Server 是否启用
-	DeepVWorkDir     string // DeepV 工作目录（用于获取 Git 信息）
-	Env              string
+	DeepVEnabled       bool   // DeepV Server 是否启用
+	DeepVWorkDir       string // DeepV 工作目录（用于获取 Git 信息）
+	HTTPProxy          string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
+	Env                string
 }
 
 // Load 从环境变量加载配置
@@ -43,6 +44,7 @@ func Load() (*Config, error) {
 		CopilotGithubToken: getEnv("COPILOT_GITHUB_TOKEN", ""),
 		DeepVEnabled:       getEnvBool("DEEPV_ENABLED", false),
 		DeepVWorkDir:     getEnv("DEEPV_WORK_DIR", ""),
+		HTTPProxy:        getEnv("HTTP_PROXY", ""),
 		Env:              getEnv("ENV", "development"),
 	}
 

@@ -42,6 +42,20 @@ func main() {
 		setupDeepVProviders(router, cfg, logger)
 	}
 
+	// ChatGPT Codex（使用 OAuth token，需要代理）
+	proxyURL := cfg.HTTPProxy
+	if proxyURL == "" {
+		proxyURL = os.Getenv("HTTPS_PROXY")
+	}
+	if proxyURL == "" {
+		proxyURL = os.Getenv("https_proxy")
+	}
+	if proxyURL != "" {
+		setupChatGPTProvider(router, proxyURL, logger)
+	} else {
+		logger.Printf("No HTTP_PROXY set, ChatGPT Codex provider disabled")
+	}
+
 	// GitHub Copilot
 	if cfg.CopilotToken != "" {
 		setupCopilotProviders(router, cfg, logger)
@@ -61,16 +75,19 @@ func main() {
 	// 注册路由
 	msgHandler := handlers.NewMessageHandler(router, logger)
 	chatHandler := handlers.NewChatCompletionsHandler(router, logger)
+	responsesHandler := handlers.NewResponsesHandler(router, logger)
 	modelHandler := handlers.NewModelHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
 
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.POST("/v1/chat/completions", chatHandler.Handle)
+	engine.POST("/v1/responses", responsesHandler.Handle)
 	engine.GET("/v1/models", modelHandler.Handle)
 	engine.GET("/health", healthHandler.Handle)
 	// 兼容不带 /v1 前缀的客户端
 	engine.POST("/messages", msgHandler.Handle)
 	engine.POST("/chat/completions", chatHandler.Handle)
+	engine.POST("/responses", responsesHandler.Handle)
 	engine.GET("/models", modelHandler.Handle)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -279,4 +296,20 @@ func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *
 	router.RegisterChain("copilot-haiku", []string{"copilot"})
 
 	logger.Printf("GitHub Copilot enabled")
+}
+
+// setupChatGPTProvider 设置 ChatGPT Codex 提供商（使用 OAuth token 走代理）
+func setupChatGPTProvider(router *provider.Router, proxyURL string, logger *log.Logger) {
+	chatgptProvider := provider.NewChatGPTProvider(proxyURL)
+	router.RegisterProvider("chatgpt", chatgptProvider)
+
+	// GPT 模型别名
+	router.RegisterChain("gpt-5.5", []string{"chatgpt"})
+	router.RegisterChain("gpt-5.5-pro", []string{"chatgpt"})
+	router.RegisterChain("gpt-5.4-mini", []string{"chatgpt"})
+	router.RegisterChain("gpt-5.4", []string{"chatgpt"})
+	router.RegisterChain("gpt-5", []string{"chatgpt"})
+	router.RegisterChain("o4-mini", []string{"chatgpt"})
+
+	logger.Printf("ChatGPT Codex provider enabled (proxy: %s)", proxyURL)
 }

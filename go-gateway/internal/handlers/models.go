@@ -22,7 +22,13 @@ func (h *ModelHandler) Handle(c *gin.Context) {
 	chains := h.router.ListChains()
 	models := make([]map[string]string, 0, len(chains))
 	for _, id := range chains {
-		models = append(models, map[string]string{"id": id, "object": "model"})
+		models = append(models, map[string]string{
+			"id":           id,
+			"object":       "model",
+			"slug":         id,
+			"display_name": id,
+			"owned_by":     "custom",
+		})
 	}
-	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models, "models": models})
 }
