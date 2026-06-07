@@ -1,0 +1,99 @@
+#!/bin/bash
+# Codex 模型切换脚本
+# 配合 litellm-gateway 使用，切换 Codex CLI 的模型配置
+#
+# 用法：
+#   codex-model gateway <模型>  → 走网关（默认模型 glm-opus）
+#   codex-model native          → 走 OpenAI 原生认证（GPT-5.5，可看历史对话）
+#   codex-model status          → 查看当前配置
+#
+# 安装：
+#   cp scripts/codex-model ~/.local/bin/codex-model
+#   chmod +x ~/.local/bin/codex-model
+#
+# 网关可用模型：glm-opus, glm-sonnet, glm-haiku, gpt-5.5, gpt-5.4,
+#               gpt-5.4-mini, longcat-sonnet, longcat-opus, coding
+
+CODEX_CONFIG="$HOME/.codex/config.toml"
+GATEWAY_KEY="${LITELLM_MASTER_KEY:-}"
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:4001/v1}"
+
+if [ -z "$GATEWAY_KEY" ]; then
+  # 尝试从 .env 文件读取
+  ENV_FILE="$HOME/Desktop/develop/test/litellm-gateway/go-gateway/.env"
+  if [ -f "$ENV_FILE" ]; then
+    GATEWAY_KEY=$(grep '^LITELLM_MASTER_KEY=' "$ENV_FILE" | cut -d'=' -f2-)
+  fi
+fi
+
+if [ -z "$GATEWAY_KEY" ]; then
+  echo "⚠️  未设置 GATEWAY_KEY，请设置 LITELLM_MASTER_KEY 环境变量或在 .env 中配置"
+  exit 1
+fi
+
+# 网关模式
+write_gateway_config() {
+  local model="$1"
+  cat > "$CODEX_CONFIG" << EOF
+model_provider = "gateway"
+model = "$model"
+model_reasoning_effort = "high"
+disable_response_storage = true
+model_catalog_json = "gateway-model-catalog.json"
+
+[model_providers.gateway]
+name = "my-gateway"
+base_url = "$GATEWAY_URL"
+wire_api = "responses"
+requires_openai_auth = true
+experimental_bearer_token = "$GATEWAY_KEY"
+EOF
+}
+
+# 原生模式：OpenAI 官方认证
+write_native_config() {
+  local model="$1"
+  cat > "$CODEX_CONFIG" << EOF
+model_provider = "openai"
+model = "$model"
+model_reasoning_effort = "high"
+
+[model_providers.gateway]
+name = "my-gateway"
+base_url = "$GATEWAY_URL"
+wire_api = "responses"
+requires_openai_auth = true
+experimental_bearer_token = "$GATEWAY_KEY"
+EOF
+}
+
+MODE="$1"
+MODEL="$2"
+
+case "$MODE" in
+  gateway|gw)
+    # 默认 glm-opus
+    MODEL="${MODEL:-glm-opus}"
+    write_gateway_config "$MODEL"
+    echo "✅ 网关模式 → $MODEL ($GATEWAY_URL)"
+    ;;
+  native)
+    MODEL="${MODEL:-gpt-5.5}"
+    write_native_config "$MODEL"
+    echo "✅ 原生模式 → $MODEL (OpenAI 官方认证)"
+    ;;
+  status)
+    echo "📋 当前 Codex 配置:"
+    grep -E "^(model|model_provider)" "$CODEX_CONFIG" | head -5
+    ;;
+  *)
+    echo "用法: codex-model <模式> [模型]"
+    echo ""
+    echo "  gateway [模型]  → 走网关 (默认 glm-opus)"
+    echo "  native [模型]   → 走 OpenAI 原生认证 (默认 gpt-5.5)"
+    echo "  status          → 查看当前配置"
+    echo ""
+    echo "网关可用模型: glm-opus, glm-sonnet, glm-haiku, gpt-5.5, gpt-5.4,"
+    echo "             gpt-5.4-mini, longcat-sonnet, longcat-opus, coding"
+    ;;
+esac

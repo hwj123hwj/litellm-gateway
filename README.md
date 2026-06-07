@@ -161,6 +161,8 @@ litellm-gateway/
 │   ├── Dockerfile
 │   └── README.md            # 完整文档
 │
+├── scripts/                 # 配套工具脚本
+│   └── codex-model          # Codex CLI 模型切换
 ├── .github/workflows/       # GitHub Actions CI/CD
 ├── docs/                    # 文档
 └── README.md                # 本文件
