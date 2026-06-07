@@ -2,9 +2,9 @@
 
 ## 背景
 
-目前使用多个国产 AI 模型提供商（智谱、小米、美团），它们都提供了 **Anthropic 兼容 API**，可以直接接入 Claude Code。
+目前使用多个 AI 模型提供商（智谱、小米、美团、EasyClaw、APIFree、OpenRouter 等），它们提供 OpenAI 和/或 Anthropic 兼容 API。
 
-**痛点**：Claude Code 同一时间只能配置一个提供商，导致其他家的模型和额度闲置。目前主力用智谱，小米和美团的资源基本浪费。
+**痛点**：Claude Code 同一时间只能配置一个提供商，导致其他家的模型和额度闲置。
 
 ## 目标
 
@@ -17,34 +17,44 @@
 
 ## 模型提供商
 
-所有提供商均暴露 **Anthropic 兼容 API**（`/v1/messages` 端点）。
-
-| 提供商 | API Base | 模型 | 角色 |
+| 提供商 | API 类型 | 模型 | 角色 |
 |--------|----------|------|------|
-| 智谱 BigModel | `https://open.bigmodel.cn/api/anthropic` | glm-4.7, glm-5-turbo, glm-5.1 | 主力（优先） |
-| 小米 MiMo | `https://token-plan-cn.xiaomimimo.com/anthropic` | mimo-v2.5, mimo-v2.5-pro | 备用 1 |
-| 美团 LongCat | `https://api.longcat.chat/anthropic` | LongCat-Flash-Chat | 备用 2 |
+| 智谱 GLM | OpenAI / Anthropic | glm-4.7, glm-5-turbo, glm-5.1, glm-4.7-flash | 主力（优先） |
+| 小米 MiMo | OpenAI / Anthropic | mimo-v2.5, mimo-v2.5-pro | 备用 1 |
+| 美团 LongCat | OpenAI | LongCat-Flash-Chat, LongCat-2.0-Preview | 备用 2 |
+| EasyClaw | OpenAI | claude-sonnet-4-6, claude-opus-4-6 | 真实 Claude |
+| APIFree | OpenAI | skywork-ai/skyclaw-v1, skyclaw-v1-lite | SkyClaw Agent |
+| OpenRouter | OpenAI | 免费模型 + GPT-5.5 | 免费兜底 |
+| ChatGPT Codex | Responses API | gpt-5.5, gpt-5.5-pro, o4-mini | OAuth 直连 |
+| GitHub Copilot | OpenAI | Gemini/GPT 模型 | 免费教育套餐 |
+| DeepV Server | 内部 | deepseek-flash, glm-5 等 | 内部聚合 |
 
 ### 模型分级映射
 
-Claude Code 内部按能力分三个层级，网关为每个层级提供模型映射：
-
-| Claude Code 层级 | 环境变量 | 智谱 | 小米 | 美团 |
-|------------------|----------|------|------|------|
-| Haiku（快速） | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | glm-4.7 | mimo-v2.5 | LongCat-Flash-Chat |
-| Sonnet（主力） | `ANTHROPIC_DEFAULT_SONNET_MODEL` | glm-5-turbo | mimo-v2.5-pro | LongCat-Flash-Chat |
-| Opus（强力） | `ANTHROPIC_DEFAULT_OPUS_MODEL` | glm-5.1 | mimo-v2.5-pro | LongCat-Flash-Chat |
+| Claude Code 层级 | 智谱 | 小米 | 美团 |
+|------------------|------|------|------|
+| Haiku（快速） | glm-haiku (glm-4.7) | — | — |
+| Sonnet（主力） | glm-sonnet (glm-5-turbo) | mimo-sonnet (mimo-v2.5) | longcat-sonnet |
+| Opus（强力） | glm-opus (glm-5.1) | mimo-opus (mimo-v2.5-pro) | longcat-opus |
 
 ## 架构
 
 ```
-Claude Code ──(Anthropic API)──▶ 网关
-                                   ├── 智谱 (Anthropic API)
-                                   ├── 小米 (Anthropic API) ── fallback
-                                   └── 美团 (Anthropic API) ── fallback
+Claude Code / Codex CLI ──▶ 网关 (:4001)
+                              ├── /v1/chat/completions  (OpenAI)
+                              ├── /v1/messages          (Anthropic)
+                              ├── /v1/responses         (Responses API)
+                              │
+                              ├── 智谱 GLM (OpenAI/Anthropic)
+                              ├── 小米 MiMo (Anthropic) ── fallback
+                              ├── 美团 LongCat (OpenAI) ── fallback
+                              ├── EasyClaw (OpenAI)
+                              ├── APIFree (OpenAI)
+                              ├── OpenRouter (OpenAI)
+                              ├── ChatGPT Codex (Responses API, OAuth)
+                              ├── GitHub Copilot (OpenAI)
+                              └── DeepV Server (内部)
 ```
-
-所有上下游都是 Anthropic API 格式，网关只做路由和转发。
 
 ### 部署方式
 
@@ -62,7 +72,7 @@ Claude Code ──(Anthropic API)──▶ 网关
 // ~/.claude/settings.json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:4000/v1",
+    "ANTHROPIC_BASE_URL": "http://localhost:4001/v1",
     "ANTHROPIC_AUTH_TOKEN": "sk-your-gateway-key"
   }
 }
@@ -77,18 +87,24 @@ Claude Code ──(Anthropic API)──▶ 网关
 | 命令 | 效果 | 说明 |
 |------|------|------|
 | `/model coding` | 自动 fallback 组 | 智谱优先，挂了切小米→美团 |
+| `/model coding-anthropic` | Anthropic 风格 fallback | 走 Anthropic API |
+| `/model free` | OpenRouter 免费模型 | 零成本 |
 | `/model glm-haiku` | 智谱 glm-4.7 | 快速任务 |
 | `/model glm-sonnet` | 智谱 glm-5-turbo | 日常编码（推荐） |
 | `/model glm-opus` | 智谱 glm-5.1 | 复杂推理 |
-| `/model mimo-haiku` | 小米 mimo-v2.5 | 小米快速任务 |
-| `/model mimo-sonnet` | 小米 mimo-v2.5-pro | 小米主力 |
+| `/model glm-flash` | 智谱 glm-4.7-flash | 免费模型 |
+| `/model mimo-sonnet` | 小米 mimo-v2.5 | 小米主力 |
 | `/model mimo-opus` | 小米 mimo-v2.5-pro | 小米强力 |
-| `/model longcat` | 美团 LongCat-Flash-Chat | 手动切美团 |
+| `/model longcat-sonnet` | 美团 LongCat | 长上下文 |
+| `/model easyclaw-sonnet` | EasyClaw Claude Sonnet | 真实 Claude |
+| `/model easyclaw-opus` | EasyClaw Claude Opus | 真实 Claude 旗舰 |
+| `/model sky-opus` | APIFree SkyClaw | SkyClaw Agent |
+| `/model gpt-5.5` | ChatGPT Codex | 需 HTTP_PROXY |
 
 ## 验收标准
 
-- [ ] 网关启动正常，Claude Code 通过网关完成一次完整的编码任务
-- [ ] `coding` 组 fallback 正常（关闭智谱后自动切小米/美团）
-- [ ] `/model glm-sonnet`、`/model mimo-sonnet`、`/model longcat` 手动切换正常
-- [ ] `.env` 不在 git 追踪中
-- [ ] 服务器部署时：HTTPS 正常、无认证 key 的请求被拒绝
+- [x] 网关启动正常，Claude Code 通过网关完成一次完整的编码任务
+- [x] `coding` 组 fallback 正常（关闭智谱后自动切小米/美团）
+- [x] `/model glm-sonnet`、`/model mimo-sonnet`、`/model longcat-sonnet` 手动切换正常
+- [x] `.env` 不在 git 追踪中
+- [x] 服务器部署时：无认证 key 的请求被拒绝

@@ -80,6 +80,7 @@ MY_PROVIDER_API_KEY=sk-xxx
 | 模型别名 | 实际模型 | 说明 |
 |----------|----------|------|
 | `gpt-5.5` | gpt-5.5 | ChatGPT Plus/Pro（需 HTTP_PROXY） |
+| `gpt-5.5-pro` | gpt-5.5-pro | ChatGPT Pro |
 | `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
 | `o4-mini` | o4-mini | 推理模型 |
 
@@ -98,6 +99,13 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `easyclaw-sonnet` | `claude-sonnet-4-6` | ✅ |
 | `easyclaw-opus` | `claude-opus-4-6` | ✅ |
 
+### APIFree（SkyClaw Agent）
+
+| 模型别名 | 实际模型 | 说明 |
+|----------|----------|------|
+| `sky-opus` | `skywork-ai/skyclaw-v1` | SkyClaw Agent 模型 |
+| `sky-lite` | `skywork-ai/skyclaw-v1-lite` | SkyClaw 轻量版 |
+
 ### 外部提供商
 
 | 模型名 | 提供商 | 说明 |
@@ -105,7 +113,9 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `coding` | GLM → MiMo → LongCat | **推荐**，OpenAI 风格，自动 fallback |
 | `coding-anthropic` | GLM → MiMo → LongCat | Anthropic 风格 |
 | `free` | OpenRouter 免费模型 | **零成本**，自动 fallback |
+| `glm-flash` | 智谱 GLM | 免费模型 |
 | `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
+| `glm-opus` | 智谱 GLM coding plan | 旗舰模型 |
 | `mimo-sonnet` | 小米 MiMo | 思考模型 |
 | `longcat-sonnet` | 美团 LongCat | 长上下文 |
 | `copilot-opus` | GitHub Copilot (Gemini 3.1 Pro) | 免费教育套餐 |
@@ -186,13 +196,14 @@ litellm-gateway/
 | `MIMO_API_KEY` | 否 | 小米 API key |
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
+| `APIFREE_API_KEY` | 否 | APIFree key（启用 SkyClaw 模型） |
 | `OPENROUTER_API_KEY` | 否 | OpenRouter key（启用免费模型） |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
 | `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
 | `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |
-| `PORT` | 否 | 监听端口（默认 4000） |
+| `PORT` | 否 | 监听端口（默认 4001） |
 
 ## 资源占用
 

@@ -175,7 +175,6 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `glm-haiku` | GLM coding plan | 轻量快速 |
 | `glm-sonnet` | GLM coding plan | 主力模型 |
 | `glm-opus` | GLM coding plan | 旗舰模型 |
-| `mimo-haiku` | MiMo OpenAI | 思考模型 |
 | `mimo-sonnet` | MiMo OpenAI | 思考模型 |
 | `mimo-opus` | MiMo OpenAI | 思考旗舰 |
 | `longcat-sonnet` | LongCat OpenAI | 长上下文 |
@@ -191,7 +190,6 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `glm-haiku-anthropic` | GLM Anthropic | 轻量快速 |
 | `glm-sonnet-anthropic` | GLM Anthropic | 主力模型 |
 | `glm-opus-anthropic` | GLM Anthropic | 旗舰模型 |
-| `mimo-haiku-anthropic` | MiMo Anthropic | 思考模型 |
 | `mimo-sonnet-anthropic` | MiMo Anthropic | 思考模型 |
 | `mimo-opus-anthropic` | MiMo Anthropic | 思考旗舰 |
 | `longcat-sonnet-anthropic` | LongCat Anthropic | 长上下文 |
@@ -206,6 +204,13 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `claude-sonnet-4-6` | claude-sonnet-4-6 | 兼容别名 |
 
 > EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换。
+
+### APIFree（SkyClaw Agent）
+
+| 模型名 | 实际模型 | 说明 |
+|--------|---------|------|
+| `sky-opus` | skywork-ai/skyclaw-v1 | SkyClaw Agent 模型 |
+| `sky-lite` | skywork-ai/skyclaw-v1-lite | SkyClaw 轻量版 |
 
 ### ChatGPT Codex（GPT-5.5，OAuth）
 
@@ -261,9 +266,14 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `MIMO_API_KEY` | 否 | — | 小米 API key |
 | `LONGCAT_API_KEY` | 否 | — | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | — | EasyClaw API key |
+| `APIFREE_API_KEY` | 否 | — | APIFree key（启用 SkyClaw 模型） |
 | `OPENROUTER_API_KEY` | 否 | — | OpenRouter key，启用免费模型 (`/model free`) |
+| `DEEPV_ENABLED` | 否 | false | 启用 DeepV Server（true/false） |
+| `DEEPV_WORK_DIR` | 否 | — | DeepV 工作目录（用于获取 Git 信息） |
+| `COPILOT_TOKEN` | 否 | — | GitHub Copilot token（短期有效，约 30 分钟） |
+| `COPILOT_GITHUB_TOKEN` | 否 | — | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | — | HTTP 代理地址（如 `http://127.0.0.1:7890`），启用 ChatGPT Codex |
-| `PORT` | 否 | 4000 | 监听端口 |
+| `PORT` | 否 | 4001 | 监听端口 |
 | `LOG_LEVEL` | 否 | info | 日志级别 |
 
 未配置 key 的 provider 会被自动跳过，不影响其他 provider 正常工作。

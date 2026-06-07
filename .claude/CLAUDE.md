@@ -69,6 +69,7 @@ gh run list --limit 3
 | MiMo | Anthropic | MIMO_API_KEY |
 | LongCat | OpenAI | LONGCAT_API_KEY |
 | EasyClaw | OpenAI | EASYCLAW_API_KEY |
+| APIFree | OpenAI | APIFREE_API_KEY |
 | Copilot | OpenAI | COPILOT_TOKEN + COPILOT_GITHUB_TOKEN |
 | ChatGPT | Responses API (透传) | HTTP_PROXY + ~/.codex/auth.json |
 | OpenRouter | OpenAI | OPENROUTER_API_KEY |
