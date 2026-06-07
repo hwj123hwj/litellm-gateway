@@ -73,14 +73,6 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 ## 支持的模型
 
-### Artizan Cloud（GPT-5.5）
-
-| 模型别名 | 实际模型 | 工具调用 |
-|----------|----------|----------|
-| `gpt-5.5` | `gpt-5.5` | ✅ |
-| `gpt-5` | `gpt-5.5` | ✅ |
-| `artizan-gpt` | `gpt-5.5` | ✅ |
-
 ### ChatGPT Codex（GPT-5.5，OAuth）
 
 使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用，不需要额外 API key。
@@ -195,7 +187,6 @@ litellm-gateway/
 | `OPENROUTER_API_KEY` | 否 | OpenRouter key（启用免费模型） |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
-| `ARTIZAN_API_KEY` | 否 | Artizan Cloud key（启用 GPT-5.5） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
 | `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
 | `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |

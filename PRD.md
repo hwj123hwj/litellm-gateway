@@ -48,10 +48,11 @@ Claude Code ──(Anthropic API)──▶ 网关
 
 ### 部署方式
 
-| 方式 | 适用场景 | 详细文档 |
-|------|----------|----------|
-| 本地 Docker | 仅本机使用，最简单 | [docs/local-deploy.md](docs/local-deploy.md) |
-| 服务器 + Nginx + HTTPS | 多地点、多设备使用 | [docs/server-deploy.md](docs/server-deploy.md) |
+| 方式 | 适用场景 | 说明 |
+|------|----------|------|
+| 本地运行 | 仅本机使用，最简单 | `go build -o gateway . && ./gateway` |
+| GitHub Actions | 自动构建部署到服务器 | 推送 `main` 分支自动触发，详见 [go-gateway/README.md](go-gateway/README.md) |
+| 手动服务器部署 | 自定义部署 | 详见 [go-gateway/README.md](go-gateway/README.md) |
 
 ## Claude Code 客户端配置
 

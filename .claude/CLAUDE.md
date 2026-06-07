@@ -13,15 +13,12 @@ LLM API 网关，支持多家提供商（GLM、MiMo、LongCat、EasyClaw、Copil
 `~/.local/bin/codex-model` 用于快速切换 Codex 使用的模型：
 
 ```bash
-codex-model gpt      # GPT-5.5 (ChatGPT OAuth，走网关+代理)
-codex-model glm      # GLM Sonnet (智谱)
-codex-model haiku    # GLM Haiku (智谱快速)
-codex-model mimo     # MiMo Sonnet (小米)
-codex-model longcat  # LongCat Sonnet (美团)
-codex-model claude   # Claude Sonnet (EasyClaw)
-codex-model coding   # Auto Fallback (智谱→小米→美团)
-codex-model status   # 查看当前配置
+codex-model gateway <model>  # 走网关（默认 glm-opus）
+codex-model native           # 走 OpenAI 原生认证（GPT-5.5）
+codex-model status           # 查看当前配置
 ```
+
+网关可用模型：`glm-opus`, `glm-sonnet`, `glm-haiku`, `gpt-5.5`, `gpt-5.4-mini`, `longcat-sonnet`, `longcat-opus`, `coding`
 
 所有模型统一走网关 `localhost:4001`，不需要 Codex 直连外部 API。
 

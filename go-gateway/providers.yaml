@@ -53,17 +53,6 @@ providers:
       - id: claude-opus-4-6
         aliases: [easyclaw-opus]
 
-  # SmartAll（GPT-5.5 & DeepSeek）
-  - name: smartall
-    type: openai
-    url: https://ai.smartall.cloud/v1/chat/completions
-    api_key_env: SMARTALL_API_KEY
-    models:
-      - id: gpt-5.5
-        aliases: [smartall-gpt55]
-      - id: deepseek-ai/deepseek-v4-flash
-        aliases: [smartall-deepseek-flash]
-
   # APIFree（SkyClaw agent 模型 — 独家，用 sky- 前缀好记）
   - name: apifree
     type: openai
