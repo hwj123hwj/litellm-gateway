@@ -11,14 +11,13 @@ providers:
     url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     api_key_env: GLM_API_KEY
     models:
+      - id: glm-5.2
+        aliases: [glm-opus]
       - id: glm-5-turbo
         aliases: [glm-sonnet]
       - id: glm-4.7
         aliases: [glm-haiku]
-      - id: glm-5.1
-        aliases: [glm-opus]
       - id: glm-4.7-flash
-        aliases: [glm-flash]
 
   # 小米 MiMo（核心供应商，保留 haiku/sonnet/opus 别名）
   - name: mimo
@@ -31,14 +30,12 @@ providers:
       - id: mimo-v2.5-pro
         aliases: [mimo-opus]
 
-  # 美团 LongCat（核心供应商，保留 haiku/sonnet/opus 别名）
+  # 美团 LongCat
   - name: longcat
     type: openai
     url: https://api.longcat.chat/openai/chat/completions
     api_key_env: LONGCAT_API_KEY
     models:
-      - id: LongCat-Flash-Chat
-        aliases: [longcat-sonnet]
       - id: LongCat-2.0-Preview
         aliases: [longcat-opus]
 
@@ -52,17 +49,6 @@ providers:
         aliases: [easyclaw-sonnet]
       - id: claude-opus-4-6
         aliases: [easyclaw-opus]
-
-  # APIFree（SkyClaw agent 模型 — 独家，用 sky- 前缀好记）
-  - name: apifree
-    type: openai
-    url: https://api.apifree.ai/agent/v1/chat/completions
-    api_key_env: APIFREE_API_KEY
-    models:
-      - id: skywork-ai/skyclaw-v1
-        aliases: [sky-opus]
-      - id: skywork-ai/skyclaw-v1-lite
-        aliases: [sky-lite]
 
   # OpenRouter（GPT + 免费模型）
   - name: openrouter
@@ -87,13 +73,14 @@ chains:
   coding:
     - glm-glm-5-turbo
     - mimo-mimo-v2.5
-    - longcat-LongCat-Flash-Chat
+    - longcat-LongCat-2.0-Preview
 
   coding-anthropic:
     - mimo-mimo-v2.5
-    - longcat-LongCat-Flash-Chat
+    - longcat-LongCat-2.0-Preview
 
   # free 兜底链：deepseek → kimi
   free:
+    - glm-glm-4.7-flash
     - or-deepseek
     - or-kimi

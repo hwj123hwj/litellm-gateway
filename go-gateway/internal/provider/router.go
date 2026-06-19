@@ -102,22 +102,17 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 	func (r *Router) mapModelName(modelName, providerName string) string {
 		mappings := map[string]map[string]string{
 			// GLM 核心：保留 haiku/sonnet/opus 别名
-			"glm-sonnet": {"glm": "glm-5-turbo"},
-			"glm-haiku":  {"glm": "glm-4.7"},
-			"glm-opus":   {"glm": "glm-5.1"},
-			"glm-flash":  {"glm": "glm-4.7-flash"},
+			"glm-opus":     {"glm": "glm-5.2"},
+			"glm-sonnet":   {"glm": "glm-5-turbo"},
+			"glm-haiku":    {"glm": "glm-4.7"},
 			// MiMo 核心：保留 haiku/sonnet/opus 别名
 			"mimo-sonnet": {"mimo": "mimo-v2.5"},
 			"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
-			// LongCat 核心：保留 sonnet/opus 别名
-			"longcat-sonnet": {"longcat": "LongCat-Flash-Chat"},
-			"longcat-opus":   {"longcat": "LongCat-2.0-Preview"},
+			// LongCat 核心：保留 opus 别名
+			"longcat-opus": {"longcat": "LongCat-2.0-Preview"},
 			// EasyClaw：供应商+模型名
 			"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
 			"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
-			// SkyClaw：独家模型，sky- 前缀好记
-			"sky-opus": {"apifree": "skywork-ai/skyclaw-v1"},
-			"sky-lite": {"apifree": "skywork-ai/skyclaw-v1-lite"},
 			// DeepV Server：供应商+模型名（加 deepv- 前缀）
 			"deepv-deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
 			"deepv-deepseek-pro":   {"deepv-deepseek-pro": "deepseek-v4-pro"},
