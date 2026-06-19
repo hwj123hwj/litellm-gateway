@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  HOST_PORT: 8080
+  HOST_PORT: 4001
 
 jobs:
   test:
@@ -99,7 +99,7 @@ jobs:
           ExecStart=/opt/go-gateway/gateway
           Restart=always
           RestartSec=5
-          Environment=PORT=8080
+          Environment=PORT=4001
           Environment=LOG_LEVEL=info
           SERVICEOF
 
@@ -123,7 +123,7 @@ jobs:
           systemctl restart go-gateway
           sleep 3
 
-          if curl -sf http://localhost:8080/health; then
+          if curl -sf http://localhost:4001/health; then
             echo ""
             echo "✅ Deploy OK"
           else
