@@ -7,9 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  CONTAINER_NAME: go-gateway
   HOST_PORT: 8080
-  CONTAINER_PORT: 8080
 
 jobs:
   test:
@@ -38,49 +36,106 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup SSH
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Cross-compile binary
+        working-directory: go-gateway
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o gateway-linux .
+          echo "Binary built: $(ls -lh gateway-linux | awk '{print $5}')"
+
+      - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
 
-      - name: Upload code to server
+      - name: Deploy binary and restart
         run: |
-          rsync -avz --delete --exclude '.git' go-gateway/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/go-gateway/
-
-      - name: Build and run container
-        run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} /bin/bash -s << 'REMOTE_SCRIPT'
           set -e
+          HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new"
+          SCP_CMD="scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new"
 
+          # 1. Upload binary
+          cd go-gateway
+          $SCP_CMD gateway-linux "$HOST:/opt/go-gateway/gateway-linux.new"
+          rm -f gateway-linux
+
+          # 2. Upload providers.yaml + scripts/config
+          $SCP_CMD providers.yaml "$HOST:/opt/go-gateway/"
+          rsync -avz -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude '.git' \
+            --exclude '*.go' \
+            --exclude 'go.*' \
+            --exclude 'gateway-linux*' \
+            internal/ "$HOST:/opt/go-gateway/internal/"
+
+          # 3. Swap binary, update env, restart service
+          $SSH_CMD "$HOST" /bin/bash -s << REMOTE_SCRIPT
+          set -e
           cd /opt/go-gateway
-          docker build -t go-gateway:latest .
 
-          docker stop go-gateway 2>/dev/null || true
-          docker rm go-gateway 2>/dev/null || true
+          # Swap in new binary
+          mv gateway-linux.new gateway
+          chmod 755 gateway
 
-          docker run -d \
-            --name go-gateway \
-            --restart unless-stopped \
-            -p 8080:8080 \
-            -e LITELLM_MASTER_KEY="${{ secrets.LITELLM_MASTER_KEY }}" \
-            -e GLM_API_KEY="${{ secrets.GLM_API_KEY }}" \
-            -e MIMO_API_KEY="${{ secrets.MIMO_API_KEY }}" \
-            -e LONGCAT_API_KEY="${{ secrets.LONGCAT_API_KEY }}" \
-            -e EASYCLAW_API_KEY="${{ secrets.EASYCLAW_API_KEY }}" \
-            -e OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
-            -e PORT=8080 \
-            -e LOG_LEVEL=info \
-            go-gateway:latest
+          # Update systemd service env vars
+          cat > /etc/systemd/system/go-gateway.service << SERVICEOF
+          [Unit]
+          Description=LLM Gateway
+          After=network.target
 
-          sleep 5
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/go-gateway
+          ExecStart=/opt/go-gateway/gateway
+          Restart=always
+          RestartSec=5
+          Environment=PORT=8080
+          Environment=LOG_LEVEL=info
+          SERVICEOF
+
+          # Append secrets from GitHub
+          cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
+          Environment=LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+          Environment=GLM_API_KEY=${GLM_API_KEY}
+          Environment=MIMO_API_KEY=${MIMO_API_KEY}
+          Environment=LONGCAT_API_KEY=${LONGCAT_API_KEY}
+          Environment=EASYCLAW_API_KEY=${EASYCLAW_API_KEY}
+          Environment=OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+          SERVICEOF
+
+          cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICEOF
+
+          systemctl daemon-reload
+          systemctl restart go-gateway
+          sleep 3
 
           if curl -sf http://localhost:8080/health; then
+            echo ""
             echo "✅ Deploy OK"
           else
             echo "⚠️  Health check failed"
-            docker logs --tail 50 go-gateway
+            journalctl -u go-gateway --no-pager -n 30
             exit 1
           fi
           REMOTE_SCRIPT
+        env:
+          LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
+          LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
+          EASYCLAW_API_KEY: ${{ secrets.EASYCLAW_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
