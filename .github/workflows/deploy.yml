@@ -110,7 +110,6 @@ jobs:
           Environment=MIMO_API_KEY=${MIMO_API_KEY}
           Environment=LONGCAT_API_KEY=${LONGCAT_API_KEY}
           Environment=EASYCLAW_API_KEY=${EASYCLAW_API_KEY}
-          Environment=OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
           SERVICEOF
 
           cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
@@ -138,4 +137,3 @@ jobs:
           MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
           LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
           EASYCLAW_API_KEY: ${{ secrets.EASYCLAW_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

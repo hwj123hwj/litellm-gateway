@@ -50,25 +50,6 @@ providers:
       - id: claude-opus-4-6
         aliases: [easyclaw-opus]
 
-  # OpenRouter（GPT + 免费模型）
-  - name: openrouter
-    type: openai
-    url: https://openrouter.ai/api/v1/chat/completions
-    api_key_env: OPENROUTER_API_KEY
-    models:
-      - id: openai/gpt-5.5
-        aliases: [gpt-5.5]
-        provider_name: or-gpt55
-      - id: deepseek/deepseek-v4-flash:free
-        aliases: [free-deepseek]
-        provider_name: or-deepseek
-      - id: moonshotai/kimi-k2.6:free
-        aliases: [free-kimi]
-        provider_name: or-kimi
-
-# Fallback 链配置
-# 当第一个提供商失败时，自动尝试下一个
-# 引用格式：供应商名-模型ID（与 SetupProvidersFromConfig 注册的 provider 名一致）
 chains:
   coding:
     - glm-glm-5-turbo
@@ -79,8 +60,6 @@ chains:
     - mimo-mimo-v2.5
     - longcat-LongCat-2.0-Preview
 
-  # free 兜底链：deepseek → kimi
+  # free 兜底链
   free:
     - glm-glm-4.7-flash
-    - or-deepseek
-    - or-kimi
