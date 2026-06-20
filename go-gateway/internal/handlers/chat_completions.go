@@ -31,9 +31,71 @@ type openAIChatCompletionsRequest struct {
 
 type openAIChatMessage struct {
 	Role       string               `json:"role"`
-	Content    string               `json:"content"`
+	Content    openAIMessageContent `json:"content"`
 	ToolCalls  []openAIChatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string               `json:"tool_call_id,omitempty"`
+}
+
+// openAIMessageContent 支持字符串和数组两种 content 格式
+type openAIMessageContent struct {
+	Str    string               `json:"-"`
+	Blocks []openAIContentBlock `json:"-"`
+	IsStr  bool                 `json:"-"`
+}
+
+type openAIContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+func (c openAIMessageContent) String() string {
+	if c.IsStr {
+		return c.Str
+	}
+	var result string
+	for _, b := range c.Blocks {
+		if b.Type == "text" {
+			result += b.Text
+		}
+	}
+	return result
+}
+
+func (c openAIMessageContent) IsArray() bool {
+	return !c.IsStr
+}
+
+func (c openAIMessageContent) TextBlocks() []openAIContentBlock {
+	if c.IsStr {
+		if c.Str == "" {
+			return nil
+		}
+		return []openAIContentBlock{{Type: "text", Text: c.Str}}
+	}
+	return c.Blocks
+}
+
+func (c openAIMessageContent) MarshalJSON() ([]byte, error) {
+	if c.IsStr {
+		return json.Marshal(c.Str)
+	}
+	return json.Marshal(c.Blocks)
+}
+
+func (c *openAIMessageContent) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		c.Str = s
+		c.IsStr = true
+		return nil
+	}
+	var blocks []openAIContentBlock
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return err
+	}
+	c.Blocks = blocks
+	c.IsStr = false
+	return nil
 }
 
 type openAIChatTool struct {
@@ -222,10 +284,11 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 
 	var systemTexts []string
 	for _, msg := range req.Messages {
+		textContent := msg.Content.String()
 		switch msg.Role {
 		case "system":
-			if msg.Content != "" {
-				systemTexts = append(systemTexts, msg.Content)
+			if textContent != "" {
+				systemTexts = append(systemTexts, textContent)
 			}
 		case "tool":
 			out.Messages = append(out.Messages, provider.Message{
@@ -233,13 +296,13 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 				Content: provider.NewBlocksContent([]provider.ContentBlock{{
 					Type:       "tool_result",
 					ToolUseID:  msg.ToolCallID,
-					ContentStr: msg.Content,
+					ContentStr: textContent,
 				}}),
 			})
 		default:
-			blocks := make([]provider.ContentBlock, 0, 1+len(msg.ToolCalls))
-			if msg.Content != "" {
-				blocks = append(blocks, provider.ContentBlock{Type: "text", Text: msg.Content})
+			blocks := make([]provider.ContentBlock, 0, len(msg.Content.TextBlocks())+len(msg.ToolCalls))
+			for _, tb := range msg.Content.TextBlocks() {
+				blocks = append(blocks, provider.ContentBlock{Type: "text", Text: tb.Text})
 			}
 			for _, tc := range msg.ToolCalls {
 				input := json.RawMessage(`{}`)
@@ -257,8 +320,11 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 					Input: input,
 				})
 			}
-			content := provider.NewStringContent(msg.Content)
+			content := provider.NewStringContent(textContent)
 			if len(blocks) > 0 && (len(blocks) > 1 || len(msg.ToolCalls) > 0 || msg.Role == "assistant") {
+				content = provider.NewBlocksContent(blocks)
+			} else if len(msg.Content.TextBlocks()) > 1 {
+				// 多 content block（如文件读取），即使无 tool_calls 也用数组格式
 				content = provider.NewBlocksContent(blocks)
 			}
 			out.Messages = append(out.Messages, provider.Message{Role: msg.Role, Content: content})
@@ -313,7 +379,7 @@ func toOpenAIChatCompletionResponse(resp *provider.Response) *openAIChatCompleti
 			})
 		}
 	}
-	message.Content = content
+	message.Content = openAIMessageContent{Str: content, IsStr: true}
 	usage := openAIChatCompletionUsage{
 		PromptTokens:     resp.Usage.InputTokens,
 		CompletionTokens: resp.Usage.OutputTokens,
