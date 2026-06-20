@@ -364,6 +364,8 @@ func toOpenAIChatCompletionResponse(resp *provider.Response) *openAIChatCompleti
 		switch block.Type {
 		case "text":
 			content += block.Text
+		case "thinking":
+			// 跳过 MiMo/Anthropic 的思维链块，不展示
 		case "tool_use":
 			arguments := "{}"
 			if len(block.Input) > 0 {

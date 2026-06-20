@@ -157,6 +157,9 @@ type ContentBlock struct {
 	ContentStr    string         `json:"-"` // 当 content 是字符串时
 	ContentBlocks []ContentBlock `json:"-"` // 当 content 是数组时
 	IsError       bool           `json:"is_error,omitempty"`
+	// thinking 字段（MiMo 思维链）
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (c *ContentBlock) UnmarshalJSON(data []byte) error {
@@ -170,6 +173,8 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 		ToolUseID string          `json:"tool_use_id"`
 		IsError   bool            `json:"is_error"`
 		Content   json.RawMessage `json:"content"`
+		Thinking  string          `json:"thinking"`
+		Signature string          `json:"signature"`
 	}
 	var a Alias
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -182,6 +187,8 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 	c.Input = a.Input
 	c.ToolUseID = a.ToolUseID
 	c.IsError = a.IsError
+	c.Thinking = a.Thinking
+	c.Signature = a.Signature
 
 	// 处理 tool_result 的 content 字段（字符串或数组）
 	if a.Content != nil {
