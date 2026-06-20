@@ -19,10 +19,10 @@ providers:
         aliases: [glm-haiku]
       - id: glm-4.7-flash
 
-  # 小米 MiMo（核心供应商，保留 haiku/sonnet/opus 别名）
+  # 小米 MiMo — 使用原生 OpenAI API
   - name: mimo
-    type: anthropic
-    url: https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages
+    type: openai
+    url: https://token-plan-cn.xiaomimimo.com/v1/chat/completions
     api_key_env: MIMO_API_KEY
     models:
       - id: mimo-v2.5
