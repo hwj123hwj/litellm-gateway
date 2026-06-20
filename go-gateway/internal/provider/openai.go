@@ -347,6 +347,18 @@ func (p *OpenAIProvider) setHeaders(req *http.Request) {
 
 func toOpenAIRequest(req *Request) *openAIRequest {
 	var msgs []openAIMessage
+
+	// 重建 system 消息（toProviderRequest 提取到了 raw["system"]，不在 Messages 里）
+	if sysRaw, ok := req.raw["system"]; ok {
+		var sysText string
+		if err := json.Unmarshal(sysRaw, &sysText); err == nil && sysText != "" {
+			msgs = append(msgs, openAIMessage{
+				Role:    "system",
+				Content: sysText,
+			})
+		}
+	}
+
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "user":

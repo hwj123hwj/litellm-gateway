@@ -220,6 +220,7 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 
 	originalModel := req.Model
 	var lastErr error
+	anySuccess := false
 	for _, p := range providerChain {
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
@@ -227,13 +228,14 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
+			anySuccess = true
 			return
 		} else {
 			lastErr = err
 			h.logger.Printf("chat.completions stream provider %s failed: %v", p.Name(), err)
 		}
 	}
-	if !c.Writer.Written() {
+	if !anySuccess {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
 	}
 }
@@ -273,7 +275,7 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 		Stream:    req.Stream,
 	}
 	for key, raw := range req.raw {
-		if key == "messages" || key == "tools" || key == "model" || key == "max_tokens" || key == "stream" {
+		if key == "messages" || key == "tools" || key == "model" || key == "max_tokens" || key == "stream" || key == "stream_options" {
 			continue
 		}
 		var decoded any
