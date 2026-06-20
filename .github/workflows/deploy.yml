@@ -120,16 +120,19 @@ jobs:
 
           systemctl daemon-reload
           systemctl restart go-gateway
-          sleep 3
 
-          if curl -sf http://localhost:4001/health; then
-            echo ""
-            echo "✅ Deploy OK"
-          else
-            echo "⚠️  Health check failed"
-            journalctl -u go-gateway --no-pager -n 30
-            exit 1
-          fi
+          for i in 1 2 3 4 5; do
+            sleep 3
+            if curl -sf http://localhost:4001/health; then
+              echo ""
+              echo "✅ Deploy OK"
+              exit 0
+            fi
+            echo "⏳ Waiting for gateway to start (attempt \$i)..."
+          done
+          echo "⚠️  Health check failed after 5 attempts"
+          journalctl -u go-gateway --no-pager -n 30
+          exit 1
           REMOTE_SCRIPT
         env:
           LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
