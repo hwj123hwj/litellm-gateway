@@ -1,14 +1,15 @@
 ---
 type: entity
-date: 2026-06-14
+date: 2026-06-21
 tags:
   - provider
   - glm
   - zhipu
   - primary
+  - updated
 ---
 
-# GLM Provider (智谱)
+# GLM Provider (智谱) — Updated 2026-06-21
 
 ## Summary
 
@@ -21,27 +22,23 @@ Primary AI model provider via Zhipu BigModel's coding plan API. Positioned as th
 - **Auth**: `GLM_API_KEY` environment variable
 - **Format**: OpenAI Chat Completions (converted to/from Anthropic format by the gateway)
 
-## Models (as of 2026-06-14)
+## Models
 
 | Alias | Model ID | Tier | Notes |
 |-------|----------|------|-------|
-| `glm-opus` | **glm-5.2** | Flagship | Latest flagship (added 2026-06) |
+| `glm-opus` | **glm-5.2** | Flagship | Latest flagship |
 | `glm-sonnet` | **glm-5-turbo** | Balanced | Primary coding model |
 | `glm-haiku` | **glm-4.7** | Lightweight | Fast/cheap option |
-| *(no alias)* | **glm-4.7-flash** | Free | In `free` fallback chain |
+| *(no alias)* | **glm-4.7-flash** | Free | No alias → raw ID exposed in `/v1/models` |
+
+Per the [[model-aliases]] alias-only rule, `glm-opus`, `glm-sonnet`, `glm-haiku` are exposed (aliases only, raw IDs hidden). `glm-4.7-flash` has no alias so its raw ID is exposed.
 
 ## Role in Fallback
 
 The `coding` chain defaults to glm-5-turbo as the first provider:
 
 ```
-coding: glm-5-turbo → mimo-v2.5 → LongCat-Flash-Chat
-```
-
-The `free` chain includes glm-4.7-flash:
-
-```
-free: glm-4.7-flash → deepseek → kimi
+coding: glm-5-turbo → mimo-v2.5 → LongCat-2.0-Preview
 ```
 
 ## Configuration
@@ -54,16 +51,19 @@ In [[source-providers-yaml]]:
   url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
   api_key_env: GLM_API_KEY
   models:
-    - id: glm-5.2        aliases: [glm-opus]
-    - id: glm-5-turbo    aliases: [glm-sonnet]
-    - id: glm-4.7        aliases: [glm-haiku]
-    - id: glm-4.7-flash  # free, no alias
+    - id: glm-5.2
+      aliases: [glm-opus]
+    - id: glm-5-turbo
+      aliases: [glm-sonnet]
+    - id: glm-4.7
+      aliases: [glm-haiku]
+    - id: glm-4.7-flash
 ```
 
 ## History
 
-- **2026-06-14**: glm-5.2 added as new `glm-opus` (replacing glm-5.1). Removed glm-5.1, glm-4.5-air, and glm-flash alias per simplification decision.
-- Original: Had glm-4.7, glm-5-turbo, glm-5.1 mapped to haiku/sonnet/opus.
+- **2026-06-21**: Updated for alias-only exposure; `free` chain references removed
+- **2026-06-19**: glm-5.2 added as new `glm-opus` (replacing glm-5.1). Removed glm-5.1, glm-4.5-air, and glm-flash alias.
 
 ## See Also
 

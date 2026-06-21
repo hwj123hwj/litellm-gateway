@@ -1,47 +1,58 @@
 ---
 type: source
 source_path: go-gateway/.env.example
-date: 2026-05-15
+date: 2026-06-21
 tags:
   - configuration
   - environment
-  - secrets
+  - env-vars
+  - updated
 ---
 
-# Source: .env.example
+# Source: .env.example (Updated 2026-06-21)
 
-## Summary
+## Current Environment Variables
 
-Template for the `.env` file containing all environment variable configuration. Not tracked in git — copy to `.env` and fill in values.
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LITELLM_MASTER_KEY` | Yes | — | Gateway auth token |
+| `GLM_API_KEY` | No | — | Zhipu GLM API key |
+| `MIMO_API_KEY` | No | — | Xiaomi MiMo API key |
+| `LONGCAT_API_KEY` | No | — | Meituan LongCat API key |
+| `EASYCLAW_API_KEY` | No | — | EasyClaw (Claude proxy) API key |
+| `DEEPV_ENABLED` | No | false | Enable DeepV Server |
+| `DEEPV_WORK_DIR` | No | — | DeepV working directory |
+| `HTTP_PROXY` | No | — | HTTP proxy for ChatGPT Codex |
+| `COPILOT_TOKEN` | No | — | GitHub Copilot token (~30 min TTL) |
+| `COPILOT_GITHUB_TOKEN` | No | — | GitHub OAuth for auto-refreshing Copilot |
+| `PORT` | No | 4001 | Listen port |
+| `LOG_LEVEL` | No | info | Log level |
 
-## All Variables
+## Removed Variables
 
+| Variable | Removed | Reason |
+|----------|---------|--------|
+| `OPENROUTER_API_KEY` | 2026-06-21 | OpenRouter provider removed |
+| `APIFREE_API_KEY` | 2026-06-21 | APIFree provider was already removed (2026-06-19) |
+
+## Default .env.example Content
+
+```env
+LITELLM_MASTER_KEY=sk-local-gateway-xxx
+GLM_API_KEY=
+MIMO_API_KEY=
+LONGCAT_API_KEY=
+EASYCLAW_API_KEY=
+DEEPV_ENABLED=false
+DEEPV_WORK_DIR=
+HTTP_PROXY=http://127.0.0.1:7890
+# COPILOT_TOKEN=
+# COPILOT_GITHUB_TOKEN=
+PORT=4001
+LOG_LEVEL=info
 ```
-LITELLM_MASTER_KEY    # Required: gateway auth token
-GLM_API_KEY            # Zhipu BigModel
-MIMO_API_KEY           # Xiaomi MiMo
-LONGCAT_API_KEY        # Meituan LongCat
-EASYCLAW_API_KEY       # EasyClaw (Claude proxy)
-OPENROUTER_API_KEY     # OpenRouter (free models)
-DEEPV_ENABLED          # false - DeepV server toggle
-DEEPV_WORK_DIR         # DeepV work directory
-APIFREE_API_KEY        # SkyClaw agent models
-HTTP_PROXY             # http://127.0.0.1:7890 - for ChatGPT Codex
-COPILOT_TOKEN          # GitHub Copilot (30min expiry)
-COPILOT_GITHUB_TOKEN   # Copilot refresh token
-PORT                   # 4001
-LOG_LEVEL              # info
-```
-
-## Important Notes
-
-- `LITELLM_MASTER_KEY` is the only **required** variable
-- Unconfigured providers are **silently skipped** — no crash
-- `HTTP_PROXY` enables ChatGPT Codex provider when set (reads token from `~/.codex/auth.json`)
-- `COPILOT_TOKEN` expires in ~30 minutes; use `COPILOT_GITHUB_TOKEN` for auto-refresh
 
 ## Related
 
-- [[source-go-gateway-readme]] — Full env var documentation
-- [[chatgpt-codex-provider]] — ChatGPT OAuth provider details
-- [[auth-flow]] — Authentication setup
+- [[provider-config]] — Provider setup guide
+- [[source-codebase-2026-06-21]] — Removal details

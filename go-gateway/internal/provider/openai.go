@@ -111,6 +111,19 @@ type openAIStreamChunk struct {
 	Object  string               `json:"object"`
 	Model   string               `json:"model"`
 	Choices []openAIStreamChoice `json:"choices"`
+	Usage   *openAIStreamUsage   `json:"usage,omitempty"`
+}
+
+// openAIStreamUsage 流式 chunk 中的 usage（最后一条 chunk 携带）
+type openAIStreamUsage struct {
+	PromptTokens        int                       `json:"prompt_tokens"`
+	CompletionTokens    int                       `json:"completion_tokens"`
+	TotalTokens         int                       `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails      `json:"prompt_tokens_details,omitempty"`
+}
+
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // ─── OpenAIProvider ──────────────────────────────────────────────────────────
@@ -223,6 +236,7 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
 
 	finishReason := ""
+	var streamUsage *openAIStreamUsage
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -237,6 +251,10 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
+		}
+		// --- usage（最后一条 chunk 携带，可能在 choices 为空的独立 chunk 中） ---
+		if chunk.Usage != nil {
+			streamUsage = chunk.Usage
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -324,9 +342,21 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	}
 
 	stopReason := mapFinishReason(finishReason)
+
+	// 用上游真实 usage 构造 message_delta（Anthropic SSE 格式）
+	inputTokens := 0
+	outputTokens := 0
+	cacheReadTokens := 0
+	if streamUsage != nil {
+		inputTokens = streamUsage.PromptTokens
+		outputTokens = streamUsage.CompletionTokens
+		if streamUsage.PromptTokensDetails != nil {
+			cacheReadTokens = streamUsage.PromptTokensDetails.CachedTokens
+		}
+	}
 	writeSSE(w, "message_delta", fmt.Sprintf(
-		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"output_tokens":0}}`,
-		stopReason,
+		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d,"cache_read_input_tokens":%d}}`,
+		stopReason, inputTokens, outputTokens, cacheReadTokens,
 	))
 	writeSSE(w, "message_stop", `{"type":"message_stop"}`)
 

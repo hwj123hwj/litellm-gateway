@@ -143,6 +143,19 @@ type openAIStreamChunkResponse struct {
 	Created int64                     `json:"created"`
 	Model   string                    `json:"model,omitempty"`
 	Choices []openAIStreamChunkChoice `json:"choices"`
+	Usage   *openAIStreamUsage        `json:"usage,omitempty"`
+}
+
+// openAIStreamUsage 流式最后一个 chunk 的 usage 字段
+type openAIStreamUsage struct {
+	PromptTokens        int                    `json:"prompt_tokens"`
+	CompletionTokens    int                    `json:"completion_tokens"`
+	TotalTokens         int                    `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails   `json:"prompt_tokens_details,omitempty"`
+}
+
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 type openAIStreamChunkChoice struct {
@@ -413,12 +426,48 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 	messageID := ""
 	model := ""
 	var pendingToolCalls map[int]*openAIChatToolCall
+	accInputTokens := 0
+	accOutputTokens := 0
+	accCachedTokens := 0
 
 	flushEvent := func() error {
 		if eventType == "" || len(dataLines) == 0 {
 			return nil
 		}
 		payload := strings.Join(dataLines, "\n")
+
+		// 从 Anthropic SSE 事件中累积 token 信息
+		switch eventType {
+		case "message_start":
+			var ms struct {
+				Message struct {
+					Usage struct {
+						InputTokens int `json:"input_tokens"`
+					} `json:"usage"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(payload), &ms); err == nil {
+				if ms.Message.Usage.InputTokens > 0 {
+					accInputTokens = ms.Message.Usage.InputTokens
+				}
+			}
+		case "message_delta":
+			var md struct {
+				Usage struct {
+					InputTokens         int `json:"input_tokens"`
+					OutputTokens        int `json:"output_tokens"`
+					CacheReadInputTokens int `json:"cache_read_input_tokens"`
+				} `json:"usage"`
+			}
+			if err := json.Unmarshal([]byte(payload), &md); err == nil {
+				if md.Usage.InputTokens > 0 {
+					accInputTokens = md.Usage.InputTokens
+				}
+				accOutputTokens = md.Usage.OutputTokens
+				accCachedTokens = md.Usage.CacheReadInputTokens
+			}
+		}
+
 		chunk, done, err := anthropicEventToOpenAIChunk(eventType, payload, created, messageID, model, pendingToolCalls)
 		if err != nil {
 			return err
@@ -435,6 +484,24 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 			}
 		}
 		if done {
+			// 发送最终 usage chunk（OpenAI 标准：最后一条带 usage，choices 为空）
+			if err := writeOpenAIChunk(w, &openAIStreamChunkResponse{
+				ID:      messageID,
+				Object:  "chat.completion.chunk",
+				Created: created,
+				Model:   model,
+				Choices: []openAIStreamChunkChoice{},
+				Usage: &openAIStreamUsage{
+					PromptTokens:     accInputTokens,
+					CompletionTokens: accOutputTokens,
+					TotalTokens:      accInputTokens + accOutputTokens,
+					PromptTokensDetails: &promptTokensDetails{
+						CachedTokens: accCachedTokens,
+					},
+				},
+			}); err != nil {
+				return err
+			}
 			eventType = ""
 			dataLines = nil
 			_, err := fmt.Fprint(w, "data: [DONE]\n\n")

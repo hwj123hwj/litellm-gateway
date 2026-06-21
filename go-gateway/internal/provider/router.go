@@ -119,8 +119,6 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 			"deepv-glm5":           {"deepv-glm5": "glm-5"},
 			"deepv-claude-sonnet":  {"deepv-claude": "claude-sonnet-4-6"},
 			"deepv-kimi":           {"deepv-kimi": "kimi-k2.6"},
-			// 免费/低成本
-			"free": {"glm-free": "glm-4.7-flash"},
 			// GitHub Copilot（免费套餐，Gemini 为主）
 			"copilot-opus":   {"copilot": "gemini-3.1-pro-preview"},
 			"copilot-sonnet": {"copilot": "gemini-3-flash-preview"},

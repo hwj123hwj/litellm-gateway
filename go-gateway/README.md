@@ -205,13 +205,6 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 > EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换。
 
-### APIFree（SkyClaw Agent）
-
-| 模型名 | 实际模型 | 说明 |
-|--------|---------|------|
-| `sky-opus` | skywork-ai/skyclaw-v1 | SkyClaw Agent 模型 |
-| `sky-lite` | skywork-ai/skyclaw-v1-lite | SkyClaw 轻量版 |
-
 ### ChatGPT Codex（GPT-5.5，OAuth）
 
 使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用 OpenAI Codex API，不需要额外 API key。
@@ -228,33 +221,6 @@ curl -N -X POST http://localhost:4001/v1/messages \
 > 2. 已通过 Codex Desktop 登录 ChatGPT，网关会自动读取 `~/.codex/auth.json` 中的 OAuth token
 > 3. 请求走 Responses API 透传（`/v1/responses`），不需要格式转换
 
-### 智谱免费模型
-
-| 模型名 | 实际模型 | 说明 |
-|--------|---------|------|
-| `glm-flash` | glm-4.7-flash | 智谱免费模型 |
-
-> 复用 `GLM_API_KEY`，无需额外 key。
-
-### OpenRouter 免费模型
-
-网关启动时自动从 OpenRouter 拉取当前可用的免费模型列表（按 context_length 降序取 top 5），缓存 6 小时（`~/Library/Caches/go-llm-gateway/openrouter-models.json`）。
-
-| 模型名 | 说明 |
-|--------|------|
-| `free` | 自动 fallback 链，依次尝试全部免费模型（**推荐**） |
-| `openrouter-free` | 同 `free` |
-| `owl` / `nemotron` / `ring` / ... | 各免费模型的简称别名，启动时动态生成 |
-
-> **查看当前可用别名**：启动日志里会打印每个注册的 chain，例如：
-> ```
-> [0] openrouter/owl-alpha (ctx=1048K)
-> [3] nvidia/nemotron-3-super-120b-a12b:free (ctx=262K)
-> ```
-> 对应别名为 `/model owl`、`/model nemotron`。
-
-> **注意**：免费模型随时可能被限流（429），`free` chain 会自动 fallback 到下一个，单独指定别名则会直接报错。生产使用建议始终用 `free`。
-
 ---
 
 ## 环境变量
@@ -266,8 +232,6 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `MIMO_API_KEY` | 否 | — | 小米 API key |
 | `LONGCAT_API_KEY` | 否 | — | 美团 API key |
 | `EASYCLAW_API_KEY` | 否 | — | EasyClaw API key |
-| `APIFREE_API_KEY` | 否 | — | APIFree key（启用 SkyClaw 模型） |
-| `OPENROUTER_API_KEY` | 否 | — | OpenRouter key，启用免费模型 (`/model free`) |
 | `DEEPV_ENABLED` | 否 | false | 启用 DeepV Server（true/false） |
 | `DEEPV_WORK_DIR` | 否 | — | DeepV 工作目录（用于获取 Git 信息） |
 | `COPILOT_TOKEN` | 否 | — | GitHub Copilot token（短期有效，约 30 分钟） |
@@ -306,6 +270,8 @@ OpenAI / Anthropic / Codex CLI 客户端
 │  Providers                  │
 │  ├── OpenAIProvider         │──▶ GLM coding / MiMo / LongCat / EasyClaw
 │  ├── AnthropicProvider      │──▶ GLM / MiMo / LongCat Anthropic
+│  ├── CopilotProvider        │──▶ GitHub Copilot (Gemini/GPT)
+│  ├── DeepVProvider          │──▶ DeepV (DeepSeek/GLM/Claude/Kimi)
 │  └── ChatGPTProvider        │──▶ ChatGPT Codex (OAuth token + proxy)
 └─────────────────────────────┘
 ```
@@ -379,7 +345,6 @@ make docker-run    # Docker Compose 启动
 | `MIMO_API_KEY` | 小米 API key |
 | `LONGCAT_API_KEY` | 美团 API key |
 | `EASYCLAW_API_KEY` | EasyClaw API key |
-| `OPENROUTER_API_KEY` | OpenRouter key（启用免费模型） |
 
 **优势**：
 - API keys 通过 Secrets 传入，部署时自动写入 `.env` 并传到服务器
@@ -417,7 +382,6 @@ GLM_API_KEY=
 MIMO_API_KEY=
 LONGCAT_API_KEY=
 EASYCLAW_API_KEY=
-OPENROUTER_API_KEY=
 PORT=8080
 LOG_LEVEL=info
 EOF

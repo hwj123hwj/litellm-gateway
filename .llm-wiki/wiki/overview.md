@@ -1,13 +1,14 @@
 ---
 type: concept
-date: 2026-06-14
+date: 2026-06-21
 tags:
   - overview
   - architecture
   - gateway
+  - updated
 ---
 
-# Project Overview: LLM Gateway
+# Project Overview: LLM Gateway (Updated 2026-06-21)
 
 ## Summary
 
@@ -29,22 +30,25 @@ AI Agent (Codex/Claude Code) ──▶ Gateway (:4001)
 
 | Provider | Type | Role |
 |----------|------|------|
-| [[glm-provider\|智谱 GLM]] | OpenAI | Primary (opus/sonnet/haiku) |
-| MiMo | Anthropic | Fallback |
-| LongCat | OpenAI | Fallback |
-| EasyClaw | OpenAI | Claude proxy |
-| APIFree | OpenAI | SkyClaw Agent |
-| OpenRouter | OpenAI | GPT + free models |
-| DeepV Server | Internal | Aggregated |
-| GitHub Copilot | OpenAI | Free tier |
-| ChatGPT Codex | Responses API | OAuth direct |
+| [[glm-provider\|智谱 GLM]] | openai | Primary (opus/sonnet/haiku) |
+| [[mimo-provider\|小米 MiMo]] | openai | Fallback 1 |
+| [[longcat-provider\|美团 LongCat]] | openai | Fallback 2 (opus only) |
+| EasyClaw | openai | Claude proxy |
+| DeepV Server | custom | Internal aggregated |
+| GitHub Copilot | custom | Free tier (Gemini/GPT) |
+| ChatGPT Codex | responses | OAuth direct (proxy required) |
+
+**Removed providers** (see [[source-codebase-2026-06-21]]):
+- ~~OpenRouter~~ — removed 2026-06-21 (no longer used)
+- ~~APIFree (SkyClaw)~~ — removed 2026-06-19 (balance exhausted)
 
 ## Key Design Decisions
 
 - **Config-driven**: Add providers without code changes via `providers.yaml`
-- **Fallback chains**: Primary → secondary → free fallback
+- **Fallback chains**: Primary → secondary (no more free-tier fallback)
 - **Multi-protocol**: Supports OpenAI, Anthropic, and Responses API formats
 - **Model aliases**: opus/sonnet/haiku naming for consistent tier mapping
+- **Alias-only exposure**: Models with aliases only expose the alias in `/v1/models` (raw ID hidden)
 - **Auth**: Single master key (`LITELLM_MASTER_KEY`) protects the gateway
 
 ## File Layout
@@ -64,7 +68,12 @@ go-gateway/
 
 ## Deployment
 
-Runs as a macOS launchd service with auto-restart:
-```bash
-launchctl load ~/Library/LaunchAgents/local.go-gateway.plist
-```
+Runs as a systemd service on the production server (8.141.97.21:4001), deployed via GitHub Actions.
+See [[server-deployment]] for details.
+
+## Related
+
+- [[provider-config]] — How to add/modify providers
+- [[fallback-chains]] — Auto-fallback routing logic
+- [[model-aliases]] — Haiku/Sonnet/Opus tier naming
+- [[source-codebase-2026-06-21]] — Latest state capture

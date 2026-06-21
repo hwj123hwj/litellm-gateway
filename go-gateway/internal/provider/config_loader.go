@@ -144,17 +144,18 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 			boundProvider := NewBoundModelProviderWrapper(baseProvider, mc.ID)
 			router.RegisterProvider(providerName, boundProvider)
 
-			// 注册模型 ID 到 provider 的映射
-			router.RegisterChain(mc.ID, []string{providerName})
-			modelToProvider[mc.ID] = providerName
-
-			// 注册别名
-			for _, alias := range mc.Aliases {
-				router.RegisterChain(alias, []string{providerName})
-				modelToProvider[alias] = providerName
+			// 有别名时只暴露别名，不对外暴露原始模型 ID（避免重复）
+			if len(mc.Aliases) > 0 {
+				for _, alias := range mc.Aliases {
+					router.RegisterChain(alias, []string{providerName})
+					modelToProvider[alias] = providerName
+				}
+				logger.Printf("Registered model: %s -> aliases %v (provider=%s)", mc.ID, mc.Aliases, providerName)
+			} else {
+				router.RegisterChain(mc.ID, []string{providerName})
+				modelToProvider[mc.ID] = providerName
+				logger.Printf("Registered model: %s (provider=%s)", mc.ID, providerName)
 			}
-
-			logger.Printf("Registered model: %s -> %s (provider=%s)", mc.ID, mc.ID, providerName)
 		}
 
 		logger.Printf("Registered provider: %s (type=%s, url=%s)", pc.Name, pc.Type, pc.URL)

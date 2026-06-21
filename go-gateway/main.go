@@ -61,11 +61,6 @@ func main() {
 		setupCopilotProviders(router, cfg, logger)
 	}
 
-	// OpenRouter 免费模型（动态拉取）
-	if cfg.OpenRouterAPIKey != "" {
-		setupOpenRouterProviders(router, cfg, logger)
-	}
-
 	// 创建 Gin 引擎
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -160,7 +155,6 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 		router.RegisterChain("glm-haiku", []string{"glm"})
 		router.RegisterChain("glm-opus", []string{"glm"})
 		router.RegisterChain("glm-flash", []string{"glm-free"})
-		router.RegisterChain("free", []string{"glm-free"})
 	}
 	// MiMo 核心别名
 	if cfg.MIMOAPIKey != "" {
@@ -215,60 +209,6 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 	router.RegisterChain("deepv-kimi", []string{"deepv-kimi"})
 
 	logger.Printf("DeepV Server enabled, workdir=%s", workDir)
-}
-
-// setupOpenRouterProviders 设置 OpenRouter 免费模型（动态补充）
-// 固定模型已在 providers.yaml 中注册，此函数只补充新增的免费模型
-func setupOpenRouterProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
-	freeModels, err := provider.FetchFreeModels(cfg.OpenRouterAPIKey, 10)
-	if err != nil {
-		logger.Printf("Warning: failed to fetch OpenRouter free models: %v", err)
-		return
-	}
-
-	// 获取已注册的 chain，避免覆盖固定模型
-	existingChains := make(map[string]bool)
-	for _, name := range router.ListChains() {
-		existingChains[name] = true
-	}
-
-	logger.Printf("OpenRouter: fetched %d free models", len(freeModels))
-	var openRouterChain []string
-	addedCount := 0
-	for i, m := range freeModels {
-		alias := provider.ModelAlias(m.ID)
-		freeAlias := ""
-		if alias != "" {
-			freeAlias = fmt.Sprintf("free-%s", alias)
-		}
-
-		// 如果该别名已注册（固定模型），跳过
-		if freeAlias != "" && existingChains[freeAlias] {
-			logger.Printf("  [%d] %s → %s (already fixed, skip)", i, m.ID, freeAlias)
-			continue
-		}
-
-		providerName := fmt.Sprintf("openrouter-extra-%d", addedCount)
-		p := provider.NewOpenRouterProvider(providerName, m.ID, cfg.OpenRouterAPIKey)
-		router.RegisterProvider(providerName, p)
-		openRouterChain = append(openRouterChain, providerName)
-		addedCount++
-
-		// 注册 free-别名 链
-		if freeAlias != "" {
-			router.RegisterChain(freeAlias, []string{providerName})
-			logger.Printf("  [%d] %s → %s (ctx=%dK)", i, m.ID, freeAlias, m.ContextLength/1000)
-		} else {
-			logger.Printf("  [%d] %s (ctx=%dK)", i, m.ID, m.ContextLength/1000)
-		}
-	}
-
-	// free 链：如果 providers.yaml 已注册了 free 链，不覆盖
-	if !existingChains["free"] && len(openRouterChain) > 0 {
-		router.RegisterChain("free", openRouterChain)
-	}
-
-	logger.Printf("OpenRouter: added %d extra free models", addedCount)
 }
 
 // setupCopilotProviders 设置 GitHub Copilot 提供商

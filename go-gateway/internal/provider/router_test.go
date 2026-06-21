@@ -61,7 +61,6 @@ func TestRouterMapModelName(t *testing.T) {
 		{"deepv-glm5", "deepv-glm5", "glm-5"},
 		{"deepv-claude-sonnet", "deepv-claude", "claude-sonnet-4-6"},
 		{"deepv-kimi", "deepv-kimi", "kimi-k2.6"},
-		{"free", "glm-free", "glm-4.7-flash"},
 	}
 
 	for _, tt := range tests {

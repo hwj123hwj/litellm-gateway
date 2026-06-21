@@ -2,6 +2,20 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-21] ingest | Codebase state (OpenRouter removal + alias-only exposure)
+- **New source pages**: source-codebase-2026-06-21 (full codebase state capture)
+- **Updated concept pages**: overview, fallback-chains, model-aliases, provider-config
+- **Updated entity pages**: glm-provider, mimo-provider, longcat-provider, openrouter-provider (→ REMOVED archive)
+- **Updated source pages**: source-providers-yaml, source-env-example
+- **Updated**: index.md (new source page, annotated updates)
+- **Key changes**:
+  - OpenRouter provider removed entirely (openrouter.go deleted, config field removed)
+  - `free` chain removed from providers.yaml and main.go
+  - Alias-only model exposure: models with aliases no longer expose raw model ID in /v1/models
+  - APIFree_API_KEY removed from .env.example
+  - mimo provider type corrected: anthropic → openai
+  - longcat-provider page corrected: removed stale longcat-sonnet references
+
 ## [2026-06-19] ingest | Project root (CI/CD + model updates + server deployment)
 - **New source pages**: source-deploy-yml (CI/CD pipeline)
 - **New entity pages**: server-deployment (8.141.97.21:4001)

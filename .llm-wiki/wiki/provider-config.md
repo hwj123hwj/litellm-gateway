@@ -1,14 +1,15 @@
 ---
 type: concept
-date: 2026-06-14
+date: 2026-06-21
 tags:
   - configuration
   - providers
   - yaml
   - howto
+  - updated
 ---
 
-# Provider Configuration (providers.yaml)
+# Provider Configuration (providers.yaml) — Updated 2026-06-21
 
 ## Summary
 
@@ -57,11 +58,20 @@ models:
     provider_name: or-gpt55    # Custom name for chain references
 ```
 
+## Alias-Only Exposure Rule (New 2026-06-21)
+
+When a model has `aliases` defined, **only the aliases** are registered as chains and exposed in `/v1/models`. The raw model ID is hidden to avoid duplicates.
+
+- `aliases` present → aliases registered, raw ID hidden
+- No `aliases` → raw model ID registered directly
+
+This is implemented in `config_loader.go` → `SetupProvidersFromConfig()`.
+
 ## Providers That Need Code Changes
 
 - **DeepV Server** — Hardcoded in `main.go` (`setupDeepVProviders`)
 - **ChatGPT Codex** — Hardcoded in `main.go` (`setupChatGPTProvider`)
-- **GitHub Copilot** — Hardcoded in `main.go` (`setupCopilotProvider`)
+- **GitHub Copilot** — Hardcoded in `main.go` (`setupCopilotProviders`)
 
 ## Provider Types
 
@@ -74,4 +84,5 @@ models:
 
 - [[source-providers-yaml]] — Current complete config
 - [[source-env-example]] — Required env vars
+- [[model-aliases]] — Alias-only exposure rule
 - [[glm-provider]] — Example provider setup

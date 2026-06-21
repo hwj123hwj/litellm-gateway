@@ -60,6 +60,4 @@ chains:
     - mimo-mimo-v2.5
     - longcat-LongCat-2.0-Preview
 
-  # free 兜底链
-  free:
-    - glm-glm-4.7-flash
+

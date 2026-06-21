@@ -1,48 +1,42 @@
 ---
 type: entity
-date: 2026-06-14
+date: 2026-06-21
 tags:
   - provider
+  - removed
   - openrouter
-  - gpt
-  - free
+  - archive
 ---
 
-# OpenRouter Provider
+# OpenRouter Provider — REMOVED
+
+> ⚠️ **This provider was removed on 2026-06-21.** Kept for historical reference only.
 
 ## Summary
 
-OpenRouter is used as the gateway to OpenAI's GPT-5.5 model and as a free model fallback source. It provides access to third-party hosted models via a unified API.
+OpenRouter was previously used as a free model fallback source and gateway to GPT-5.5. It was removed because the service is no longer used.
 
-## API Details
+## What Was Removed
+
+- `internal/provider/openrouter.go` (entire file: `OpenRouterProvider`, `FetchFreeModels`, `ModelAlias`, cache logic)
+- `OPENROUTER_API_KEY` config field and env var
+- `setupOpenRouterProviders()` function in `main.go`
+- `free` chain (which depended on OpenRouter models as fallbacks)
+- All `free-*` dynamically-generated model aliases
+
+## Historical Details
 
 - **Type**: `openai`
 - **Endpoint**: `https://openrouter.ai/api/v1/chat/completions`
 - **Auth**: `OPENROUTER_API_KEY` environment variable
-- **Format**: OpenAI Chat Completions
+- Fetched free models at startup, cached for 6 hours
+- Models were registered with `free-{alias}` naming pattern
 
-## Models
+## Removal Context
 
-| Alias | Model ID | Notes |
-|-------|----------|-------|
-| `gpt-5.5` | **openai/gpt-5.5** | Full GPT-5.5 via OpenRouter |
-| `free-deepseek` | **deepseek/deepseek-v4-flash:free** | Free deepseek model |
-| `free-kimi` | **moonshotai/kimi-k2.6:free** | Free kimi model |
+See [[source-codebase-2026-06-21]] for full changelog.
 
-## Role in Fallback
+## Related
 
-The `free` chain uses OpenRouter models as secondary fallbacks:
-
-```
-free: glm-4.7-flash → deepseek (OpenRouter) → kimi (OpenRouter)
-```
-
-## Important Note
-
-The OpenRouter URL (`openrouter.ai`) is accessed **without proxy** — the `OpenAIProvider` in the gateway creates a plain `http.Client` with no proxy configuration. This means GPT-5.5 via the gateway works only if `openrouter.ai` is directly accessible from the network.
-
-## See Also
-
-- [[source-providers-yaml]] — Full config
-- [[fallback-chains]] — Free fallback chain
-- [[glm-provider]] — Free model also in the chain
+- [[source-codebase-2026-06-21]] — Removal details
+- [[fallback-chains]] — `free` chain also removed
