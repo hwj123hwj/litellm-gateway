@@ -157,12 +157,12 @@ jobs:
       - name: Build binary (clean environment)
         working-directory: go-gateway
         run: |
-          # Use setup-go's Go installation (not system Go 1.22)
-          export GOROOT=$(go env GOROOT)
-          export PATH="$GOROOT/bin:$PATH"
+          # Unset GOROOT so Go auto-detects from setup-go's binary location
+          unset GOROOT
           export GOPATH=/tmp/actions-go
           export GOCACHE=/tmp/actions-go-cache
           mkdir -p $GOPATH $GOCACHE
+          echo "Using Go: $(which go) $(go version), GOROOT=$(go env GOROOT)"
           go build -o gateway .
           echo "Binary built: $(ls -lh gateway | awk '{print $5}')"
 
