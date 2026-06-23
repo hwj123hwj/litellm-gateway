@@ -154,9 +154,13 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Build binary
+      - name: Build binary (clean environment)
         working-directory: go-gateway
+        env:
+          GOPATH: /home/q/litellm-gateway/runner/_work/go
+          GOCACHE: /home/q/litellm-gateway/runner/_work/go-cache
         run: |
+          mkdir -p $GOPATH $GOCACHE
           go build -o gateway .
           echo "Binary built: $(ls -lh gateway | awk '{print $5}')"
 
