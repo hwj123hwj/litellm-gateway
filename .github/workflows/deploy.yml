@@ -167,6 +167,7 @@ jobs:
           echo "Binary built: $(ls -lh gateway | awk '{print $5}')"
 
       - name: Deploy locally
+        working-directory: go-gateway
         env:
           LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
           GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
