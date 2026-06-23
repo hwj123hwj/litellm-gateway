@@ -140,3 +140,58 @@ jobs:
           MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
           LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
           EASYCLAW_API_KEY: ${{ secrets.EASYCLAW_API_KEY }}
+
+  deploy-mini-pc:
+    name: Deploy to Mini PC
+    runs-on: [self-hosted, mini-pc]
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build binary
+        working-directory: go-gateway
+        run: |
+          go build -o gateway .
+          echo "Binary built: $(ls -lh gateway | awk '{print $5}')"
+
+      - name: Deploy locally
+        run: |
+          set -e
+          DEPLOY_DIR="/home/q/litellm-gateway"
+
+          # 1. Copy the new binary
+          cp go-gateway/gateway "$DEPLOY_DIR/go-gateway/gateway.new"
+          chmod 755 "$DEPLOY_DIR/go-gateway/gateway.new"
+
+          # 2. Copy config files
+          cp go-gateway/providers.yaml "$DEPLOY_DIR/go-gateway/providers.yaml" 2>/dev/null || true
+
+          # 3. Stop current service, swap binary, restart
+          cd "$DEPLOY_DIR/go-gateway"
+          mv gateway.new gateway
+
+          # Restart via systemd user service or direct process
+          if systemctl --user list-units --type=service 2>/dev/null | grep -q go-gateway; then
+            systemctl --user restart go-gateway
+          else
+            # Kill existing and restart
+            pkill -f "go-gateway/gateway" 2>/dev/null || true
+            sleep 1
+            nohup ./gateway &>/dev/null &
+          fi
+
+          # 4. Health check
+          sleep 3
+          if curl -sf http://localhost:4001/health; then
+            echo "✅ Mini PC Deploy OK"
+          else
+            echo "⚠️  Health check failed, checking logs..."
+            journalctl --user -u go-gateway --no-pager -n 20 2>/dev/null || true
+            exit 1
+          fi
