@@ -185,15 +185,12 @@ jobs:
           cp providers.yaml "$DEPLOY_DIR/providers.yaml" 2>/dev/null || true
 
           # 3. Write .env with secrets from GitHub
-          cat > "$DEPLOY_DIR/.env" << ENVEOF
-LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
-GLM_API_KEY=${GLM_API_KEY}
-MIMO_API_KEY=${MIMO_API_KEY}
-LONGCAT_API_KEY=${LONGCAT_API_KEY}
-EASYCLAW_API_KEY=${EASYCLAW_API_KEY}
-PORT=4001
-LOG_LEVEL=info
-ENVEOF
+          printf 'LITELLM_MASTER_KEY=%s\nGLM_API_KEY=%s\nMIMO_API_KEY=%s\nLONGCAT_API_KEY=%s\nEASYCLAW_API_KEY=%s\nPORT=4001\nLOG_LEVEL=info\n' \
+            "${LITELLM_MASTER_KEY}" \
+            "${GLM_API_KEY}" \
+            "${MIMO_API_KEY}" \
+            "${LONGCAT_API_KEY}" \
+            "${EASYCLAW_API_KEY}" > "$DEPLOY_DIR/.env"
           chmod 600 "$DEPLOY_DIR/.env"
           cd "$DEPLOY_DIR"
           mv gateway.new gateway
