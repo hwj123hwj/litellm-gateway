@@ -156,28 +156,46 @@ jobs:
 
       - name: Build binary (clean environment)
         working-directory: go-gateway
-        env:
-          GOPATH: /home/q/litellm-gateway/runner/_work/go
-          GOCACHE: /home/q/litellm-gateway/runner/_work/go-cache
         run: |
+          # Use setup-go's Go installation (not system Go 1.22)
+          export GOROOT=$(go env GOROOT)
+          export PATH="$GOROOT/bin:$PATH"
+          export GOPATH=/tmp/actions-go
+          export GOCACHE=/tmp/actions-go-cache
           mkdir -p $GOPATH $GOCACHE
           go build -o gateway .
           echo "Binary built: $(ls -lh gateway | awk '{print $5}')"
 
       - name: Deploy locally
+        env:
+          LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
+          LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
+          EASYCLAW_API_KEY: ${{ secrets.EASYCLAW_API_KEY }}
         run: |
           set -e
-          DEPLOY_DIR="/home/q/litellm-gateway"
+          DEPLOY_DIR="/home/q/litellm-gateway/go-gateway"
 
           # 1. Copy the new binary
-          cp go-gateway/gateway "$DEPLOY_DIR/go-gateway/gateway.new"
-          chmod 755 "$DEPLOY_DIR/go-gateway/gateway.new"
+          cp gateway "$DEPLOY_DIR/gateway.new"
+          chmod 755 "$DEPLOY_DIR/gateway.new"
 
           # 2. Copy config files
-          cp go-gateway/providers.yaml "$DEPLOY_DIR/go-gateway/providers.yaml" 2>/dev/null || true
+          cp providers.yaml "$DEPLOY_DIR/providers.yaml" 2>/dev/null || true
 
-          # 3. Stop current service, swap binary, restart
-          cd "$DEPLOY_DIR/go-gateway"
+          # 3. Write .env with secrets from GitHub
+          cat > "$DEPLOY_DIR/.env" << ENVEOF
+LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+GLM_API_KEY=${GLM_API_KEY}
+MIMO_API_KEY=${MIMO_API_KEY}
+LONGCAT_API_KEY=${LONGCAT_API_KEY}
+EASYCLAW_API_KEY=${EASYCLAW_API_KEY}
+PORT=4001
+LOG_LEVEL=info
+ENVEOF
+          chmod 600 "$DEPLOY_DIR/.env"
+          cd "$DEPLOY_DIR"
           mv gateway.new gateway
 
           # Restart via systemd user service or direct process
