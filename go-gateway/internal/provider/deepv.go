@@ -393,8 +393,16 @@ func (p *DeepVProvider) setHeaders(req *http.Request) error {
 // getAccessToken 获取访问令牌
 func (p *DeepVProvider) getAccessToken() (string, error) {
 	// 检查缓存
-	if p.tokenCache != nil && time.Now().Unix() < p.tokenCache.ExpiresAt {
-		return p.tokenCache.AccessToken, nil
+	// 注意：有些系统的 ExpiresAt 是毫秒，而 time.Now().Unix() 是秒，所以这里兼容处理
+	nowSec := time.Now().Unix()
+	if p.tokenCache != nil {
+		expiresAt := p.tokenCache.ExpiresAt
+		if expiresAt > 9999999999 { // 如果是毫秒，转成秒
+			expiresAt = expiresAt / 1000
+		}
+		if nowSec < expiresAt {
+			return p.tokenCache.AccessToken, nil
+		}
 	}
 
 	// 从文件读取
@@ -403,10 +411,15 @@ func (p *DeepVProvider) getAccessToken() (string, error) {
 		return "", fmt.Errorf("get home dir: %w", err)
 	}
 
-	tokenPath := filepath.Join(homeDir, ".deepv", "jwt-token.json")
+	// 优先读取 ~/.easycode-user/jwt-token.json，其次 fallback 到 ~/.deepv/jwt-token.json
+	tokenPath := filepath.Join(homeDir, ".easycode-user", "jwt-token.json")
 	data, err := os.ReadFile(tokenPath)
 	if err != nil {
-		return "", fmt.Errorf("read token file: %w", err)
+		tokenPath = filepath.Join(homeDir, ".deepv", "jwt-token.json")
+		data, err = os.ReadFile(tokenPath)
+		if err != nil {
+			return "", fmt.Errorf("read token file (checked both ~/.easycode-user and ~/.deepv): %w", err)
+		}
 	}
 
 	var token jwtToken
