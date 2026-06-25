@@ -2,6 +2,13 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-26] ingest | DeepV token path compatibility update
+- **New entity pages**: deepv-provider (DeepV Server custom provider specs)
+- **Updated**: index.md (registered deepv-provider entity)
+- **Key changes**:
+  - Added support for modern `~/.easycode-user/jwt-token.json` location fallback in `deepv.go`.
+  - Added millisecond timestamp handling for DeepV auth tokens.
+
 ## [2026-06-21] ingest | Codebase state (OpenRouter removal + alias-only exposure)
 - **New source pages**: source-codebase-2026-06-21 (full codebase state capture)
 - **Updated concept pages**: overview, fallback-chains, model-aliases, provider-config
