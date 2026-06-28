@@ -1,6 +1,5 @@
-import { useCallback } from 'react'
-import { getModels } from '../api'
-import { useFetch } from '../hooks'
+import { useEffect } from 'react'
+import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
 const COLORS: Record<string, string> = {
@@ -23,20 +22,25 @@ function fmt(n: number) {
 }
 
 export default function Models() {
-  const fetcher = useCallback(() => getModels(), [])
-  const { data, error, loading } = useFetch(fetcher, { refreshInterval: 15000 })
+  const { models, modelsLoading, modelsError, fetchModels } = useStore()
 
-  if (loading) return <div className="loading">加载中...</div>
-  if (error) return <div className="error-banner">⚠ {error}</div>
-  if (!data) return null
+  useEffect(() => {
+    fetchModels()
+    const timer = setInterval(fetchModels, 15000)
+    return () => clearInterval(timer)
+  }, [fetchModels])
 
-  const activeCount = data.models.filter((m) => m.status !== 'idle').length
+  if (modelsLoading && !models) return <div className="loading">加载中...</div>
+  if (modelsError) return <div className="error-banner">⚠ {modelsError}</div>
+  if (!models) return null
+
+  const activeCount = models.models.filter((m) => m.status !== 'idle').length
 
   return (
     <>
-      <PageHeader title="模型管理" subtitle={`共 ${data.total} 个模型，${activeCount} 个活跃`} />
+      <PageHeader title="模型管理" subtitle={`共 ${models.total} 个模型，${activeCount} 个活跃`} />
       <div className="model-detail-list">
-        {data.models
+        {models.models
           .sort((a, b) => b.requests - a.requests)
           .map((m) => (
             <div key={m.model} className="model-detail-card">
@@ -78,7 +82,7 @@ export default function Models() {
               </div>
             </div>
           ))}
-        {data.models.length === 0 && (
+        {models.models.length === 0 && (
           <div className="empty-state">
             <div className="empty-icon">📭</div>
             <div className="empty-text">暂无模型数据</div>

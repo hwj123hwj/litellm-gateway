@@ -1,7 +1,6 @@
-import { useCallback } from 'react'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getDashboard } from '../api'
-import { useFetch } from '../hooks'
+import { useStore } from '../store'
 
 const PROVIDER_COLORS: Record<string, string> = {
   glm: '#9a3412',
@@ -29,14 +28,19 @@ function formatNumber(n: number): string {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const fetcher = useCallback(() => getDashboard(), [])
-  const { data, error, loading } = useFetch(fetcher, { refreshInterval: 10000 })
+  const { dashboard, dashboardLoading, dashboardError, fetchDashboard } = useStore()
 
-  if (loading) return <div className="loading">加载中...</div>
-  if (error) return <div className="error-banner">⚠ {error}</div>
-  if (!data) return null
+  useEffect(() => {
+    fetchDashboard()
+    const timer = setInterval(fetchDashboard, 10000)
+    return () => clearInterval(timer)
+  }, [fetchDashboard])
 
-  const { summary, providers, models } = data
+  if (dashboardLoading && !dashboard) return <div className="loading">加载中...</div>
+  if (dashboardError) return <div className="error-banner">⚠ {dashboardError}</div>
+  if (!dashboard) return null
+
+  const { summary, providers, models } = dashboard
 
   return (
     <>
@@ -149,7 +153,7 @@ export default function Dashboard() {
                 {models
                   .sort((a, b) => b.requests - a.requests)
                   .slice(0, 5)
-                  .map((m, i) => {
+                  .map((m) => {
                     const maxReq = Math.max(...models.map((x) => x.requests), 1)
                     const pct = (m.requests / maxReq) * 100
                     return (

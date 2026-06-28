@@ -1,6 +1,5 @@
-import { useCallback } from 'react'
-import { getLogs } from '../api'
-import { useFetch } from '../hooks'
+import { useEffect } from 'react'
+import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
 function fmtTime(ts: string) {
@@ -18,24 +17,29 @@ function fmtLatency(ms: number) {
 }
 
 export default function Logs() {
-  const fetcher = useCallback(() => getLogs(100), [])
-  const { data, error, loading } = useFetch(fetcher, { refreshInterval: 10000 })
+  const { logs, logsLoading, logsError, fetchLogs } = useStore()
 
-  if (loading) return <div className="loading">加载中...</div>
-  if (error) return <div className="error-banner">⚠ {error}</div>
-  if (!data) return null
+  useEffect(() => {
+    fetchLogs(100)
+    const timer = setInterval(() => fetchLogs(100), 10000)
+    return () => clearInterval(timer)
+  }, [fetchLogs])
+
+  if (logsLoading && !logs) return <div className="loading">加载中...</div>
+  if (logsError) return <div className="error-banner">⚠ {logsError}</div>
+  if (!logs) return null
 
   return (
     <>
-      <PageHeader title="活动日志" subtitle={`最近 ${data.total} 条请求记录`} />
+      <PageHeader title="活动日志" subtitle={`最近 ${logs.total} 条请求记录`} />
       <div className="logs-list">
-        {data.logs.length === 0 && (
+        {logs.logs.length === 0 && (
           <div className="empty-state">
             <div className="empty-icon">📄</div>
             <div className="empty-text">暂无日志，等待第一个请求...</div>
           </div>
         )}
-        {data.logs.map((log, i) => {
+        {logs.logs.map((log, i) => {
           const isSuccess = log.status_code >= 200 && log.status_code < 400
           const statusClass = log.error ? 'error' : isSuccess ? 'success' : 'error'
           const statusText = log.error ? '错误' : isSuccess ? '成功' : `${log.status_code}`

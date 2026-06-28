@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
@@ -8,37 +8,33 @@ import Models from './pages/Models'
 import Providers from './pages/Providers'
 import Logs from './pages/Logs'
 import Settings from './pages/Settings'
-import type { HealthResponse } from './api'
-import { getHealth } from './api'
+import { useStore } from './store'
 
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [health, setHealth] = useState<HealthResponse | null>(null)
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('api_key') || '')
-
-  const handleSaveKey = useCallback((key: string) => {
-    setApiKey(key)
-    localStorage.setItem('api_key', key)
-  }, [])
+  const {
+    apiKey,
+    setApiKey,
+    health,
+    fetchHealth,
+  } = useStore()
 
   useEffect(() => {
     if (!apiKey) return
-    const load = () => {
-      getHealth()
-        .then(setHealth)
-        .catch(() => setHealth(null))
-    }
-    load()
-    const timer = setInterval(load, 15000)
+    fetchHealth()
+    const timer = setInterval(fetchHealth, 15000)
     return () => clearInterval(timer)
-  }, [apiKey])
+  }, [apiKey, fetchHealth])
 
   const status = health?.status || 'unknown'
 
+  const handleSaveKey = (key: string) => {
+    setApiKey(key)
+    window.location.reload()
+  }
+
   return (
     <div className="app-layout">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      {sidebarOpen && <div className="overlay show" onClick={() => setSidebarOpen(false)} />}
+      <Sidebar onClose={() => {}} />
 
       <div className="shell">
         <div className="api-key-bar">
@@ -51,10 +47,7 @@ export default function App() {
           <button onClick={() => window.location.reload()}>连接</button>
         </div>
 
-        <Header
-          status={status}
-          onMenuClick={() => setSidebarOpen(true)}
-        />
+        <Header status={status} onMenuClick={() => {}} />
 
         <main className="content">
           <Routes>

@@ -9,11 +9,11 @@ const NAV_ITEMS = [
 ]
 
 interface Props {
-  open: boolean
-  onClose: () => void
+  open?: boolean
+  onClose?: () => void
 }
 
-export default function Sidebar({ open, onClose }: Props) {
+export default function Sidebar({ open = false, onClose }: Props) {
   const location = useLocation()
 
   return (

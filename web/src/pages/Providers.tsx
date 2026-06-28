@@ -1,6 +1,5 @@
-import { useCallback } from 'react'
-import { getProviders } from '../api'
-import { useFetch } from '../hooks'
+import { useEffect } from 'react'
+import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
 const COLORS: Record<string, string> = {
@@ -21,18 +20,23 @@ function abbr(name: string) {
 }
 
 export default function Providers() {
-  const fetcher = useCallback(() => getProviders(), [])
-  const { data, error, loading } = useFetch(fetcher, { refreshInterval: 15000 })
+  const { providers, providersLoading, providersError, fetchProviders } = useStore()
 
-  if (loading) return <div className="loading">加载中...</div>
-  if (error) return <div className="error-banner">⚠ {error}</div>
-  if (!data) return null
+  useEffect(() => {
+    fetchProviders()
+    const timer = setInterval(fetchProviders, 15000)
+    return () => clearInterval(timer)
+  }, [fetchProviders])
+
+  if (providersLoading && !providers) return <div className="loading">加载中...</div>
+  if (providersError) return <div className="error-banner">⚠ {providersError}</div>
+  if (!providers) return null
 
   return (
     <>
-      <PageHeader title="提供商" subtitle={`共 ${data.total} 个提供商`} />
+      <PageHeader title="提供商" subtitle={`共 ${providers.total} 个提供商`} />
       <div className="provider-grid">
-        {data.providers.map((p) => (
+        {providers.providers.map((p) => (
           <div key={p.name} className="provider-card">
             <div className="provider-icon" style={{ background: `linear-gradient(135deg, ${color(p.name)}, ${color(p.name)}cc)` }}>
               {abbr(p.name)}
@@ -48,7 +52,7 @@ export default function Providers() {
             )}
           </div>
         ))}
-        {data.providers.length === 0 && (
+        {providers.providers.length === 0 && (
           <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
             <div className="empty-icon">🔌</div>
             <div className="empty-text">暂无提供商数据</div>
