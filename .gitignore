@@ -8,3 +8,12 @@ __pycache__/
 certbot/conf/
 certbot/www/
 .DS_Store
+
+# Easy Code
+.easycode/
+
+# CI Runner
+runner/
+
+# Go gateway runtime data
+go-gateway/data/
