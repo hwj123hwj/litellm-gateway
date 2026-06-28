@@ -12,9 +12,15 @@ import {
   getModels,
   getLogs,
   getHealth,
+  setBackendUrl,
+  getBackendUrl,
 } from '../api'
 
 interface AppState {
+  // Backend URL
+  backendUrl: string
+  setBackendUrl: (url: string) => void
+
   // Auth
   apiKey: string
   setApiKey: (key: string) => void
@@ -51,6 +57,13 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  // Backend URL
+  backendUrl: getBackendUrl(),
+  setBackendUrl: (url: string) => {
+    setBackendUrl(url)
+    set({ backendUrl: url })
+  },
+
   // Auth
   apiKey: localStorage.getItem('api_key') || '',
   setApiKey: (key: string) => {
