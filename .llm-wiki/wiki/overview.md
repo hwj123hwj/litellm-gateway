@@ -1,6 +1,6 @@
 ---
 type: concept
-date: 2026-06-21
+date: 2026-06-28
 tags:
   - overview
   - architecture
@@ -8,7 +8,7 @@ tags:
   - updated
 ---
 
-# Project Overview: LLM Gateway (Updated 2026-06-21)
+# Project Overview: LLM Gateway (Updated 2026-06-28)
 
 ## Summary
 
@@ -50,6 +50,9 @@ AI Agent (Codex/Claude Code) ──▶ Gateway (:4001)
 - **Model aliases**: opus/sonnet/haiku naming for consistent tier mapping
 - **Alias-only exposure**: Models with aliases only expose the alias in `/v1/models` (raw ID hidden)
 - **Auth**: Single master key (`LITELLM_MASTER_KEY`) protects the gateway
+- **Admin auth**: Independent `ADMIN_TOKEN` for admin endpoints (optional)
+- **Metrics persistence**: SQLite storage for request logs and daily stats
+- **Auto cleanup**: Daily cleanup of data older than 30 days
 
 ## File Layout
 
@@ -60,17 +63,21 @@ go-gateway/
 ├── .env                 # API keys and config
 ├── internal/
 │   ├── config/          # Config loading (port, proxy, etc.)
-│   ├── auth/            # Bearer token auth
+│   ├── auth/            # Bearer token auth + admin auth
 │   ├── handlers/        # HTTP handlers (chat, models, health, admin)
 │   ├── middleware/       # Logging + metrics middleware
 │   ├── metrics/         # In-memory metrics collector
+│   ├── storage/         # SQLite persistence
 │   └── provider/        # Provider implementations + router
 web/                     # Admin dashboard (React + Vite + Capacitor)
 ├── src/
 │   ├── api/             # API client for /admin/* endpoints
 │   ├── components/      # Sidebar, Header, MobileTabBar
 │   ├── pages/           # Dashboard, Models, Providers, Logs, Settings
+│   ├── plugins/         # Capacitor native plugins
+│   ├── store/           # Zustand state management
 │   └── styles/          # Responsive CSS
+├── android/             # Android project (Capacitor)
 ├── capacitor.config.json # Android packaging config
 └── vite.config.ts       # Dev proxy + build config
 ```
