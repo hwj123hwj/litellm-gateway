@@ -61,9 +61,18 @@ go-gateway/
 ├── internal/
 │   ├── config/          # Config loading (port, proxy, etc.)
 │   ├── auth/            # Bearer token auth
-│   ├── handlers/        # HTTP handlers (chat, models, health)
-│   ├── middleware/       # Logging middleware
+│   ├── handlers/        # HTTP handlers (chat, models, health, admin)
+│   ├── middleware/       # Logging + metrics middleware
+│   ├── metrics/         # In-memory metrics collector
 │   └── provider/        # Provider implementations + router
+web/                     # Admin dashboard (React + Vite + Capacitor)
+├── src/
+│   ├── api/             # API client for /admin/* endpoints
+│   ├── components/      # Sidebar, Header, MobileTabBar
+│   ├── pages/           # Dashboard, Models, Providers, Logs, Settings
+│   └── styles/          # Responsive CSS
+├── capacitor.config.json # Android packaging config
+└── vite.config.ts       # Dev proxy + build config
 ```
 
 ## Deployment
@@ -76,4 +85,5 @@ See [[server-deployment]] for details.
 - [[provider-config]] — How to add/modify providers
 - [[fallback-chains]] — Auto-fallback routing logic
 - [[model-aliases]] — Haiku/Sonnet/Opus tier naming
+- [[admin-dashboard]] — Admin dashboard (React + Capacitor)
 - [[source-codebase-2026-06-21]] — Latest state capture

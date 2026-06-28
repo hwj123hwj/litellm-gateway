@@ -209,6 +209,9 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		return
 	}
 
+	c.Set("request_model", req.Model)
+	c.Set("request_is_stream", req.Stream)
+
 	if req.Stream {
 		h.handleStream(c, providerReq)
 		return
@@ -220,6 +223,9 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
+
+	c.Set("request_input_tokens", resp.Usage.InputTokens)
+	c.Set("request_output_tokens", resp.Usage.OutputTokens)
 
 	c.JSON(http.StatusOK, toOpenAIChatCompletionResponse(resp))
 }

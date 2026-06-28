@@ -1,0 +1,21 @@
+{
+  "appId": "com.ezycode.litellm-admin",
+  "appName": "LiteLLM Admin",
+  "webDir": "dist/renderer",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true,
+    "url": "http://192.168.1.100:3000"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1000,
+      "backgroundColor": "#fef9f0",
+      "showSpinner": false
+    }
+  }
+}

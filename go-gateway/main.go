@@ -9,6 +9,7 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/auth"
 	"github.com/weijian/go-llm-gateway/internal/config"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
+	"github.com/weijian/go-llm-gateway/internal/metrics"
 	"github.com/weijian/go-llm-gateway/internal/middleware"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 )
@@ -21,6 +22,9 @@ func main() {
 
 	logger := log.New(os.Stdout, "[gateway] ", log.LstdFlags)
 	logger.Printf("Starting go-llm-gateway on port %d", cfg.Port)
+
+	// 初始化指标收集器
+	collector := metrics.NewCollector()
 
 	// 初始化路由器
 	router := provider.NewRouter(logger)
@@ -64,7 +68,7 @@ func main() {
 	// 创建 Gin 引擎
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	engine.Use(middleware.Logging(logger))
+	engine.Use(middleware.Logging(logger, collector))
 	engine.Use(auth.BearerAuth(cfg.MasterKey, logger))
 
 	// 注册路由
@@ -73,6 +77,7 @@ func main() {
 	responsesHandler := handlers.NewResponsesHandler(router, logger)
 	modelHandler := handlers.NewModelHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
+	adminHandler := handlers.NewAdminHandler(router, collector, logger)
 
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.POST("/v1/chat/completions", chatHandler.Handle)
@@ -84,6 +89,13 @@ func main() {
 	engine.POST("/chat/completions", chatHandler.Handle)
 	engine.POST("/responses", responsesHandler.Handle)
 	engine.GET("/models", modelHandler.Handle)
+
+	// 管理面板 API
+	engine.GET("/admin/dashboard", adminHandler.HandleDashboard)
+	engine.GET("/admin/providers", adminHandler.HandleProviders)
+	engine.GET("/admin/models", adminHandler.HandleModels)
+	engine.GET("/admin/logs", adminHandler.HandleLogs)
+	engine.GET("/admin/health", adminHandler.HandleHealth)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	logger.Printf("Server listening on %s", addr)
