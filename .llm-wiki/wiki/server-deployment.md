@@ -5,6 +5,7 @@ tags:
   - deployment
   - cicd
   - server
+  - cors
 ---
 
 # Server Deployment (Updated 2026-06-28)
@@ -46,6 +47,50 @@ LiteLLM Gateway 部署在 8.141.97.21:4001 服务器上，通过 GitHub Actions 
 | `LONGCAT_API_KEY` | LongCat API Key |
 | `EASYCLAW_API_KEY` | EasyClaw API Key |
 
+## CORS 配置
+
+### 问题
+
+Android WebView 跨域请求被拒绝，CORS 预检请求返回 401。
+
+### 解决方案
+
+1. **添加 CORS 中间件**（gin-contrib/cors）
+   - 允许所有来源跨域请求
+   - 允许 Authorization 头
+   - 预检请求缓存 12 小时
+
+2. **OPTIONS 请求跳过认证**
+   - BearerAuth 中间件跳过 OPTIONS 请求
+   - CORS 预检请求不需要携带认证信息
+
+### 测试
+
+```bash
+# CORS 预检请求
+curl -H "Origin: http://localhost" \
+     -H "Access-Control-Request-Method: GET" \
+     -H "Access-Control-Request-Headers: Authorization" \
+     -X OPTIONS http://8.141.97.21:4001/admin/health
+
+# 返回：
+# HTTP/1.1 204 No Content
+# Access-Control-Allow-Headers: Origin,Content-Type,Authorization,Accept,X-Requested-With
+# Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+# Access-Control-Allow-Origin: *
+# Access-Control-Max-Age: 43200
+
+# 实际 GET 请求
+curl -H "Origin: http://localhost" \
+     -H "Authorization: Bearer sk-local-gateway-hwj123hwj" \
+     http://8.141.97.21:4001/admin/health
+
+# 返回：
+# HTTP/1.1 200 OK
+# Access-Control-Allow-Origin: *
+# {"status":"ok",...}
+```
+
 ## 部署流程
 
 1. **测试阶段：**
@@ -67,6 +112,7 @@ LiteLLM Gateway 部署在 8.141.97.21:4001 服务器上，通过 GitHub Actions 
 
 ```bash
 curl http://8.141.97.21:4001/health
+# 返回：{"status":"ok"}
 ```
 
 ## Admin API
@@ -81,6 +127,6 @@ curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/logs
 
 ## Android APK 配置
 
-在 Android 应用中配置：
+在 Android 应用首次启动时配置：
 - **后端地址：** `http://8.141.97.21:4001`
 - **API Key：** LITELLM_MASTER_KEY 的值
