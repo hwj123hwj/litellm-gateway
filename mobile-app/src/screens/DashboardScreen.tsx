@@ -81,7 +81,7 @@ export default function DashboardScreen({ navigation }: any) {
   }
 
   if (dashboardError && !dashboard) {
-    return <PageContainer error={dashboardError} />
+    return <PageContainer error={dashboardError} onRetry={fetchDashboard} />
   }
 
   const summary = dashboard?.summary

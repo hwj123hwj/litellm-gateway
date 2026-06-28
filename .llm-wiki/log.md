@@ -2,6 +2,17 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 3
+- **Updated synthesis page**: mobile-app-performance (sections 17–23, updated file map, trimmed follow-ups)
+- **Key changes (code)**:
+  - build.gradle: enabled R8 minify + shrinkResources by default for release builds (APK size reduction)
+  - ProvidersScreen: replaced manual ScrollView grid with FlashList numColumns=2 (virtualization)
+  - Extracted ModelCard, LogEntryItem, ProviderCard into React.memo components under components/{models,logs,providers}/
+  - PageContainer: added onRetry prop → error state now shows a retry button; all 4 data screens wire it up
+  - App.tsx: deduplicated StatusBar into a single top-level instance
+  - TabNavigator: extracted screenOptions to module level (stable reference, fewer re-renders)
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 2
 - **Updated synthesis page**: mobile-app-performance (sections 10–16 + updated file map + closed follow-ups)
 - **Key changes (code)**:

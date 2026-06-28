@@ -111,31 +111,35 @@ export default function App() {
   // showSetup 是派生状态，无需独立 useState
   const showSetup = initialized && !backendUrl
 
+  let content: React.ReactNode
   if (!initialized) {
-    return (
+    content = (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>加载中...</Text>
-        <StatusBar style="dark" />
       </View>
     )
-  }
-
-  if (showSetup) {
-    return (
+  } else if (showSetup) {
+    content = (
       <SafeAreaProvider>
         <SetupScreen />
-        <StatusBar style="dark" />
+      </SafeAreaProvider>
+    )
+  } else {
+    content = (
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <TabNavigator />
+        </NavigationContainer>
       </SafeAreaProvider>
     )
   }
 
+  // StatusBar 统一提取到顶层，避免在三个分支中重复
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <TabNavigator />
-        <StatusBar style="dark" />
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <>
+      {content}
+      <StatusBar style="dark" />
+    </>
   )
 }
 

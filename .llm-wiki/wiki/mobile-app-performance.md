@@ -100,25 +100,31 @@ mobile-app/src/
 │   └── index.ts
 ├── components/
 │   ├── dashboard/
-│   │   └── index.tsx      # NEW: memoized ProviderChip / ActiveModelItem / ModelRankRow
+│   │   └── index.tsx      # memoized ProviderChip / ActiveModelItem / ModelRankRow
+│   ├── logs/              # NEW (R3)
+│   │   └── LogEntryItem.tsx
+│   ├── models/            # NEW (R3)
+│   │   └── ModelCard.tsx
+│   ├── providers/         # NEW (R3)
+│   │   └── ProviderCard.tsx
 │   ├── CardPanel.tsx
-│   ├── ItemSeparator.tsx  # NEW (R2): memoized list separator
+│   ├── ItemSeparator.tsx  # memoized list separator (R2)
 │   ├── KpiCard.tsx
-│   ├── PageContainer.tsx
+│   ├── PageContainer.tsx  # R3: +onRetry error button
 │   ├── PageHeader.tsx
 │   ├── StatusBadge.tsx
 │   └── index.ts
-├── hooks/                 # NEW (R2)
+├── hooks/                 # (R2)
 │   ├── usePolling.ts      # usePolling(fn, intervalMs)
 │   └── index.ts
 ├── navigation/
-│   ├── TabNavigator.tsx
+│   ├── TabNavigator.tsx   # R3: module-level screenOptions
 │   └── index.ts
 ├── screens/
-│   ├── DashboardScreen.tsx    # ScrollView + memoized items + precomputed sorts + usePolling
-│   ├── LogsScreen.tsx         # stable keyExtractor + usePolling + ItemSeparator
-│   ├── ModelsScreen.tsx       # atomic selectors + non-mutating sort + usePolling + ItemSeparator
-│   ├── ProvidersScreen.tsx    # atomic selectors + usePolling
+│   ├── DashboardScreen.tsx    # ScrollView + memoized items + precomputed sorts + usePolling + retry
+│   ├── LogsScreen.tsx         # stable keyExtractor + usePolling + ItemSeparator + LogEntryItem + retry
+│   ├── ModelsScreen.tsx       # atomic selectors + non-mutating sort + usePolling + ItemSeparator + ModelCard + retry
+│   ├── ProvidersScreen.tsx    # atomic selectors + usePolling + FlashList numColumns=2 + ProviderCard + retry
 │   ├── SettingsScreen.tsx     # atomic selectors + timer cleanup
 │   └── index.ts
 ├── store/
@@ -132,37 +138,45 @@ mobile-app/src/
     ├── format.ts           # formatNumber / formatLatency / formatRelativeTime / abbreviate
     └── index.ts
 ```
-├── navigation/
-│   ├── TabNavigator.tsx
-│   └── index.ts
-├── screens/
-│   ├── DashboardScreen.tsx    # ScrollView + memoized items + precomputed sorts
-│   ├── LogsScreen.tsx         # stable keyExtractor
-│   ├── ModelsScreen.tsx       # atomic selectors + non-mutating sort
-│   ├── ProvidersScreen.tsx    # atomic selectors
-│   ├── SettingsScreen.tsx     # atomic selectors
-│   └── index.ts
-├── store/
-│   └── index.ts
-├── theme/
-│   ├── colors.ts
-│   ├── spacing.ts
-│   ├── typography.ts
-│   └── index.ts
-└── utils/                  # NEW
-    ├── format.ts           # formatNumber / formatLatency / formatRelativeTime / abbreviate
-    └── index.ts
-```
 
-## Follow-ups (not yet applied)
+## Round 3 — Build optimization, componentization & UX (2026-06-29)
+
+### 17. R8 + resource shrinking (release build size)
+- **Before**: `android.enableMinifyInReleaseBuilds` defaulted to `false`; `shrinkResources` defaulted to `'false'`. Release APKs shipped full native + bridge code.
+- **After**: both now default to `'true'` in `app/build.gradle`. The existing `proguard-rules.pro` already keeps Reanimated + TurboModules, so R8 is safe to enable. This shrinks the release APK (native code + unused JS bridge classes).
+
+### 18. ProvidersScreen: ScrollView → FlashList numColumns=2
+- **Before**: `ProvidersScreen` manually chunked data into rows-of-2 and rendered inside a `ScrollView`. Every provider rendered at once (no virtualization); manual `rows` useMemo added complexity.
+- **After**: replaced with a single `<FlashList numColumns={2}>`. FlashList handles the grid layout, recycling, and only mounts visible items.
+
+### 19. ModelCard extracted (ModelsScreen)
+- **Before**: the model card markup was an inline closure inside `renderItem`, recreated every render — FlashList could not memoize it.
+- **After**: extracted to `src/components/models/ModelCard.tsx` as a `React.memo` component. `ModelsScreen` is now ~60 lines (was ~210).
+
+### 20. LogEntryItem extracted (LogsScreen)
+- **Before**: same inline-closure anti-pattern for log entries.
+- **After**: extracted to `src/components/logs/LogEntryItem.tsx`, `React.memo`-wrapped. `LogsScreen` is now ~75 lines (was ~190).
+
+### 21. ProviderCard extracted (ProvidersScreen)
+- **Before**: `ProviderCard` was a function defined inside the screen file; not memoized.
+- **After**: moved to `src/components/providers/ProviderCard.tsx`, `React.memo`-wrapped.
+
+### 22. PageContainer error retry
+- **Before**: the error state only showed a static banner — no way to recover without restarting the app.
+- **After**: `PageContainer` accepts an optional `onRetry` callback; when provided, a "重试" (retry) button renders below the error banner. All four data screens now pass their fetch function as the retry handler.
+
+### 23. App.tsx StatusBar dedup + TabNavigator stable options
+- **Before**: `<StatusBar style="dark" />` was duplicated across all three render branches in `App.tsx`. `TabNavigator.screenOptions` was an inline arrow created every render.
+- **After**: StatusBar lifted to the top level (single instance). `screenOptions` extracted to a module-level function in `TabNavigator.tsx`.
+
+## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:
 
-- **React Compiler**: enable `babel-plugin-react-compiler` for automatic memoization if profiler shows wasted renders after the selector refactor.
+- **React Compiler**: enable `babel-plugin-react-compiler` for automatic memoization if profiler shows wasted renders after the selector + memo refactor.
 - **FlashList `estimatedItemSize`**: the @shopify/flash-list v2 type defs in this project do not declare `estimatedItemSize` (it is deprecated in v2), so it was intentionally omitted. If upgrading to a version that re-introduces it, add it back for accurate recycling.
 - **Bundle analysis**: run `npx react-native bundle ... + source-map-explorer` to baseline JS bundle size before/after further changes.
-- **Hermes mmap**: verify Android JS bundle is **not** compressed in the APK so Hermes can mmap it (TTI win). Check `android/app/build.gradle` `enableHermes` + packaging options.
-- **R8**: confirm `minifyEnabled` / `shrinkResources` are on for release builds.
+- **Hermes mmap**: `enableBundleCompression` is already `false` in `build.gradle` and `expo.useLegacyPackaging=false` in `gradle.properties`, so the JS bundle should be uncompressed/mmap-able. Verify with an actual release APK build.
 
 ## Related
 
