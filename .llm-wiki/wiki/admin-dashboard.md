@@ -6,9 +6,16 @@ LiteLLM Gateway 管理面板，提供实时监控、模型管理、提供商状�
 
 ## 下载
 
-**GitHub Release:** https://github.com/hwj123hwj/litellm-gateway/releases/tag/v1.0.0
+**最新版本: v1.0.1**
 
-**APK下载:** https://github.com/hwj123hwj/litellm-gateway/releases/download/v1.0.0/litellm-admin-v1.0.0.apk
+**GitHub Release:** https://github.com/hwj123hwj/litellm-gateway/releases/tag/v1.0.1
+
+**APK下载:** https://github.com/hwj123hwj/litellm-gateway/releases/download/v1.0.1/litellm-admin-v1.0.1.apk
+
+### v1.0.1 更新内容
+- Android 首次启动配置引导
+- 自动检测 Android 环境
+- 未配置后端地址时显示配置页面
 
 ## 技术栈
 
