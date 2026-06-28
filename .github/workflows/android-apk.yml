@@ -8,19 +8,15 @@ on:
 
 jobs:
   build-android:
-    name: Build & Release APK
+    name: Build APK
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
-    env:
-      EXPO_NO_DOTENV: '1'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Node.js ──
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -28,79 +24,49 @@ jobs:
           cache: 'npm'
           cache-dependency-path: mobile-app/package-lock.json
 
-      # ── Java 17 ──
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # ── Android SDK ──
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK components
-        run: |
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" 2>&1 | tail -5
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-
-      # ── 安装依赖 ──
       - name: Install npm dependencies
         working-directory: mobile-app
         run: npm ci
 
-      # ── 安装 Expo CLI ──
-      - name: Install Expo CLI
-        run: npm install -g expo-cli eas-cli
-
-      # ── 登录 Expo（匿名模式，不需要账号）──
-      - name: Expo whoami
-        working-directory: mobile-app
-        run: npx expo whoami || true
-
-      # ── Prebuild：生成原生 Android 项目 ──
       - name: Expo Prebuild
         working-directory: mobile-app
-        run: |
-          npx expo prebuild --platform android --no-install
-          echo "=== Prebuild done, listing android dir ==="
-          ls -la android/ || true
-          ls -la android/app/ || true
+        run: npx expo prebuild --platform android --no-install
 
-      # ── 设置 Gradle ──
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      # ── 构建 APK ──
-      - name: Build Android APK
+      - name: Build APK
         working-directory: mobile-app/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon -x test -x lint --stacktrace 2>&1 | tail -100
+          ./gradlew assembleRelease --no-daemon
 
-      # ── 验证 APK ──
-      - name: Verify APK exists
+      - name: Find APK
         working-directory: mobile-app
         run: |
           echo "=== Looking for APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found"
-          ls -la android/app/build/outputs/apk/release/ 2>/dev/null || echo "Release dir not found"
-          ls -la android/app/build/outputs/apk/debug/ 2>/dev/null || echo "Debug dir not found"
+          find . -name "*.apk" -type f 2>/dev/null | head -20
+          echo "=== Listing build outputs ==="
+          ls -laR android/app/build/outputs/ 2>/dev/null | head -50
 
-      # ── 上传 Artifact ──
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: litellm-admin-apk
-          path: |
-            mobile-app/android/app/build/outputs/apk/release/*.apk
-            mobile-app/android/app/build/outputs/apk/debug/*.apk
+          path: mobile-app/android/app/build/outputs/apk/**/*.apk
           retention-days: 30
 
-      # ── 创建 Release ──
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') && success()
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: "LiteLLM Admin ${{ github.ref_name }}"
@@ -121,9 +87,7 @@ jobs:
             - 从 Capacitor (WebView) 迁移至 React Native
             - Hermes 引擎优化启动速度
             - FlashList 优化长列表滚动性能
-          files: |
-            mobile-app/android/app/build/outputs/apk/release/*.apk
-            mobile-app/android/app/build/outputs/apk/debug/*.apk
+          files: mobile-app/android/app/build/outputs/apk/**/*.apk
           draft: false
           prerelease: false
         env:
