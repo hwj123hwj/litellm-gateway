@@ -2,21 +2,17 @@ import { useEffect, useMemo } from 'react'
 import { View, Text, StyleSheet, ScrollView } from 'react-native'
 import { useStore } from '../store'
 import { PageContainer, PageHeader } from '../components'
-import { Colors, Typography, Spacing, Radius, Shadow, getProviderColor, getStatusColor } from '../theme'
+import {
+  Colors,
+  Typography,
+  Spacing,
+  Radius,
+  Shadow,
+  getProviderColor,
+  getStatusColor,
+} from '../theme'
+import { formatLatency, abbreviate } from '../utils'
 import type { ProviderInfo } from '../api'
-
-function formatLatency(ms: number): string {
-  return ms < 1000 ? ms.toFixed(0) + 'ms' : (ms / 1000).toFixed(1) + 's'
-}
-
-function abbreviate(name: string): string {
-  return name
-    .split(/[-_]/)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 3)
-}
 
 function ProviderCard({ item }: { item: ProviderInfo }) {
   const color = getProviderColor(item.name)
@@ -52,8 +48,10 @@ function ProviderCard({ item }: { item: ProviderInfo }) {
 }
 
 export default function ProvidersScreen() {
-  const { providers, providersLoading, providersError, fetchProviders } =
-    useStore()
+  const providers = useStore((s) => s.providers)
+  const providersLoading = useStore((s) => s.providersLoading)
+  const providersError = useStore((s) => s.providersError)
+  const fetchProviders = useStore((s) => s.fetchProviders)
 
   useEffect(() => {
     fetchProviders()
@@ -76,7 +74,10 @@ export default function ProvidersScreen() {
   }, [data])
 
   return (
-    <PageContainer loading={providersLoading && !providers} error={providersError}>
+    <PageContainer
+      loading={providersLoading && !providers}
+      error={providersError}
+    >
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}

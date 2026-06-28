@@ -22,7 +22,14 @@ async function getBaseUrl(): Promise<string> {
   return 'http://10.0.2.2:4001/admin'
 }
 
-async function fetchJSON<T>(path: string): Promise<T> {
+/**
+ * 统一的 JSON 请求方法。
+ * 支持 AbortSignal 以便组件卸载时取消未完成的请求，避免卸载后 setState。
+ */
+async function fetchJSON<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
   const apiKey = (await AsyncStorage.getItem(STORAGE_KEYS.API_KEY)) || ''
   const base = await getBaseUrl()
   const res = await fetch(`${base}${path}`, {
@@ -30,6 +37,7 @@ async function fetchJSON<T>(path: string): Promise<T> {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
+    signal,
   })
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`)
@@ -57,22 +65,27 @@ export async function getApiKey(): Promise<string> {
   return (await AsyncStorage.getItem(STORAGE_KEYS.API_KEY)) || ''
 }
 
-export function getDashboard(): Promise<DashboardResponse> {
-  return fetchJSON('/dashboard')
+export function getDashboard(signal?: AbortSignal): Promise<DashboardResponse> {
+  return fetchJSON('/dashboard', signal)
 }
 
-export function getProviders(): Promise<ProvidersResponse> {
-  return fetchJSON('/providers')
+export function getProviders(
+  signal?: AbortSignal,
+): Promise<ProvidersResponse> {
+  return fetchJSON('/providers', signal)
 }
 
-export function getModels(): Promise<ModelsResponse> {
-  return fetchJSON('/models')
+export function getModels(signal?: AbortSignal): Promise<ModelsResponse> {
+  return fetchJSON('/models', signal)
 }
 
-export function getLogs(limit = 50): Promise<LogsResponse> {
-  return fetchJSON(`/logs?limit=${limit}`)
+export function getLogs(
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<LogsResponse> {
+  return fetchJSON(`/logs?limit=${limit}`, signal)
 }
 
-export function getHealth(): Promise<HealthResponse> {
-  return fetchJSON('/health')
+export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  return fetchJSON('/health', signal)
 }

@@ -13,7 +13,11 @@ import { PageHeader, PageContainer } from '../components'
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme'
 
 export default function SettingsScreen() {
-  const { backendUrl, setBackendUrl, apiKey, setApiKey, initialized } = useStore()
+  const backendUrl = useStore((s) => s.backendUrl)
+  const setBackendUrl = useStore((s) => s.setBackendUrl)
+  const apiKey = useStore((s) => s.apiKey)
+  const setApiKey = useStore((s) => s.setApiKey)
+  const initialized = useStore((s) => s.initialized)
   const [urlInput, setUrlInput] = useState(backendUrl)
   const [keyInput, setKeyInput] = useState(apiKey)
   const [saved, setSaved] = useState(false)

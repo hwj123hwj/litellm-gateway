@@ -4,24 +4,24 @@ import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
 import { PageContainer, PageHeader } from '../components'
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme'
+import { formatRelativeTime, formatLatency } from '../utils'
 import type { LogEntry } from '../api'
 
-function formatTime(ts: string): string {
-  const d = new Date(ts)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return Math.floor(diff / 60_000) + ' 分钟前'
-  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + ' 小时前'
-  return d.toLocaleDateString('zh-CN')
-}
-
-function formatLatency(ms: number): string {
-  return ms < 1000 ? ms.toFixed(0) + 'ms' : (ms / 1000).toFixed(1) + 's'
-}
-
 export default function LogsScreen() {
-  const { logs, logsLoading, logsError, fetchLogs } = useStore()
+  const logs = useStore((s) => s.logs)
+  const logsLoading = useStore((s) => s.logsLoading)
+  const logsError = useStore((s) => s.logsError)
+  const fetchLogs = useStore((s) => s.fetchLogs)
+
+  // 保存最新的日志项，以便 keyExtractor 稳定引用
+  // 使用 provider + model + timestamp 组合作为 key，避免使用 index
+  const keyExtractor = useCallback(
+    (item: LogEntry, _index: number): string => {
+      // timestamp + model 在多数场景下足够稳定
+      return `${item.timestamp}|${item.model}|${item.path}`
+    },
+    [],
+  )
 
   useEffect(() => {
     fetchLogs(100)
@@ -31,7 +31,7 @@ export default function LogsScreen() {
 
   const data = useMemo(() => logs?.logs ?? [], [logs?.logs])
 
-  const renderItem = useCallback(({ item, index }: { item: LogEntry; index: number }) => {
+  const renderItem = useCallback(({ item }: { item: LogEntry }) => {
     const isSuccess = item.status_code >= 200 && item.status_code < 400
     const hasError = !!item.error
     const statusClass = hasError ? 'error' : isSuccess ? 'success' : 'error'
@@ -73,7 +73,7 @@ export default function LogsScreen() {
         <Text style={styles.detail} numberOfLines={2}>
           {detailParts.join(' · ')}
         </Text>
-        <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
+        <Text style={styles.time}>{formatRelativeTime(item.timestamp)}</Text>
       </View>
     )
   }, [])
@@ -96,7 +96,7 @@ export default function LogsScreen() {
         <FlashList
           data={data}
           renderItem={renderItem}
-          keyExtractor={(_, i) => String(i)}
+          keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />

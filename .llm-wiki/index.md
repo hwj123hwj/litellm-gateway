@@ -26,4 +26,4 @@
 - [[model-aliases]] — Haiku/Sonnet/Opus tier naming (updated 2026-06-21)
 
 ## Synthesis
-<!-- Cross-cutting analysis pages will be listed here -->
+- [[mobile-app-performance]] — React Native app perf fixes (2026-06-29): selectors, sort-in-render, nested FlashList, stable keys

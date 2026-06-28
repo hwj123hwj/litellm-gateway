@@ -17,7 +17,8 @@ import { TabNavigator } from './src/navigation'
 import { Colors, Typography, Spacing, Radius, Shadow } from './src/theme'
 
 function SetupScreen() {
-  const { setBackendUrl, setApiKey, backendUrl } = useStore()
+  const setBackendUrl = useStore((s) => s.setBackendUrl)
+  const setApiKey = useStore((s) => s.setApiKey)
   const [url, setUrl] = useState('http://')
   const [key, setKey] = useState('')
   const [saving, setSaving] = useState(false)
@@ -97,30 +98,18 @@ function SetupScreen() {
 }
 
 export default function App() {
-  const { initialized, init, backendUrl, apiKey, fetchHealth } = useStore()
-  const [showSetup, setShowSetup] = useState(false)
+  // 使用精确选择器，避免 store 任意字段变化触发 App 重渲染
+  const initialized = useStore((s) => s.initialized)
+  const init = useStore((s) => s.init)
+  const backendUrl = useStore((s) => s.backendUrl)
 
+  // 启动时从 AsyncStorage 加载配置
   useEffect(() => {
     init()
   }, [init])
 
-  useEffect(() => {
-    if (!initialized) return
-    // 如果没有配置后端地址，显示设置引导
-    if (!backendUrl) {
-      setShowSetup(true)
-    } else {
-      setShowSetup(false)
-    }
-  }, [initialized, backendUrl])
-
-  // 定期刷新 health
-  useEffect(() => {
-    if (!apiKey || !backendUrl) return
-    fetchHealth()
-    const timer = setInterval(fetchHealth, 15000)
-    return () => clearInterval(timer)
-  }, [apiKey, backendUrl, fetchHealth])
+  // showSetup 是派生状态，无需独立 useState
+  const showSetup = initialized && !backendUrl
 
   if (!initialized) {
     return (

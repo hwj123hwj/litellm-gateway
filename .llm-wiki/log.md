@@ -2,6 +2,20 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) performance pass
+- **New synthesis page**: mobile-app-performance (full audit + fixes)
+- **Updated**: index.md (registered synthesis page)
+- **Key changes (code)**:
+  - Replaced nested empty-data FlashList in DashboardScreen with ScrollView
+  - Moved sort logic into useMemo (non-mutating) across Dashboard/Models screens
+  - Switched all screens + App.tsx to atomic Zustand selectors
+  - Removed duplicate 15s health polling + derived-state useState in App.tsx
+  - Stable keyExtractor in LogsScreen (timestamp|model|path instead of index)
+  - Extracted formatNumber/formatLatency/formatRelativeTime/abbreviate to src/utils
+  - Extracted memoized list-item components to src/components/dashboard
+  - Added AbortSignal plumbing to api/client.ts fetchJSON and get* functions
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-26] ingest | DeepV token path compatibility update
 - **New entity pages**: deepv-provider (DeepV Server custom provider specs)
 - **Updated**: index.md (registered deepv-provider entity)

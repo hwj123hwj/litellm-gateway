@@ -4,20 +4,13 @@ import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
 import { PageContainer, PageHeader } from '../components'
 import { Colors, Typography, Spacing, Radius, Shadow, getProviderColor, getStatusColor } from '../theme'
-import type { ModelInfo } from '../api'
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
-  return String(n)
-}
-
-function formatLatency(ms: number): string {
-  return ms < 1000 ? ms.toFixed(0) + 'ms' : (ms / 1000).toFixed(1) + 's'
-}
+import { formatNumber, formatLatency } from '../utils'
 
 export default function ModelsScreen() {
-  const { models, modelsLoading, modelsError, fetchModels } = useStore()
+  const models = useStore((s) => s.models)
+  const modelsLoading = useStore((s) => s.modelsLoading)
+  const modelsError = useStore((s) => s.modelsError)
+  const fetchModels = useStore((s) => s.fetchModels)
 
   useEffect(() => {
     fetchModels()
@@ -27,7 +20,7 @@ export default function ModelsScreen() {
 
   const sortedModels = useMemo(
     () =>
-      (models?.models ?? []).sort((a, b) => b.requests - a.requests),
+      [...(models?.models ?? [])].sort((a, b) => b.requests - a.requests),
     [models?.models],
   )
 
@@ -36,7 +29,7 @@ export default function ModelsScreen() {
     [sortedModels],
   )
 
-  const renderItem = useCallback(({ item }: { item: ModelInfo }) => {
+  const renderItem = useCallback(({ item }: { item: typeof sortedModels[number] }) => {
     const color = getProviderColor(item.provider || item.model)
     const sc = getStatusColor(item.status)
 
