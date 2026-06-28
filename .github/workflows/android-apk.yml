@@ -47,9 +47,13 @@ jobs:
         run: npx expo prebuild --platform android --clean
 
       # ── 构建 APK ──
+      - name: Make gradlew executable
+        working-directory: mobile-app/android
+        run: chmod +x gradlew
+
       - name: Build APK
         working-directory: mobile-app/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       # ── 签名 APK（可选，使用 debug keystore）──
       # 如果需要正式签名，在 Settings > Secrets 中配置 KEYSTORE_BASE64 等
