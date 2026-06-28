@@ -122,6 +122,8 @@ func main() {
 		admin.GET("/models", adminHandler.HandleModels)
 		admin.GET("/logs", adminHandler.HandleLogs)
 		admin.GET("/health", adminHandler.HandleHealth)
+		admin.GET("/config", adminHandler.HandleConfig)
+		admin.GET("/stats", adminHandler.HandleStats)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

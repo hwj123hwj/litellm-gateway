@@ -233,3 +233,44 @@ func (h *AdminHandler) HandleHealth(c *gin.Context) {
 		"providers":        providerStatuses,
 	})
 }
+
+// HandleConfig GET /admin/config
+// 返回当前配置信息
+func (h *AdminHandler) HandleConfig(c *gin.Context) {
+	providers := h.router.ListProviders()
+	chains := h.router.ListChains()
+
+	c.JSON(http.StatusOK, gin.H{
+		"providers": providers,
+		"chains":    chains,
+		"total_providers": len(providers),
+		"total_chains":    len(chains),
+	})
+}
+
+// HandleStats GET /admin/stats
+// 返回详细统计信息
+func (h *AdminHandler) HandleStats(c *gin.Context) {
+	dashboard := h.collector.GetDashboard()
+	modelStats := h.collector.GetModelStats()
+	providerStats := h.collector.GetProviderStats()
+
+	// 计算总 token 数
+	totalTokens := 0
+	for _, ms := range modelStats {
+		totalTokens += ms.TotalTokens
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"summary": gin.H{
+			"today_requests": dashboard.TodayRequests,
+			"success_rate":   dashboard.SuccessRate,
+			"active_models":  dashboard.ActiveModels,
+			"avg_latency_ms": dashboard.AvgLatency,
+			"uptime":         dashboard.Uptime,
+			"total_tokens":   totalTokens,
+		},
+		"models":    modelStats,
+		"providers": providerStats,
+	})
+}
