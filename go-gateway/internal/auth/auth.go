@@ -27,8 +27,8 @@ func extractToken(c *gin.Context) string {
 // BearerAuth 创建 Bearer token 认证中间件
 func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// /health 不需要认证
-		if c.Request.URL.Path == "/health" {
+		// /health 和 OPTIONS 请求不需要认证
+		if c.Request.URL.Path == "/health" || c.Request.Method == "OPTIONS" {
 			c.Next()
 			return
 		}
