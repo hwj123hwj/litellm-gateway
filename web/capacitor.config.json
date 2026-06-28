@@ -1,5 +1,5 @@
 {
-  "appId": "com.ezycode.litellm-admin",
+  "appId": "com.ezycode.litellm",
   "appName": "LiteLLM Admin",
   "webDir": "dist/renderer",
   "server": {
