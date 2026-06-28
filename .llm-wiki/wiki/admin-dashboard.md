@@ -4,6 +4,12 @@
 
 LiteLLM Gateway 管理面板，提供实时监控、模型管理、提供商状态、请求日志等功能。
 
+## 下载
+
+**GitHub Release:** https://github.com/hwj123hwj/litellm-gateway/releases/tag/v1.0.0
+
+**APK下载:** https://github.com/hwj123hwj/litellm-gateway/releases/download/v1.0.0/litellm-admin-v1.0.0.apk
+
 ## 技术栈
 
 | 组件 | 技术 | 版本 |
