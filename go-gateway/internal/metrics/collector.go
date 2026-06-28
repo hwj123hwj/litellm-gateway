@@ -52,6 +52,12 @@ type DashboardSummary struct {
 	Uptime        string  `json:"uptime"`
 }
 
+// Store 持久化存储接口
+type Store interface {
+	SaveRecord(r RequestRecord) error
+	GetRecentLogs(limit int) ([]RequestRecord, error)
+}
+
 // Collector 内存指标收集器
 type Collector struct {
 	mu          sync.RWMutex
@@ -59,6 +65,7 @@ type Collector struct {
 	maxRecords  int
 	startTime   time.Time
 	todayStart  time.Time
+	store       Store // 可选的持久化存储
 
 	// 按天重置的计数器
 	todayTotal   int
@@ -91,6 +98,13 @@ func NewCollector() *Collector {
 	}
 }
 
+// SetStore 设置持久化存储
+func (c *Collector) SetStore(store Store) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.store = store
+}
+
 // Record 记录一条请求
 func (c *Collector) Record(r RequestRecord) {
 	c.mu.Lock()
@@ -110,6 +124,11 @@ func (c *Collector) Record(r RequestRecord) {
 		c.records[len(c.records)-1] = r
 	} else {
 		c.records = append(c.records, r)
+	}
+
+	// 持久化到 SQLite
+	if c.store != nil {
+		go c.store.SaveRecord(r)
 	}
 
 	// 更新每日计数

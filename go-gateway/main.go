@@ -12,6 +12,7 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/metrics"
 	"github.com/weijian/go-llm-gateway/internal/middleware"
 	"github.com/weijian/go-llm-gateway/internal/provider"
+	"github.com/weijian/go-llm-gateway/internal/storage"
 )
 
 func main() {
@@ -25,6 +26,21 @@ func main() {
 
 	// 初始化指标收集器
 	collector := metrics.NewCollector()
+
+	// 初始化 SQLite 持久化存储
+	dbPath := os.Getenv("PI_GO_DATA_DIR")
+	if dbPath == "" {
+		dbPath = "./data"
+	}
+	os.MkdirAll(dbPath, 0755)
+	sqlitePath := dbPath + "/metrics.db"
+	if store, err := storage.NewSQLiteStore(sqlitePath, logger); err != nil {
+		logger.Printf("Warning: SQLite store init failed: %v, using memory only", err)
+	} else {
+		collector.SetStore(store)
+		defer store.Close()
+		logger.Printf("SQLite metrics store: %s", sqlitePath)
+	}
 
 	// 初始化路由器
 	router := provider.NewRouter(logger)
