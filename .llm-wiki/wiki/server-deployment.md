@@ -1,87 +1,86 @@
 ---
-type: entity
-date: 2026-06-19
+type: concept
+date: 2026-06-28
 tags:
   - deployment
+  - cicd
   - server
-  - infrastructure
-  - systemd
-  - aliyun
 ---
 
-# Server Deployment (8.141.97.21)
+# Server Deployment (Updated 2026-06-28)
 
-## Summary
+## 概述
 
-The production gateway runs on an Alibaba Cloud ECS instance (Ubuntu 24.04) at `8.141.97.21:4001`.
+LiteLLM Gateway 部署在 8.141.97.21:4001 服务器上，通过 GitHub Actions CI/CD 自动部署。
 
-## Access
+## 服务器信息
 
-| Detail | Value |
-|--------|-------|
-| IP | `8.141.97.21` |
-| Port | `4001` |
-| User | `root` |
-| SSH Key | `~/.ssh/id_ed25519` (user's Mac) |
-| CI/CD Key | Dedicated ed25519 keypair (GitHub secret `SSH_PRIVATE_KEY`) |
+- **地址：** 8.141.97.21:4001
+- **服务：** go-gateway (systemd service)
+- **部署目录：** /opt/go-gateway
 
-## Gateway Setup
+## CI/CD 配置
+
+### GitHub Actions
+
+文件：`.github/workflows/deploy.yml`
+
+**触发条件：**
+- Push to main branch
+- Manual workflow_dispatch
+
+**部署目标：**
+1. 远程服务器（8.141.97.21）— 通过 SSH 部署
+2. Mini PC（self-hosted runner）— 本地部署
+
+### Secrets 配置
+
+| Secret | 说明 |
+|--------|------|
+| `DEPLOY_HOST` | 部署主机地址 |
+| `DEPLOY_USER` | 部署用户 |
+| `SSH_PRIVATE_KEY` | SSH 私钥 |
+| `LITELLM_MASTER_KEY` | 主密钥 |
+| `GLM_API_KEY` | GLM API Key |
+| `MIMO_API_KEY` | MiMo API Key |
+| `LONGCAT_API_KEY` | LongCat API Key |
+| `EASYCLAW_API_KEY` | EasyClaw API Key |
+
+## 部署流程
+
+1. **测试阶段：**
+   - `go vet ./...`
+   - `go test -v ./...`
+
+2. **构建阶段：**
+   - 交叉编译：`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`
+   - 输出：`gateway-linux`
+
+3. **部署阶段：**
+   - 上传二进制文件到 /opt/go-gateway
+   - 上传配置文件（providers.yaml）
+   - 更新 systemd 服务配置
+   - 重启服务
+   - 健康检查（5次重试）
+
+## 健康检查
 
 ```bash
-# Service
-systemctl status go-gateway
-
-# Config
-/opt/go-gateway/gateway        # Binary (~31MB)
-/opt/go-gateway/providers.yaml # Provider config
-/opt/go-gateway/internal/      # Source code
-
-# Service definition
-/etc/systemd/system/go-gateway.service
+curl http://8.141.97.21:4001/health
 ```
 
-## Systemd Service
+## Admin API
 
-```
-[Unit]
-Description=LLM Gateway
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/opt/go-gateway/gateway
-Restart=always          # Auto-restart on crash
-RestartSec=5
-Environment=PORT=4001
-Environment=LOG_LEVEL=info
-Environment=LITELLM_MASTER_KEY=...
-Environment=GLM_API_KEY=...
-# ... other API keys
-
-[Install]
-WantedBy=multi-user.target  # Start on boot
+```bash
+curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/health
+curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/dashboard
+curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/models
+curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/providers
+curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/logs
 ```
 
-## Firewall
+## Android APK 配置
 
-Alibaba Cloud security group allows inbound TCP `4001` from user's public IP (`103.169.96.128/32`).
-
-## CI/CD
-
-Pushes to GitHub `main` branch trigger [[source-deploy-yml]], which:
-1. Runs tests on GitHub Actions
-2. Cross-compiles Linux binary
-3. SCPs to server
-4. Restarts systemd service
-5. Health checks at `http://localhost:4001/health`
-
-## History
-
-- **2026-06-19**: Migrated from Docker to native Go binary + systemd. Port changed from 8080 to 4001. New SSH deploy key generated.
-- Original: Docker-based via old server with different SSH credentials.
-
-## See Also
-
-- [[source-deploy-yml]] — CI/CD pipeline details
-- [[overview]] — Architecture overview
-- [[provider-config]] — Provider management
+在 Android 应用中配置：
+- **后端地址：** `http://8.141.97.21:4001`
+- **API Key：** LITELLM_MASTER_KEY 的值
