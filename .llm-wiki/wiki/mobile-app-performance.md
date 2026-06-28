@@ -101,16 +101,17 @@ mobile-app/src/
 ├── components/
 │   ├── dashboard/
 │   │   └── index.tsx      # memoized ProviderChip / ActiveModelItem / ModelRankRow
-│   ├── logs/              # NEW (R3)
+│   ├── logs/              # (R3)
 │   │   └── LogEntryItem.tsx
-│   ├── models/            # NEW (R3)
+│   ├── models/            # (R3)
 │   │   └── ModelCard.tsx
-│   ├── providers/         # NEW (R3)
+│   ├── providers/         # (R3)
 │   │   └── ProviderCard.tsx
 │   ├── CardPanel.tsx
+│   ├── EmptyState.tsx     # NEW (R4): memoized empty placeholder
 │   ├── ItemSeparator.tsx  # memoized list separator (R2)
 │   ├── KpiCard.tsx
-│   ├── PageContainer.tsx  # R3: +onRetry error button
+│   ├── PageContainer.tsx  # (R3): +onRetry error button
 │   ├── PageHeader.tsx
 │   ├── StatusBadge.tsx
 │   └── index.ts
@@ -121,10 +122,10 @@ mobile-app/src/
 │   ├── TabNavigator.tsx   # R3: module-level screenOptions
 │   └── index.ts
 ├── screens/
-│   ├── DashboardScreen.tsx    # ScrollView + memoized items + precomputed sorts + usePolling + retry
-│   ├── LogsScreen.tsx         # stable keyExtractor + usePolling + ItemSeparator + LogEntryItem + retry
-│   ├── ModelsScreen.tsx       # atomic selectors + non-mutating sort + usePolling + ItemSeparator + ModelCard + retry
-│   ├── ProvidersScreen.tsx    # atomic selectors + usePolling + FlashList numColumns=2 + ProviderCard + retry
+│   ├── DashboardScreen.tsx    # ScrollView + memoized items + precomputed sorts + usePolling + retry + typed nav + stable keys + EmptyState
+│   ├── LogsScreen.tsx         # stable keyExtractor + usePolling + ItemSeparator + LogEntryItem + retry + EmptyState + named constants
+│   ├── ModelsScreen.tsx       # atomic selectors + non-mutating sort + usePolling + ItemSeparator + ModelCard + retry + EmptyState
+│   ├── ProvidersScreen.tsx    # atomic selectors + usePolling + FlashList numColumns=2 + ProviderCard + retry + EmptyState
 │   ├── SettingsScreen.tsx     # atomic selectors + timer cleanup
 │   └── index.ts
 ├── store/
@@ -168,6 +169,31 @@ mobile-app/src/
 ### 23. App.tsx StatusBar dedup + TabNavigator stable options
 - **Before**: `<StatusBar style="dark" />` was duplicated across all three render branches in `App.tsx`. `TabNavigator.screenOptions` was an inline arrow created every render.
 - **After**: StatusBar lifted to the top level (single instance). `screenOptions` extracted to a module-level function in `TabNavigator.tsx`.
+
+## Round 4 — Network resilience, type safety & DRY (2026-06-29)
+
+### 24. Request timeout + structured error classification (api/client.ts)
+- **Before**: `fetchJSON` had no timeout — a hung backend would leave the loading spinner spinning forever. Errors were thrown as plain `Error("API error: 404 Not Found")` strings, giving the UI no way to distinguish auth failures from network drops.
+- **After**:
+  - Added a 15s default timeout via `mergeSignals()` (combines an internal timeout `AbortController` with the caller's external signal).
+  - Introduced `ApiError` class with a discriminated `code` field: `'TIMEOUT' | 'NETWORK' | 'AUTH' | 'SERVER' | 'CLIENT'`. Network-layer catches, 401/403, and 5xx are now mapped to user-friendly Chinese messages at the API boundary, so `PageContainer` can later show different retry/CTA actions per code.
+  - Exported `ApiError` from the api barrel.
+
+### 25. DashboardScreen inline `keyExtractor` arrows
+- **Before**: the Provider strip and Active Models FlashList used inline `(item) => item.name` / `(item) => item.model` arrows — new function identity every render.
+- **After**: extracted to stable `useCallback` refs (`providerKeyExtractor`, `modelKeyExtractor`).
+
+### 26. `navigation: any` → typed navigation prop (DashboardScreen)
+- **Before**: `DashboardScreen({ navigation }: any)` — no type safety on `.navigate()` calls.
+- **After**: imported `BottomTabNavigationProp` and typed the prop as `BottomTabNavigationProp<Record<string, object | undefined>, 'DashboardTab'>`.
+
+### 27. EmptyState component (DRY)
+- **Before**: four screens (Dashboard, Models, Providers, Logs) each duplicated a 10-line `<View><Text>icon</Text><Text>msg</Text></View>` empty block plus its 3 style entries.
+- **After**: extracted `src/components/EmptyState.tsx` (`React.memo`-wrapped, `icon` + `message` props). All four screens now use `<EmptyState icon="📄" message="..." />`. Removed ~40 lines of duplicated styles.
+
+### 28. Magic numbers → named constants (LogsScreen)
+- **Before**: `fetchLogs(100)` and `10000` appeared as inline literals.
+- **After**: `LOG_FETCH_LIMIT = 100` and `POLL_INTERVAL_MS = 10_000` declared at module top. Retry handler now reuses the same `fetch` callback used by polling (stable identity).
 
 ## Follow-ups (remaining)
 

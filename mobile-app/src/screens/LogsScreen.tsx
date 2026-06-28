@@ -3,10 +3,19 @@ import { View, Text, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
 import { usePolling } from '../hooks'
-import { PageContainer, PageHeader, ItemSeparator } from '../components'
+import {
+  PageContainer,
+  PageHeader,
+  ItemSeparator,
+  EmptyState,
+} from '../components'
 import { LogEntryItem } from '../components/logs'
-import { Colors, Typography, Spacing } from '../theme'
+import { Spacing } from '../theme'
 import type { LogEntry } from '../api'
+
+/** 常量化魔法数字，便于全局调整 */
+const LOG_FETCH_LIMIT = 100
+const POLL_INTERVAL_MS = 10_000
 
 export default function LogsScreen() {
   const logs = useStore((s) => s.logs)
@@ -23,7 +32,8 @@ export default function LogsScreen() {
     [],
   )
 
-  usePolling(() => fetchLogs(100), 10000)
+  const fetch = useCallback(() => fetchLogs(LOG_FETCH_LIMIT), [fetchLogs])
+  usePolling(fetch, POLL_INTERVAL_MS)
 
   const data = useMemo(() => logs?.logs ?? [], [logs?.logs])
 
@@ -33,7 +43,7 @@ export default function LogsScreen() {
   )
 
   return (
-    <PageContainer loading={logsLoading && !logs} error={logsError} onRetry={() => fetchLogs(100)}>
+    <PageContainer loading={logsLoading && !logs} error={logsError} onRetry={fetch}>
       <View style={styles.headerWrap}>
         <PageHeader
           title="活动日志"
@@ -42,10 +52,7 @@ export default function LogsScreen() {
       </View>
 
       {data.length === 0 && !logsLoading ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>📄</Text>
-          <Text style={styles.emptyText}>暂无日志，等待第一个请求...</Text>
-        </View>
+        <EmptyState icon="📄" message="暂无日志，等待第一个请求..." />
       ) : (
         <FlashList
           data={data}
@@ -67,20 +74,5 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: Spacing[4],
     paddingBottom: Spacing[16],
-  },
-  empty: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing[16],
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: Spacing[3],
-  },
-  emptyText: {
-    fontSize: Typography.fontSize.md,
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.body,
   },
 })

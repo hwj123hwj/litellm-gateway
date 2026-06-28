@@ -6,9 +6,16 @@ import {
   ScrollView,
 } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs'
 import { useStore } from '../store'
 import { usePolling } from '../hooks'
-import { PageContainer, KpiCard, CardPanel, PageHeader } from '../components'
+import {
+  PageContainer,
+  KpiCard,
+  CardPanel,
+  PageHeader,
+  EmptyState,
+} from '../components'
 import {
   ProviderChip,
   ActiveModelItem,
@@ -16,9 +23,18 @@ import {
 } from '../components/dashboard'
 import { Colors, Typography, Spacing, Radius } from '../theme'
 import { formatNumber, formatLatency } from '../utils'
-import type { ModelInfo } from '../api'
+import type { ModelInfo, ProviderInfo } from '../api'
 
-export default function DashboardScreen({ navigation }: any) {
+type DashboardNavigation = BottomTabNavigationProp<
+  Record<string, object | undefined>,
+  'DashboardTab'
+>
+
+export default function DashboardScreen({
+  navigation,
+}: {
+  navigation: DashboardNavigation
+}) {
   // 使用精确选择器，避免 store 任意字段变化导致的重渲染
   const dashboard = useStore((s) => s.dashboard)
   const dashboardLoading = useStore((s) => s.dashboardLoading)
@@ -63,11 +79,18 @@ export default function DashboardScreen({ navigation }: any) {
   )
 
   const renderProviderChip = useCallback(
-    ({ item }: { item: typeof providerData[number] }) => (
+    ({ item }: { item: ProviderInfo }) => (
       <ProviderChip item={item} onPress={goToProviders} />
     ),
     [goToProviders],
   )
+
+  const providerKeyExtractor = useCallback(
+    (item: ProviderInfo) => item.name,
+    [],
+  )
+
+  const modelKeyExtractor = useCallback((item: ModelInfo) => item.model, [])
 
   const renderModelItem = useCallback(
     ({ item }: { item: ModelInfo }) => (
@@ -154,7 +177,7 @@ export default function DashboardScreen({ navigation }: any) {
           <FlashList
             data={providerData}
             renderItem={renderProviderChip}
-            keyExtractor={(item) => item.name}
+            keyExtractor={providerKeyExtractor}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.stripPadding}
@@ -169,17 +192,15 @@ export default function DashboardScreen({ navigation }: any) {
         onAction={goToModels}
       >
         {topModels.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📭</Text>
-            <Text style={styles.emptyText}>
-              暂无模型数据，等待第一个请求...
-            </Text>
-          </View>
+          <EmptyState
+            icon="📭"
+            message="暂无模型数据，等待第一个请求..."
+          />
         ) : (
           <FlashList
             data={topModels}
             renderItem={renderModelItem}
-            keyExtractor={(item) => item.model}
+            keyExtractor={modelKeyExtractor}
             scrollEnabled={false}
           />
         )}
@@ -255,20 +276,6 @@ const styles = StyleSheet.create({
   stripPadding: {
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[1],
-  },
-  // Empty
-  empty: {
-    alignItems: 'center',
-    paddingVertical: Spacing[10],
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: Spacing[3],
-  },
-  emptyText: {
-    fontSize: Typography.fontSize.md,
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.body,
   },
   // Table
   tableHeader: {

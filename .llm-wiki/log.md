@@ -2,6 +2,16 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 4
+- **Updated synthesis page**: mobile-app-performance (sections 24–28, updated file map)
+- **Key changes (code)**:
+  - api/client.ts: added 15s request timeout (mergeSignals) + ApiError class with code field (TIMEOUT/NETWORK/AUTH/SERVER/CLIENT) for structured error handling
+  - DashboardScreen: extracted inline keyExtractor arrows to stable useCallback refs; replaced `navigation: any` with typed `BottomTabNavigationProp`
+  - New components/EmptyState.tsx (React.memo) — replaces 4 duplicated empty-state blocks across Dashboard/Models/Providers/Logs
+  - LogsScreen: extracted magic numbers (LOG_FETCH_LIMIT, POLL_INTERVAL_MS) to named constants; retry reuses the stable fetch callback
+  - Exported ApiError from api barrel
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 3
 - **Updated synthesis page**: mobile-app-performance (sections 17–23, updated file map, trimmed follow-ups)
 - **Key changes (code)**:

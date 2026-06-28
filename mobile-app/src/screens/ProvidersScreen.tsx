@@ -1,12 +1,19 @@
 import { useCallback, useMemo } from 'react'
-import { View, Text, StyleSheet } from 'react-native'
+import { View, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
 import { usePolling } from '../hooks'
-import { PageContainer, PageHeader, ItemSeparator } from '../components'
+import {
+  PageContainer,
+  PageHeader,
+  ItemSeparator,
+  EmptyState,
+} from '../components'
 import { ProviderCard } from '../components/providers'
-import { Colors, Typography, Spacing } from '../theme'
+import { Spacing } from '../theme'
 import type { ProviderInfo } from '../api'
+
+const POLL_INTERVAL_MS = 15_000
 
 export default function ProvidersScreen() {
   const providers = useStore((s) => s.providers)
@@ -14,7 +21,7 @@ export default function ProvidersScreen() {
   const providersError = useStore((s) => s.providersError)
   const fetchProviders = useStore((s) => s.fetchProviders)
 
-  usePolling(fetchProviders, 15000)
+  usePolling(fetchProviders, POLL_INTERVAL_MS)
 
   const data = useMemo(
     () => providers?.providers ?? [],
@@ -41,10 +48,7 @@ export default function ProvidersScreen() {
       </View>
 
       {data.length === 0 && !providersLoading ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🔌</Text>
-          <Text style={styles.emptyText}>暂无提供商数据</Text>
-        </View>
+        <EmptyState icon="🔌" message="暂无提供商数据" />
       ) : (
         <FlashList
           data={data}
@@ -67,20 +71,5 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: Spacing[4],
     paddingBottom: Spacing[16],
-  },
-  empty: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing[16],
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: Spacing[3],
-  },
-  emptyText: {
-    fontSize: Typography.fontSize.md,
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.body,
   },
 })

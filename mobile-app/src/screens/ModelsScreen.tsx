@@ -1,12 +1,19 @@
 import { useCallback, useMemo } from 'react'
-import { View, Text, StyleSheet } from 'react-native'
+import { View, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
 import { usePolling } from '../hooks'
-import { PageContainer, PageHeader, ItemSeparator } from '../components'
+import {
+  PageContainer,
+  PageHeader,
+  ItemSeparator,
+  EmptyState,
+} from '../components'
 import { ModelCard } from '../components/models'
-import { Colors, Typography, Spacing } from '../theme'
+import { Spacing } from '../theme'
 import type { ModelInfo } from '../api'
+
+const POLL_INTERVAL_MS = 15_000
 
 export default function ModelsScreen() {
   const models = useStore((s) => s.models)
@@ -14,7 +21,7 @@ export default function ModelsScreen() {
   const modelsError = useStore((s) => s.modelsError)
   const fetchModels = useStore((s) => s.fetchModels)
 
-  usePolling(fetchModels, 15000)
+  usePolling(fetchModels, POLL_INTERVAL_MS)
 
   const sortedModels = useMemo(
     () =>
@@ -31,11 +38,14 @@ export default function ModelsScreen() {
     ({ item }: { item: ModelInfo }) => <ModelCard item={item} />,
     [],
   )
-
   const keyExtractor = useCallback((item: ModelInfo) => item.model, [])
 
   return (
-    <PageContainer loading={modelsLoading && !models} error={modelsError} onRetry={fetchModels}>
+    <PageContainer
+      loading={modelsLoading && !models}
+      error={modelsError}
+      onRetry={fetchModels}
+    >
       <View style={styles.container}>
         <PageHeader
           title="模型管理"
@@ -44,10 +54,7 @@ export default function ModelsScreen() {
       </View>
 
       {sortedModels.length === 0 && !modelsLoading ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>📭</Text>
-          <Text style={styles.emptyText}>暂无模型数据</Text>
-        </View>
+        <EmptyState icon="📭" message="暂无模型数据" />
       ) : (
         <FlashList
           data={sortedModels}
@@ -69,20 +76,5 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: Spacing[4],
     paddingBottom: Spacing[16],
-  },
-  empty: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing[16],
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: Spacing[3],
-  },
-  emptyText: {
-    fontSize: Typography.fontSize.md,
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.body,
   },
 })
