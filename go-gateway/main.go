@@ -87,6 +87,9 @@ func main() {
 	engine.Use(middleware.Logging(logger, collector))
 	engine.Use(auth.BearerAuth(cfg.MasterKey, logger))
 
+	// 管理端点使用独立的 admin auth
+	adminAuth := auth.AdminAuth(cfg.MasterKey, cfg.AdminToken, logger)
+
 	// 注册路由
 	msgHandler := handlers.NewMessageHandler(router, logger)
 	chatHandler := handlers.NewChatCompletionsHandler(router, logger)
@@ -107,11 +110,15 @@ func main() {
 	engine.GET("/models", modelHandler.Handle)
 
 	// 管理面板 API
-	engine.GET("/admin/dashboard", adminHandler.HandleDashboard)
-	engine.GET("/admin/providers", adminHandler.HandleProviders)
-	engine.GET("/admin/models", adminHandler.HandleModels)
-	engine.GET("/admin/logs", adminHandler.HandleLogs)
-	engine.GET("/admin/health", adminHandler.HandleHealth)
+	admin := engine.Group("/admin")
+	admin.Use(adminAuth)
+	{
+		admin.GET("/dashboard", adminHandler.HandleDashboard)
+		admin.GET("/providers", adminHandler.HandleProviders)
+		admin.GET("/models", adminHandler.HandleModels)
+		admin.GET("/logs", adminHandler.HandleLogs)
+		admin.GET("/health", adminHandler.HandleHealth)
+	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	logger.Printf("Server listening on %s", addr)

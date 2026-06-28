@@ -14,6 +14,7 @@ type Config struct {
 	Port               int
 	LogLevel           string
 	MasterKey          string
+	AdminToken         string // 独立的管理端点 token（可选）
 	GLMAPIKey          string
 	MIMOAPIKey         string
 	LongcatAPIKey      string
@@ -34,6 +35,7 @@ func Load() (*Config, error) {
 		Port:             getEnvInt("PORT", 4000),
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 		MasterKey:        getEnv("LITELLM_MASTER_KEY", ""),
+		AdminToken:         getEnv("ADMIN_TOKEN", ""),
 		GLMAPIKey:        getEnv("GLM_API_KEY", ""),
 		MIMOAPIKey:       getEnv("MIMO_API_KEY", ""),
 		LongcatAPIKey:    getEnv("LONGCAT_API_KEY", ""),
