@@ -1,13 +1,13 @@
-import { useEffect, useCallback, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
 } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
+import { usePolling } from '../hooks'
 import { PageContainer, KpiCard, CardPanel, PageHeader } from '../components'
 import {
   ProviderChip,
@@ -27,18 +27,14 @@ export default function DashboardScreen({ navigation }: any) {
   const health = useStore((s) => s.health)
   const fetchHealth = useStore((s) => s.fetchHealth)
 
-  // 轮询数据 - 在 effect 中启动和清理
-  useEffect(() => {
-    fetchDashboard()
-    fetchHealth()
-    const timer = setInterval(() => {
+  // 轮询数据 - 使用 usePolling hook 统一管理（卸载自动清理）
+  usePolling(
+    () => {
       fetchDashboard()
       fetchHealth()
-    }, 10000)
-    return () => clearInterval(timer)
-  }, [fetchDashboard, fetchHealth])
-
-  const status = health?.status || 'unknown'
+    },
+    10000,
+  )
 
   // 预排序 & 切片的模型列表，避免在 render 中重复排序
   const sortedModels = useMemo(() => {

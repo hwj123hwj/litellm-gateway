@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { View, Text, StyleSheet, ScrollView } from 'react-native'
 import { useStore } from '../store'
+import { usePolling } from '../hooks'
 import { PageContainer, PageHeader } from '../components'
 import {
   Colors,
@@ -53,11 +54,7 @@ export default function ProvidersScreen() {
   const providersError = useStore((s) => s.providersError)
   const fetchProviders = useStore((s) => s.fetchProviders)
 
-  useEffect(() => {
-    fetchProviders()
-    const timer = setInterval(fetchProviders, 15000)
-    return () => clearInterval(timer)
-  }, [fetchProviders])
+  usePolling(fetchProviders, 15000)
 
   const data = useMemo(
     () => providers?.providers ?? [],

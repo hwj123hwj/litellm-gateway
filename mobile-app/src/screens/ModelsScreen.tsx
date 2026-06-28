@@ -1,8 +1,9 @@
-import { useEffect, useCallback, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
-import { PageContainer, PageHeader } from '../components'
+import { usePolling } from '../hooks'
+import { PageContainer, PageHeader, ItemSeparator } from '../components'
 import { Colors, Typography, Spacing, Radius, Shadow, getProviderColor, getStatusColor } from '../theme'
 import { formatNumber, formatLatency } from '../utils'
 
@@ -12,11 +13,7 @@ export default function ModelsScreen() {
   const modelsError = useStore((s) => s.modelsError)
   const fetchModels = useStore((s) => s.fetchModels)
 
-  useEffect(() => {
-    fetchModels()
-    const timer = setInterval(fetchModels, 15000)
-    return () => clearInterval(timer)
-  }, [fetchModels])
+  usePolling(fetchModels, 15000)
 
   const sortedModels = useMemo(
     () =>
@@ -103,7 +100,7 @@ export default function ModelsScreen() {
           renderItem={renderItem}
           keyExtractor={(item) => item.model}
           contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={ItemSeparator}
         />
       )}
     </PageContainer>
@@ -118,9 +115,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: Spacing[4],
     paddingBottom: Spacing[16],
-  },
-  separator: {
-    height: Spacing[3],
   },
   card: {
     backgroundColor: Colors.card,

@@ -2,6 +2,18 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 2
+- **Updated synthesis page**: mobile-app-performance (sections 10–16 + updated file map + closed follow-ups)
+- **Key changes (code)**:
+  - Store: `RequestGuard` class with monotonic generation counter — only the latest response writes to the store, killing polling race conditions
+  - Store: each `fetch*` action creates an AbortController and passes signal to the API client
+  - New `src/hooks/usePolling.ts` — ref-based polling hook; all 4 list screens migrated off manual setInterval
+  - New `src/components/ItemSeparator.tsx` — memoized module-level separator (replaces inline arrow `ItemSeparatorComponent`)
+  - SettingsScreen: setTimeout stored in useRef, cleared on re-tap and on unmount
+  - LogsScreen: keyExtractor appends `|${index}` to break ties on identical log entries
+  - DashboardScreen: removed dead `status` variable and unused useEffect import
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) performance pass
 - **New synthesis page**: mobile-app-performance (full audit + fixes)
 - **Updated**: index.md (registered synthesis page)

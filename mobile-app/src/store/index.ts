@@ -18,15 +18,49 @@ import {
   getApiKey,
 } from '../api'
 
+/**
+ * 竞态保护：每个数据域维护独立的 generation 计数器，
+ * 保证只有最后一次请求的响应才能写入 store。
+ */
+class RequestGuard<T> {
+  private generation = 0
+
+  constructor(
+    private set: (partial: Partial<Record<string, unknown>>) => void,
+    private keys: { data: string; loading: string; error: string },
+  ) {}
+
+  async run(fetcher: (signal: AbortSignal) => Promise<T>) {
+    const controller = new AbortController()
+    const gen = ++this.generation
+    this.set({
+      [this.keys.loading]: true,
+      [this.keys.error]: null,
+    })
+
+    try {
+      const data = await fetcher(controller.signal)
+      // 仅当本次请求仍是最新一次时才写入
+      if (gen === this.generation) {
+        this.set({ [this.keys.data]: data, [this.keys.loading]: false })
+      }
+    } catch (e: any) {
+      // AbortError 不视为错误
+      if (e?.name === 'AbortError') return
+      if (gen === this.generation) {
+        this.set({ [this.keys.error]: e.message, [this.keys.loading]: false })
+      }
+    }
+  }
+}
+
 interface AppState {
   // Backend URL
   backendUrl: string
-  initBackendUrl: () => Promise<void>
   setBackendUrl: (url: string) => Promise<void>
 
   // Auth
   apiKey: string
-  initApiKey: () => Promise<void>
   setApiKey: (key: string) => Promise<void>
 
   // Initialization
@@ -64,103 +98,84 @@ interface AppState {
   fetchLogs: (limit?: number) => Promise<void>
 }
 
-export const useStore = create<AppState>((set, get) => ({
-  // Backend URL
-  backendUrl: '',
-  initBackendUrl: async () => {
-    const url = await getBackendUrl()
-    set({ backendUrl: url })
-  },
-  setBackendUrl: async (url: string) => {
-    await saveBackendUrl(url)
-    set({ backendUrl: url })
-  },
+export const useStore = create<AppState>((set) => {
+  // 每个数据域独立的 RequestGuard，互不干扰
+  const healthGuard = new RequestGuard<HealthResponse>(set, {
+    data: 'health',
+    loading: 'healthLoading',
+    error: 'healthError',
+  })
+  const dashboardGuard = new RequestGuard<DashboardResponse>(set, {
+    data: 'dashboard',
+    loading: 'dashboardLoading',
+    error: 'dashboardError',
+  })
+  const providersGuard = new RequestGuard<ProvidersResponse>(set, {
+    data: 'providers',
+    loading: 'providersLoading',
+    error: 'providersError',
+  })
+  const modelsGuard = new RequestGuard<ModelsResponse>(set, {
+    data: 'models',
+    loading: 'modelsLoading',
+    error: 'modelsError',
+  })
+  const logsGuard = new RequestGuard<LogsResponse>(set, {
+    data: 'logs',
+    loading: 'logsLoading',
+    error: 'logsError',
+  })
 
-  // Auth
-  apiKey: '',
-  initApiKey: async () => {
-    const key = await getApiKey()
-    set({ apiKey: key })
-  },
-  setApiKey: async (key: string) => {
-    await saveApiKey(key)
-    set({ apiKey: key })
-  },
+  return {
+    // Backend URL
+    backendUrl: '',
+    setBackendUrl: async (url: string) => {
+      await saveBackendUrl(url)
+      set({ backendUrl: url })
+    },
 
-  // Initialization
-  initialized: false,
-  init: async () => {
-    const [url, key] = await Promise.all([getBackendUrl(), getApiKey()])
-    set({ backendUrl: url, apiKey: key, initialized: true })
-  },
+    // Auth
+    apiKey: '',
+    setApiKey: async (key: string) => {
+      await saveApiKey(key)
+      set({ apiKey: key })
+    },
 
-  // Health
-  health: null,
-  healthLoading: false,
-  healthError: null,
-  fetchHealth: async () => {
-    set({ healthLoading: true, healthError: null })
-    try {
-      const health = await getHealth()
-      set({ health, healthLoading: false })
-    } catch (e: any) {
-      set({ healthError: e.message, healthLoading: false })
-    }
-  },
+    // Initialization
+    initialized: false,
+    init: async () => {
+      const [url, key] = await Promise.all([getBackendUrl(), getApiKey()])
+      set({ backendUrl: url, apiKey: key, initialized: true })
+    },
 
-  // Dashboard
-  dashboard: null,
-  dashboardLoading: false,
-  dashboardError: null,
-  fetchDashboard: async () => {
-    set({ dashboardLoading: true, dashboardError: null })
-    try {
-      const dashboard = await getDashboard()
-      set({ dashboard, dashboardLoading: false })
-    } catch (e: any) {
-      set({ dashboardError: e.message, dashboardLoading: false })
-    }
-  },
+    // Health
+    health: null,
+    healthLoading: false,
+    healthError: null,
+    fetchHealth: () => healthGuard.run((s) => getHealth(s)),
 
-  // Providers
-  providers: null,
-  providersLoading: false,
-  providersError: null,
-  fetchProviders: async () => {
-    set({ providersLoading: true, providersError: null })
-    try {
-      const providers = await getProviders()
-      set({ providers, providersLoading: false })
-    } catch (e: any) {
-      set({ providersError: e.message, providersLoading: false })
-    }
-  },
+    // Dashboard
+    dashboard: null,
+    dashboardLoading: false,
+    dashboardError: null,
+    fetchDashboard: () => dashboardGuard.run((s) => getDashboard(s)),
 
-  // Models
-  models: null,
-  modelsLoading: false,
-  modelsError: null,
-  fetchModels: async () => {
-    set({ modelsLoading: true, modelsError: null })
-    try {
-      const models = await getModels()
-      set({ models, modelsLoading: false })
-    } catch (e: any) {
-      set({ modelsError: e.message, modelsLoading: false })
-    }
-  },
+    // Providers
+    providers: null,
+    providersLoading: false,
+    providersError: null,
+    fetchProviders: () => providersGuard.run((s) => getProviders(s)),
 
-  // Logs
-  logs: null,
-  logsLoading: false,
-  logsError: null,
-  fetchLogs: async (limit = 100) => {
-    set({ logsLoading: true, logsError: null })
-    try {
-      const logs = await getLogs(limit)
-      set({ logs, logsLoading: false })
-    } catch (e: any) {
-      set({ logsError: e.message, logsLoading: false })
-    }
-  },
-}))
+    // Models
+    models: null,
+    modelsLoading: false,
+    modelsError: null,
+    fetchModels: () => modelsGuard.run((s) => getModels(s)),
+
+    // Logs
+    logs: null,
+    logsLoading: false,
+    logsError: null,
+    fetchLogs: (limit = 100) => logsGuard.run((s) => getLogs(limit, s)),
+  }
+})

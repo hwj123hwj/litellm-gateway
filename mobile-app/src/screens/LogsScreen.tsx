@@ -1,8 +1,9 @@
-import { useEffect, useCallback, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
 import { useStore } from '../store'
-import { PageContainer, PageHeader } from '../components'
+import { usePolling } from '../hooks'
+import { PageContainer, PageHeader, ItemSeparator } from '../components'
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme'
 import { formatRelativeTime, formatLatency } from '../utils'
 import type { LogEntry } from '../api'
@@ -13,21 +14,16 @@ export default function LogsScreen() {
   const logsError = useStore((s) => s.logsError)
   const fetchLogs = useStore((s) => s.fetchLogs)
 
-  // 保存最新的日志项，以便 keyExtractor 稳定引用
-  // 使用 provider + model + timestamp 组合作为 key，避免使用 index
+  // 稳定的 keyExtractor：timestamp + model + path 组合，
+  // 并在末尾附加 index 作为兜底，防止极端情况下两条日志字段完全相同时 key 碰撞。
   const keyExtractor = useCallback(
-    (item: LogEntry, _index: number): string => {
-      // timestamp + model 在多数场景下足够稳定
-      return `${item.timestamp}|${item.model}|${item.path}`
+    (item: LogEntry, index: number): string => {
+      return `${item.timestamp}|${item.model}|${item.path}|${index}`
     },
     [],
   )
 
-  useEffect(() => {
-    fetchLogs(100)
-    const timer = setInterval(() => fetchLogs(100), 10000)
-    return () => clearInterval(timer)
-  }, [fetchLogs])
+  usePolling(() => fetchLogs(100), 10000)
 
   const data = useMemo(() => logs?.logs ?? [], [logs?.logs])
 
@@ -98,7 +94,7 @@ export default function LogsScreen() {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ItemSeparatorComponent={ItemSeparator}
         />
       )}
     </PageContainer>
@@ -113,9 +109,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: Spacing[4],
     paddingBottom: Spacing[16],
-  },
-  separator: {
-    height: Spacing[3],
   },
   entry: {
     backgroundColor: Colors.card,

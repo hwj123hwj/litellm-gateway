@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   View,
   Text,
@@ -21,17 +21,30 @@ export default function SettingsScreen() {
   const [urlInput, setUrlInput] = useState(backendUrl)
   const [keyInput, setKeyInput] = useState(apiKey)
   const [saved, setSaved] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const handleSaveUrl = useCallback(async () => {
     await setBackendUrl(urlInput)
     setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    // 清理上一次的定时器，避免快速点击产生多个并存的定时器。
+    // 组件卸载时未触发的 setState 会通过 effect 的清理函数取消。
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => {
+      setSaved(false)
+    }, 2000)
   }, [urlInput, setBackendUrl])
 
   const handleSaveKey = useCallback(async () => {
     await setApiKey(keyInput)
     Alert.alert('已保存', 'API Key 已更新')
   }, [keyInput, setApiKey])
+
+  // 组件卸载时清理定时器，避免 setState on unmounted component
+  useEffect(() => {
+    return () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+    }
+  }, [])
 
   return (
     <PageContainer loading={!initialized}>
