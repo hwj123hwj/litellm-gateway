@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/auth"
@@ -40,6 +41,9 @@ func main() {
 		collector.SetStore(store)
 		defer store.Close()
 		logger.Printf("SQLite metrics store: %s", sqlitePath)
+
+		// 启动后台清理任务（每天清理 30 天前的数据）
+		go startCleanupTask(store, logger)
 	}
 
 	// 初始化路由器
@@ -287,4 +291,25 @@ func setupChatGPTProvider(router *provider.Router, proxyURL string, logger *log.
 	router.RegisterChain("o4-mini", []string{"chatgpt"})
 
 	logger.Printf("ChatGPT Codex provider enabled (proxy: %s)", proxyURL)
+}
+
+// startCleanupTask 启动后台清理任务
+func startCleanupTask(store *storage.SQLiteStore, logger *log.Logger) {
+	// 首次启动时清理
+	if err := store.Cleanup(30); err != nil {
+		logger.Printf("Cleanup error: %v", err)
+	}
+
+	// 每天凌晨 3 点清理
+	for {
+		now := time.Now()
+		tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 3, 0, 0, 0, now.Location())
+		duration := tomorrow.Sub(now)
+		logger.Printf("Next cleanup in %v", duration)
+		time.Sleep(duration)
+
+		if err := store.Cleanup(30); err != nil {
+			logger.Printf("Cleanup error: %v", err)
+		}
+	}
 }
