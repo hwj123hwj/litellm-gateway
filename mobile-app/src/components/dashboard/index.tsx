@@ -62,10 +62,9 @@ function ActiveModelItemComponent({ item, onPress }: ActiveModelItemProps) {
 
 interface ModelRankRowProps {
   item: ModelInfo
-  maxRequests: number
 }
 
-function ModelRankRowComponent({ item, maxRequests }: ModelRankRowProps) {
+function ModelRankRowComponent({ item }: ModelRankRowProps) {
   const color = getProviderColor(item.provider || item.model)
   return (
     <View style={styles.tableRow}>

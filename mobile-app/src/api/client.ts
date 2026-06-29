@@ -103,7 +103,12 @@ async function fetchJSON<T>(
     }
     throw new ApiError(`请求失败: ${res.status} ${res.statusText}`, 'CLIENT')
   }
-  return res.json()
+
+  try {
+    return await res.json()
+  } catch {
+    throw new ApiError('服务器返回的数据格式错误', 'SERVER')
+  }
 }
 
 /** 结构化 API 错误，带可分类的 code 字段，方便 UI 精确提示 */

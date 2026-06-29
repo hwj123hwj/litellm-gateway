@@ -9,7 +9,7 @@ import {
   getProviderColor,
   getStatusColor,
 } from '../../theme'
-import { formatLatency, abbreviate } from '../../utils'
+import { formatLatency, abbreviate, formatNumber } from '../../utils'
 import type { ProviderInfo } from '../../api'
 
 function ProviderCardComponent({ item }: { item: ProviderInfo }) {
@@ -38,7 +38,7 @@ function ProviderCardComponent({ item }: { item: ProviderInfo }) {
       </View>
       {item.requests > 0 && (
         <Text style={styles.meta}>
-          {item.requests} 请求 · {formatLatency(item.avg_latency)}
+          {formatNumber(item.requests)} 请求 · {formatLatency(item.avg_latency)}
         </Text>
       )}
     </View>

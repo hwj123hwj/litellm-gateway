@@ -2,6 +2,17 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 7 bug audit
+- **Updated synthesis page**: mobile-app-performance (sections 37–41)
+- **Context**: second pass review after R6, focusing on dead code, UI consistency, and error-path robustness
+- **Bugs found & fixed**:
+  - **#37 (MEDIUM)** ModelRankRow accepted maxRequests prop but never rendered it — DashboardScreen wasted a useMemo computing it and triggered extra re-renders. Removed prop + memo.
+  - **#38 (MEDIUM)** ProviderCard rendered raw item.requests instead of formatNumber() — inconsistent with all other cards, large numbers overflowed. Now uses formatNumber.
+  - **#39 (LOW)** fetchJSON res.json() parse failure (malformed 200 body) was uncaught, surfaced as misleading NETWORK error. Now throws ApiError SERVER with accurate message.
+  - **#40 (MEDIUM)** RequestGuard AbortError check was dead code — fetchJSON already wraps all AbortErrors into ApiError TIMEOUT. Removed dead branch.
+  - **#41 (MEDIUM)** DashboardScreen polled fetchHealth every 10s but health data was never used by any UI — pure waste. Removed from polling callback.
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — regression & bug audit (Round 6)
 - **Updated synthesis page**: mobile-app-performance (sections 33–36)
 - **Context**: reviewed commits 571e3bd..9a770e0 (R1–R5) for regressions/bugs introduced by the optimization refactors

@@ -56,10 +56,11 @@ class RequestGuard<T> {
         this.set({ [this.keys.data]: data, [this.keys.loading]: false })
       }
     } catch (e: any) {
-      // AbortError 不视为错误（超时或新请求取代旧请求导致）
-      if (e?.name === 'AbortError') return
+      // fetchJSON 已将所有 AbortError 包装为 ApiError('TIMEOUT')，
+      // 所以这里不会收到原始 AbortError。
+      // 对于被新请求取代的旧请求，gen !== this.generation，
+      // 其错误被自然忽略，不会写入 store。
       if (gen === this.generation) {
-        // 保留完整错误对象；若是非 ApiError，则包装为 NETWORK
         const err =
           e instanceof ApiError
             ? e

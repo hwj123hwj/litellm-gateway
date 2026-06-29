@@ -233,6 +233,30 @@ A review of the 5 preceding optimization commits surfaced several issues introdu
 - **Bug**: R4's `mergeSignals` attached an `abort` listener to the external signal via `external.addEventListener('abort', ...)`, but the `cleanup` function only cleared the timeout timer — it never removed the listener. Over many poll cycles this leaked listener callbacks on the (long-lived) external AbortSignal.
 - **Fix**: `cleanup` now captures the handler reference and calls `external.removeEventListener('abort', handler)`.
 
+## Round 7 — Second regression & bug audit (2026-06-29)
+
+A deeper review of the code after R6 found 5 more issues, including dead code, UI inconsistencies, and robustness gaps.
+
+### 37. `ModelRankRow` accepted `maxRequests` prop but never used it (MEDIUM)
+- **Bug**: The component was designed to show a progress bar (needing `maxRequests` for relative width), but the implementation rendered only text values. Despite this, `DashboardScreen` ran a `useMemo` to compute `maxRequests` and passed it as a prop — triggering unnecessary `ModelRankRow` re-renders whenever `maxRequests` changed.
+- **Fix**: Removed `maxRequests` from both the `ModelRankRowProps` interface and the JSX in `DashboardScreen`. Deleted the unused `useMemo` for `maxRequests`.
+
+### 38. `ProviderCard` rendered raw `item.requests` instead of `formatNumber()` (MEDIUM)
+- **Bug**: Every other card/chip in the app used `formatNumber()` (e.g., `1500` → `"1.5K"`), but `ProviderCard` rendered `{item.requests}` as a raw number. This caused visual inconsistency — large request counts overflowed the narrow grid card.
+- **Fix**: Imported `formatNumber` and applied it. Now consistent with `ProviderChip`, `ModelCard`, and `LogEntryItem`.
+
+### 39. `fetchJSON` did not catch `res.json()` parse failures (LOW)
+- **Bug**: If the server returned a 200 OK but a non-JSON body (e.g., an HTML error page from a reverse proxy, or an empty body), `res.json()` threw a raw `SyntaxError`. This was not caught by the network `catch` block, so it propagated as an unhandled exception — eventually wrapped as a misleading `NETWORK` error by `RequestGuard`.
+- **Fix**: Wrapped `res.json()` in `try/catch`, throwing `new ApiError('服务器返回的数据格式错误', 'SERVER')` on failure. The user now sees an accurate "server returned malformed data" message.
+
+### 40. `RequestGuard` had unreachable `AbortError` check (dead code) (MEDIUM)
+- **Bug**: R4's `fetchJSON` already wraps **all** `AbortError`s into `ApiError('TIMEOUT')`. By the time the error reaches `RequestGuard`, it is always an `ApiError`, never a raw `AbortError`. The `if (e?.name === 'AbortError') return` guard was dead code — it could never be true.
+- **Fix**: Removed the dead `AbortError` check. Replaced it with a clearer comment explaining that cancelled (superseded) requests are handled implicitly: `gen !== this.generation` means the error belongs to a stale request and is naturally ignored.
+
+### 41. DashboardScreen polled `fetchHealth` but never used health data (MEDIUM)
+- **Bug**: DashboardScreen called both `fetchDashboard()` and `fetchHealth()` every 10s. However, after R6 removed the `health` state subscription, the health data fetched by this poll was never consumed by any UI component — it just triggered unnecessary store updates and network traffic.
+- **Fix**: Removed `fetchHealth()` from the DashboardScreen polling callback. Health polling is now solely the responsibility of a dedicated health indicator (if one is ever added). `fetchHealth` remains in the store for future use but is no longer wasted on the Dashboard.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:

@@ -42,16 +42,10 @@ export default function DashboardScreen({
   const dashboardLoading = useStore((s) => s.dashboardLoading)
   const dashboardError = useStore((s) => s.dashboardError)
   const fetchDashboard = useStore((s) => s.fetchDashboard)
-  const fetchHealth = useStore((s) => s.fetchHealth)
 
-  // 轮询数据 - 使用 usePolling hook 统一管理（卸载自动清理）
-  usePolling(
-    () => {
-      fetchDashboard()
-      fetchHealth()
-    },
-    POLL_INTERVAL_MS,
-  )
+  // 轮询数据 - Dashboard 页面只需 dashboard 数据
+  // health 数据由专门的 health 指示器（如有）独立管理，此处不拉取
+  usePolling(fetchDashboard, POLL_INTERVAL_MS)
 
   // 预排序 & 切片的模型列表，避免在 render 中重复排序
   const sortedModels = useMemo(() => {
@@ -63,11 +57,6 @@ export default function DashboardScreen({
   const providerData = useMemo(() => dashboard?.providers ?? [], [
     dashboard?.providers,
   ])
-
-  // 最大请求数用于进度条计算，避免每行都重新计算
-  const maxRequests = useMemo(() => {
-    return Math.max(...sortedModels.map((x) => x.requests), 1)
-  }, [sortedModels])
 
   // 稳定的导航回调
   const goToProviders = useCallback(
@@ -229,7 +218,6 @@ export default function DashboardScreen({
             <ModelRankRow
               key={m.model}
               item={m}
-              maxRequests={maxRequests}
             />
           ))}
         </CardPanel>
