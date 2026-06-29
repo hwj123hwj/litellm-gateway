@@ -27,8 +27,10 @@ async function getBaseUrl(): Promise<string> {
     }
     return cleanUrl + '/admin'
   }
-  // 默认地址（局域网开发）
+  // 默认地址：局域网开发用 10.0.2.2 (Android 模拟器)
+  // 如果打包出来在真机上，会弹配置页让用户手动输入，不会用到这个默认值
   return 'http://10.0.2.2:4001/admin'
+}
 }
 
 /**

@@ -2,6 +2,13 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 12 expo prebuild fix
+- **Updated synthesis page**: mobile-app-performance (sections 52–53)
+- **Context**: v1.2.0 still showed 'CLEARTEXT communication not permitted' on real device. User screenshot confirmed the error persisted.
+- **Root cause**: CI workflow runs `expo prebuild` before building, which regenerates android/ dir and wiped out the manual cleartext HTTP config from R10.
+- **Fix**: Created an Expo Config Plugin (`app.plugin.js`) that injects usesCleartextTraffic + networkSecurityConfig during prebuild. Registered in app.json plugins array. Survives regeneration.
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 11 setup screen self-heal
 - **Updated synthesis page**: mobile-app-performance (sections 49–51)
 - **Context**: user reported app stuck on broken state after upgrading — old 'http://' default from v1.0.0 was still in AsyncStorage, bypassing setup screen

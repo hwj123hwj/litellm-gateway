@@ -308,6 +308,15 @@ A code-analysis sub-agent performed a deep review of all files. This round addre
 ### 51. Bump version to 1.2.0
 - Bumped `app.json` version `1.1.1` → `1.2.0` for the setup-screen UX overhaul and self-healing URL validation.
 
+## Round 12 — Cleartext HTTP config lost by `expo prebuild` (2026-06-29)
+
+### 52. `usesCleartextTraffic` overwritten by `expo prebuild` (HIGH, build-breaking)
+- **Bug**: R10 manually added `android:usesCleartextTraffic="true"` and `network_security_config.xml` directly to the `android/` directory. However, the CI workflow runs `npx expo prebuild --platform android` *before* building, which **regenerates the entire `android/` directory** from `app.json`. This wiped out the manual changes, causing the v1.2.0 release APK to ship without cleartext permission — users still got `CLEARTEXT communication not permitted` errors.
+- **Fix**: Created an Expo Config Plugin (`app.plugin.js`) that programmatically injects `android:usesCleartextTraffic="true"` and generates `res/xml/network_security_config.xml` during the `prebuild` phase. Registered it in `app.json` via `"plugins": ["./app.plugin.js"]`. This ensures the cleartext config survives `prebuild` regeneration and is applied consistently across all builds.
+
+### 53. Bump version to 1.2.1
+- Bumped version for the config plugin fix.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:
