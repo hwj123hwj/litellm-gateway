@@ -30,6 +30,8 @@ type DashboardNavigation = BottomTabNavigationProp<
   'DashboardTab'
 >
 
+const POLL_INTERVAL_MS = 10_000
+
 export default function DashboardScreen({
   navigation,
 }: {
@@ -49,7 +51,7 @@ export default function DashboardScreen({
       fetchDashboard()
       fetchHealth()
     },
-    10000,
+    POLL_INTERVAL_MS,
   )
 
   // 预排序 & 切片的模型列表，避免在 render 中重复排序
@@ -75,6 +77,10 @@ export default function DashboardScreen({
   )
   const goToModels = useCallback(
     () => navigation.navigate('ModelsTab'),
+    [navigation],
+  )
+  const goToSettings = useCallback(
+    () => navigation.navigate('SettingsTab'),
     [navigation],
   )
 
@@ -104,7 +110,12 @@ export default function DashboardScreen({
   }
 
   if (dashboardError && !dashboard) {
-    return <PageContainer error={dashboardError} onRetry={fetchDashboard} />
+    return (
+      <PageContainer
+        error={dashboardError}
+        onRetry={dashboardError.code === 'AUTH' ? goToSettings : fetchDashboard}
+      />
+    )
   }
 
   const summary = dashboard?.summary

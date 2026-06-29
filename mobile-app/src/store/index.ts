@@ -16,11 +16,13 @@ import {
   getBackendUrl,
   setApiKey as saveApiKey,
   getApiKey,
+  ApiError,
 } from '../api'
 
 /**
  * 竞态保护：每个数据域维护独立的 generation 计数器，
  * 保证只有最后一次请求的响应才能写入 store。
+ * 保留完整的 ApiError 对象（而非仅 message），以便 UI 根据 code 做差异化处理。
  */
 class RequestGuard<T> {
   private generation = 0
@@ -45,10 +47,15 @@ class RequestGuard<T> {
         this.set({ [this.keys.data]: data, [this.keys.loading]: false })
       }
     } catch (e: any) {
-      // AbortError 不视为错误
+      // AbortError 不视为错误（超时或组件卸载导致）
       if (e?.name === 'AbortError') return
       if (gen === this.generation) {
-        this.set({ [this.keys.error]: e.message, [this.keys.loading]: false })
+        // 保留完整错误对象；若是非 ApiError，则包装为 NETWORK
+        const err =
+          e instanceof ApiError
+            ? e
+            : new ApiError(e?.message || '未知错误', 'NETWORK')
+        this.set({ [this.keys.error]: err, [this.keys.loading]: false })
       }
     }
   }
@@ -70,31 +77,31 @@ interface AppState {
   // Health
   health: HealthResponse | null
   healthLoading: boolean
-  healthError: string | null
+  healthError: ApiError | null
   fetchHealth: () => Promise<void>
 
   // Dashboard
   dashboard: DashboardResponse | null
   dashboardLoading: boolean
-  dashboardError: string | null
+  dashboardError: ApiError | null
   fetchDashboard: () => Promise<void>
 
   // Providers
   providers: ProvidersResponse | null
   providersLoading: boolean
-  providersError: string | null
+  providersError: ApiError | null
   fetchProviders: () => Promise<void>
 
   // Models
   models: ModelsResponse | null
   modelsLoading: boolean
-  modelsError: string | null
+  modelsError: ApiError | null
   fetchModels: () => Promise<void>
 
   // Logs
   logs: LogsResponse | null
   logsLoading: boolean
-  logsError: string | null
+  logsError: ApiError | null
   fetchLogs: (limit?: number) => Promise<void>
 }
 

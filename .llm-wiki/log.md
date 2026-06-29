@@ -2,6 +2,15 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 5
+- **Updated synthesis page**: mobile-app-performance (sections 29–32)
+- **Key changes (code)**:
+  - store/index.ts: RequestGuard now preserves the full ApiError instance (not just .message); store *Error fields typed as ApiError | null; non-ApiError throws wrapped as NETWORK
+  - components/PageContainer.tsx: error prop typed as ApiError; CTA differentiates AUTH (🔑 "去配置 Key") vs other errors (⚠ "重试")
+  - All 4 data screens (Dashboard/Models/Providers/Logs): onRetry switches to goToSettings when error.code === 'AUTH', else retries fetch; Logs/Models/Providers navigation props now typed via BottomTabNavigationProp
+  - DashboardScreen: extracted inline 10000 polling literal to POLL_INTERVAL_MS constant
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 4
 - **Updated synthesis page**: mobile-app-performance (sections 24–28, updated file map)
 - **Key changes (code)**:

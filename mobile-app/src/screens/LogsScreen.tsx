@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
-import { View, Text, StyleSheet } from 'react-native'
+import { View, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs'
 import { useStore } from '../store'
 import { usePolling } from '../hooks'
 import {
@@ -13,11 +14,20 @@ import { LogEntryItem } from '../components/logs'
 import { Spacing } from '../theme'
 import type { LogEntry } from '../api'
 
+type LogsNavigation = BottomTabNavigationProp<
+  Record<string, object | undefined>,
+  'LogsTab'
+>
+
 /** 常量化魔法数字，便于全局调整 */
 const LOG_FETCH_LIMIT = 100
 const POLL_INTERVAL_MS = 10_000
 
-export default function LogsScreen() {
+export default function LogsScreen({
+  navigation,
+}: {
+  navigation: LogsNavigation
+}) {
   const logs = useStore((s) => s.logs)
   const logsLoading = useStore((s) => s.logsLoading)
   const logsError = useStore((s) => s.logsError)
@@ -35,6 +45,11 @@ export default function LogsScreen() {
   const fetch = useCallback(() => fetchLogs(LOG_FETCH_LIMIT), [fetchLogs])
   usePolling(fetch, POLL_INTERVAL_MS)
 
+  const goToSettings = useCallback(
+    () => navigation.navigate('SettingsTab'),
+    [navigation],
+  )
+
   const data = useMemo(() => logs?.logs ?? [], [logs?.logs])
 
   const renderItem = useCallback(
@@ -43,7 +58,11 @@ export default function LogsScreen() {
   )
 
   return (
-    <PageContainer loading={logsLoading && !logs} error={logsError} onRetry={fetch}>
+    <PageContainer
+      loading={logsLoading && !logs}
+      error={logsError}
+      onRetry={logsError?.code === 'AUTH' ? goToSettings : fetch}
+    >
       <View style={styles.headerWrap}>
         <PageHeader
           title="活动日志"

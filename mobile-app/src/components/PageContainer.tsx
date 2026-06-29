@@ -1,10 +1,14 @@
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native'
 import { Colors, Typography, Spacing, Radius } from '../theme'
+import type { ApiError } from '../api'
 
 interface Props {
   loading?: boolean
-  error?: string | null
-  /** error 状态下点击重试的回调；传入后会在错误 banner 上显示重试按钮 */
+  error?: ApiError | null
+  /**
+   * error 状态下点击重试的回调；传入后会在错误 banner 上显示重试按钮。
+   * AUTH 类错误（401/403）时优先显示此回调（用于跳转到设置页配置 Key）。
+   */
   onRetry?: () => void
   children?: React.ReactNode
 }
@@ -20,11 +24,15 @@ export function PageContainer({ loading, error, onRetry, children }: Props) {
   }
 
   if (error) {
+    // 根据错误 code 差异化展示 CTA
+    const isAuthError = error.code === 'AUTH'
+    const ctaLabel = isAuthError ? '去配置 Key' : '重试'
+
     return (
       <View style={styles.errorWrap}>
         <View style={styles.errorBanner}>
-          <Text style={styles.errorIcon}>⚠</Text>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorIcon}>{isAuthError ? '🔑' : '⚠'}</Text>
+          <Text style={styles.errorText}>{error.message}</Text>
         </View>
         {onRetry && (
           <TouchableOpacity
@@ -32,7 +40,7 @@ export function PageContainer({ loading, error, onRetry, children }: Props) {
             onPress={onRetry}
             activeOpacity={0.7}
           >
-            <Text style={styles.retryBtnText}>重试</Text>
+            <Text style={styles.retryBtnText}>{ctaLabel}</Text>
           </TouchableOpacity>
         )}
       </View>

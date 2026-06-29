@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { FlashList } from '@shopify/flash-list'
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs'
 import { useStore } from '../store'
 import { usePolling } from '../hooks'
 import {
@@ -13,15 +14,29 @@ import { ModelCard } from '../components/models'
 import { Spacing } from '../theme'
 import type { ModelInfo } from '../api'
 
+type ModelsNavigation = BottomTabNavigationProp<
+  Record<string, object | undefined>,
+  'ModelsTab'
+>
+
 const POLL_INTERVAL_MS = 15_000
 
-export default function ModelsScreen() {
+export default function ModelsScreen({
+  navigation,
+}: {
+  navigation: ModelsNavigation
+}) {
   const models = useStore((s) => s.models)
   const modelsLoading = useStore((s) => s.modelsLoading)
   const modelsError = useStore((s) => s.modelsError)
   const fetchModels = useStore((s) => s.fetchModels)
 
   usePolling(fetchModels, POLL_INTERVAL_MS)
+
+  const goToSettings = useCallback(
+    () => navigation.navigate('SettingsTab'),
+    [navigation],
+  )
 
   const sortedModels = useMemo(
     () =>
@@ -44,7 +59,7 @@ export default function ModelsScreen() {
     <PageContainer
       loading={modelsLoading && !models}
       error={modelsError}
-      onRetry={fetchModels}
+      onRetry={modelsError?.code === 'AUTH' ? goToSettings : fetchModels}
     >
       <View style={styles.container}>
         <PageHeader

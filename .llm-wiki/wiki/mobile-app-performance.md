@@ -195,6 +195,24 @@ mobile-app/src/
 - **Before**: `fetchLogs(100)` and `10000` appeared as inline literals.
 - **After**: `LOG_FETCH_LIMIT = 100` and `POLL_INTERVAL_MS = 10_000` declared at module top. Retry handler now reuses the same `fetch` callback used by polling (stable identity).
 
+## Round 5 — Structured errors end-to-end (2026-06-29)
+
+### 29. Store preserves full `ApiError` object (not just message string)
+- **Before**: `RequestGuard` stored `e.message` (a plain string) into `*Error`. The structured `code` field from R4's `ApiError` was lost at the store boundary, so the UI had no way to know *why* a request failed.
+- **After**: `RequestGuard` now stores the full `ApiError` instance. Store `*Error` fields are typed `ApiError | null`. Non-ApiError throws are wrapped as `code: 'NETWORK'`.
+
+### 30. `PageContainer` shows differentiated CTA per error code
+- **Before**: error state always showed a generic "重试" button regardless of error type.
+- **After**: reads `error.code`; `AUTH` errors show 🔑 icon + "去配置 Key" button label, all others show ⚠ + "重试". This gives the user actionable guidance instead of a dead-end retry.
+
+### 31. AUTH-error auto-redirect to Settings tab (all 4 data screens)
+- **Before**: a 401/403 left the user on a blank error screen with no way to fix the key.
+- **After**: DashboardScreen, ModelsScreen, ProvidersScreen, LogsScreen each compute `onRetry={error?.code === 'AUTH' ? goToSettings : fetchFn}`. When the backend rejects the API key, the button now navigates to the Settings tab instead of pointlessly retrying. All screens now receive a typed `BottomTabNavigationProp` navigation prop (Logs/Models/Providers were previously untyped).
+
+### 32. DashboardScreen polling interval → named constant
+- **Before**: `10000` was an inline literal passed to `usePolling`.
+- **After**: extracted to module-level `POLL_INTERVAL_MS = 10_000`, matching the pattern already used in Logs/Models/Providers screens.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:
