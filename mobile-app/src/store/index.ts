@@ -26,6 +26,8 @@ import {
  */
 class RequestGuard<T> {
   private generation = 0
+  /** 当前活跃请求的 AbortController，新的请求发起时会 abort 上一个 */
+  private currentController: AbortController | null = null
 
   constructor(
     private set: (partial: Partial<Record<string, unknown>>) => void,
@@ -33,7 +35,14 @@ class RequestGuard<T> {
   ) {}
 
   async run(fetcher: (signal: AbortSignal) => Promise<T>) {
+    // 竞态保护核心：新请求到来时，立即 abort 上一个尚未完成的请求
+    // 这样旧请求的 fetch 网络层会被真正取消，而非空跑浪费带宽
+    if (this.currentController) {
+      this.currentController.abort()
+    }
+
     const controller = new AbortController()
+    this.currentController = controller
     const gen = ++this.generation
     this.set({
       [this.keys.loading]: true,
@@ -47,7 +56,7 @@ class RequestGuard<T> {
         this.set({ [this.keys.data]: data, [this.keys.loading]: false })
       }
     } catch (e: any) {
-      // AbortError 不视为错误（超时或组件卸载导致）
+      // AbortError 不视为错误（超时或新请求取代旧请求导致）
       if (e?.name === 'AbortError') return
       if (gen === this.generation) {
         // 保留完整错误对象；若是非 ApiError，则包装为 NETWORK
@@ -56,6 +65,11 @@ class RequestGuard<T> {
             ? e
             : new ApiError(e?.message || '未知错误', 'NETWORK')
         this.set({ [this.keys.error]: err, [this.keys.loading]: false })
+      }
+    } finally {
+      // 清理 currentController 引用，避免对一个已完成的请求反复 abort
+      if (this.currentController === controller) {
+        this.currentController = null
       }
     }
   }

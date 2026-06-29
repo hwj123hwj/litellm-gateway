@@ -42,7 +42,6 @@ export default function DashboardScreen({
   const dashboardLoading = useStore((s) => s.dashboardLoading)
   const dashboardError = useStore((s) => s.dashboardError)
   const fetchDashboard = useStore((s) => s.fetchDashboard)
-  const health = useStore((s) => s.health)
   const fetchHealth = useStore((s) => s.fetchHealth)
 
   // 轮询数据 - 使用 usePolling hook 统一管理（卸载自动清理）

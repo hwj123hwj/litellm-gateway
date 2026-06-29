@@ -28,6 +28,7 @@ async function getBaseUrl(): Promise<string> {
 /**
  * 将外部 AbortSignal 与超时 signal 合并。
  * 任一触发都会 abort 请求。
+ * 通过 addEventListener 实现时，会在 fetch 完成时通过返回的 cleanup 移除监听。
  */
 function mergeSignals(
   external?: AbortSignal,
@@ -36,16 +37,26 @@ function mergeSignals(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
+  // 用于移除外部 signal 上的事件监听器，避免内存泄漏
+  let onExternalAbort: (() => void) | null = null
+
   if (external) {
-    if (external.aborted) controller.abort()
-    else external.addEventListener('abort', () => controller.abort(), {
-      once: true,
-    })
+    if (external.aborted) {
+      controller.abort()
+    } else {
+      onExternalAbort = () => controller.abort()
+      external.addEventListener('abort', onExternalAbort, { once: true })
+    }
   }
 
   return {
     signal: controller.signal,
-    cleanup: () => clearTimeout(timer),
+    cleanup: () => {
+      clearTimeout(timer)
+      if (onExternalAbort && external) {
+        external.removeEventListener('abort', onExternalAbort)
+      }
+    },
   }
 }
 

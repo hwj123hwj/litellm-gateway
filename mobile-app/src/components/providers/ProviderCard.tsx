@@ -49,12 +49,14 @@ export const ProviderCard = memo(ProviderCardComponent)
 
 const styles = StyleSheet.create({
   card: {
+    flex: 1,
     backgroundColor: Colors.card,
     borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.border,
     padding: Spacing[4],
     alignItems: 'center',
+    margin: Spacing[2],
     ...Shadow.card,
   },
   icon: {

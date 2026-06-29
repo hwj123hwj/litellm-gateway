@@ -2,6 +2,16 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — regression & bug audit (Round 6)
+- **Updated synthesis page**: mobile-app-performance (sections 33–36)
+- **Context**: reviewed commits 571e3bd..9a770e0 (R1–R5) for regressions/bugs introduced by the optimization refactors
+- **Bugs found & fixed**:
+  - **#33 (HIGH)** store RequestGuard created AbortController per call but never aborted the previous in-flight request — generation counter only prevented stale state writes, not wasted network calls. Now holds currentController ref and aborts it on each new run().
+  - **#34 (HIGH)** DashboardScreen subscribed to `health` state via useStore but the value was unused (dead `status` var was removed in R2 but subscription remained) — every 10s health poll triggered a pointless DashboardScreen re-render. Removed the selector.
+  - **#35 (MEDIUM)** ProvidersScreen FlashList with numColumns=2 kept ItemSeparatorComponent, which FlashList inserts between horizontal neighbors too, causing uneven card gutters. Removed separator; spacing now via card margin.
+  - **#36 (LOW)** api/client.ts mergeSignals attached an abort listener to the external signal but cleanup only cleared the timeout, leaking listeners over poll cycles. Now removes the listener in cleanup.
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) performance pass — Round 5
 - **Updated synthesis page**: mobile-app-performance (sections 29–32)
 - **Key changes (code)**:

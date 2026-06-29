@@ -213,6 +213,26 @@ mobile-app/src/
 - **Before**: `10000` was an inline literal passed to `usePolling`.
 - **After**: extracted to module-level `POLL_INTERVAL_MS = 10_000`, matching the pattern already used in Logs/Models/Providers screens.
 
+## Round 6 — Regression & bug audit (2026-06-29)
+
+A review of the 5 preceding optimization commits surfaced several issues introduced by the refactors themselves. This round fixes them.
+
+### 33. RequestGuard never aborted the in-flight request (HIGH)
+- **Bug**: R2's `RequestGuard` created an `AbortController` for each `run()` call and passed its signal to the fetcher, but **never called `.abort()` on the previous controller** when a new request started. The generation counter only prevented stale writes to the store — the old network request still ran to completion, wasting bandwidth and socket connections. The "race protection" was half-functional: it guarded *state* but not *resources*.
+- **Fix**: `RequestGuard` now holds a `currentController` ref. On each new `run()`, it calls `currentController.abort()` before creating a new one. The `finally` block clears the ref so we don't repeatedly abort a completed request. Now a new poll genuinely cancels the previous in-flight fetch.
+
+### 34. DashboardScreen subscribed to `health` state but never used it (HIGH)
+- **Bug**: `const health = useStore((s) => s.health)` was in `DashboardScreen`, but the value was only used for `const status = health?.status || 'unknown'` — and `status` itself was removed as dead code in R2 (item #16). The `useStore` subscription remained, meaning **every 10s health poll caused a full DashboardScreen re-render** for nothing, since `health` data was fetched but the render output didn't depend on it.
+- **Fix**: removed the `health` selector entirely. `DashboardScreen` now only subscribes to `fetchHealth` (a stable function reference) and calls it in the polling callback, without subscribing to the health *data*.
+
+### 35. ProvidersScreen `numColumns=2` + `ItemSeparatorComponent` layout bug (MEDIUM)
+- **Bug**: R3 switched ProvidersScreen to `FlashList numColumns={2}` but kept `ItemSeparatorComponent={ItemSeparator}`. With multiple columns, FlashList/FlatList inserts separators **between horizontal neighbors too**, producing a 12px gap *inside* each row between the two cards, on top of the vertical gap between rows. The grid looked uneven.
+- **Fix**: removed `ItemSeparatorComponent` from the ProvidersScreen FlashList. Card spacing is now handled by `margin: Spacing[2]` + `flex: 1` inside `ProviderCard`'s `card` style, giving uniform gutters in both directions.
+
+### 36. `mergeSignals` event-listener leak (LOW)
+- **Bug**: R4's `mergeSignals` attached an `abort` listener to the external signal via `external.addEventListener('abort', ...)`, but the `cleanup` function only cleared the timeout timer — it never removed the listener. Over many poll cycles this leaked listener callbacks on the (long-lived) external AbortSignal.
+- **Fix**: `cleanup` now captures the handler reference and calls `external.removeEventListener('abort', handler)`.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:
