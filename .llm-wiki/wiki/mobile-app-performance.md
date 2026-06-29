@@ -287,6 +287,14 @@ A code-analysis sub-agent performed a deep review of all files. This round addre
 - **Bug**: `client.ts getLogs` had a default `limit=50`, but `store/index.ts fetchLogs` had a default `limit=100`. Since the store always passes its default explicitly, the client default was never used in practice — but the inconsistency was a latent trap: if any future code called `getLogs()` directly (without going through the store), it would silently fetch half the expected logs.
 - **Fix**: Aligned both defaults to `100`.
 
+## Round 10 — Cleartext HTTP traffic blocked by Android Network Security Policy (2026-06-29)
+
+### 48. `CLEARTEXT communication not permitted by network security policy` (HIGH, runtime crash)
+- **Bug**: The app targets Android 9+ (API 28+), where cleartext (HTTP) traffic is blocked by default. The app lets users configure a custom backend URL — typically an IP or domain over HTTP (e.g. `http://8.141.97.21:4001`). When the app tried to fetch, the OS blocked the request with `java.net.UnknownServiceException: CLEARTEXT communication to 8.141.97.21 not permitted by network security policy`. The `debug` build variant had `usesCleartextTraffic="true"`, but the `main` (release) manifest did not — so release APKs were completely broken for any HTTP backend.
+- **Fix**:
+  1. Added `android:usesCleartextTraffic="true"` to the `<application>` tag in `main/AndroidManifest.xml`.
+  2. Created a dedicated `network_security_config.xml` that explicitly permits cleartext traffic, and referenced it via `android:networkSecurityConfig="@xml/network_security_config"`. This is the Android-recommended approach and works across all build variants (debug + release).
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:

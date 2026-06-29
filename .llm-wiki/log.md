@@ -2,6 +2,15 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 10 fix: cleartext HTTP blocked
+- **Updated synthesis page**: mobile-app-performance (section 48)
+- **Context**: user reported runtime error: `CLEARTEXT communication to 8.141.97.21 not permitted by network security policy`
+- **Root cause**: Android 9+ blocks HTTP traffic by default. The `main` (release) AndroidManifest.xml lacked `usesCleartextTraffic` and a network security config — only the `debug` variant had it. Release APKs could not connect to any HTTP backend.
+- **Fix**:
+  1. Added `android:usesCleartextTraffic="true"` to main AndroidManifest.xml
+  2. Created `res/xml/network_security_config.xml` explicitly permitting cleartext, referenced via `android:networkSecurityConfig`
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 9 fourth audit
 - **Updated synthesis page**: mobile-app-performance (sections 45–47)
 - **Context**: final deep code review via code-reviewer sub-agent
