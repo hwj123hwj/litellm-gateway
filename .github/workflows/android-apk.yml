@@ -47,22 +47,11 @@ jobs:
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           echo "=== Before patch ==="
           grep "usesCleartextTraffic" "$MANIFEST" || echo "usesCleartextTraffic NOT FOUND"
-          # Add usesCleartextTraffic and networkSecurityConfig to <application> tag
           sed -i 's/<application /<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml\/network_security_config" /' "$MANIFEST"
           echo "=== After patch ==="
           grep "usesCleartextTraffic" "$MANIFEST"
-          # Create network security config XML
           mkdir -p android/app/src/main/res/xml
-          cat > android/app/src/main/res/xml/network_security_config.xml << 'XMLEOF'
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <base-config cleartextTrafficPermitted="true">
-        <trust-anchors>
-            <certificates src="system" />
-        </trust-anchors>
-    </base-config>
-</network-security-config>
-XMLEOF
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<network-security-config>' '    <base-config cleartextTrafficPermitted="true">' '        <trust-anchors>' '            <certificates src="system" />' '        </trust-anchors>' '    </base-config>' '</network-security-config>' > android/app/src/main/res/xml/network_security_config.xml
           echo "=== network_security_config.xml created ==="
           cat android/app/src/main/res/xml/network_security_config.xml
 
