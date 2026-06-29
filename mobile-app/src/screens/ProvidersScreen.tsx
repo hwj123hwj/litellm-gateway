@@ -70,9 +70,9 @@ export default function ProvidersScreen({
           keyExtractor={keyExtractor}
           numColumns={2}
           contentContainerStyle={styles.listContent}
-          // numColumns 模式下禁用 ItemSeparator，改用 item 内部 padding 控制间距，
+          // numColumns 模式下禁用 ItemSeparator，改用 item 内部 margin 控制间距，
           // 否则 separator 会出现在水平相邻的两列之间产生错位。
-          // 卡片间距由 ProviderCard 的 marginRight/marginBottom + listContent 控制。
+          // 卡片间距由 ProviderCard 的 margin + listContent 控制。
         />
       )}
     </PageContainer>

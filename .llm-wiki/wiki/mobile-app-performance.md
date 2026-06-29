@@ -257,6 +257,22 @@ A deeper review of the code after R6 found 5 more issues, including dead code, U
 - **Bug**: DashboardScreen called both `fetchDashboard()` and `fetchHealth()` every 10s. However, after R6 removed the `health` state subscription, the health data fetched by this poll was never consumed by any UI component — it just triggered unnecessary store updates and network traffic.
 - **Fix**: Removed `fetchHealth()` from the DashboardScreen polling callback. Health polling is now solely the responsibility of a dedicated health indicator (if one is ever added). `fetchHealth` remains in the store for future use but is no longer wasted on the Dashboard.
 
+## Round 8 — Third regression & bug audit (2026-06-29)
+
+A code-analysis sub-agent performed a deep review of all files. This round addresses the findings.
+
+### 42. `usePolling` lacked debounce — rapid tab switches stacked requests (MEDIUM)
+- **Bug**: `usePolling` ran `fn` on every interval tick unconditionally. On slow networks, if a poll cycle elapsed before the previous fetch resolved, a new request was initiated while the old one was still in-flight. `RequestGuard` would abort the old one, but the abort-then-refetch cycle was wasteful and could cause UI flicker.
+- **Fix**: `usePolling` now tracks an `isRunning` ref. If the previous `fn()` promise hasn't settled, the tick is skipped entirely. This provides debounce at the source, reducing unnecessary network initiations before `RequestGuard` even needs to abort.
+
+### 43. `RequestGuard.set` bypassed TypeScript safety with string-keyed records (HIGH)
+- **Bug**: `RequestGuard` received the zustand `set` function typed as `(partial: Partial<Record<string, unknown>>) => void` and constructed keys dynamically (e.g., `[this.keys.data]`). This erased all type safety — a typo in `dataKey` (e.g. `'dashbord'`) would compile silently and write to a non-existent store field, with the real field never updating.
+- **Fix**: Refactored `RequestGuard` to be generic over a prefix `K` (e.g. `'dashboard'`). It now constructs keys as template literals (`${this.prefix}`, `${this.prefix}Loading`, `${this.prefix}Error`) and casts to `Partial<AppState>` so the compiler validates that the derived keys exist on `AppState`. A typo like `'dashbord'` now fails at compile time. Also corrected the custom `StoreSet` type to match zustand's actual `set` signature (removed the incompatible `replace` parameter).
+
+### 44. FlashList v2 does not accept `estimatedItemSize` (MEDIUM, build-breaking)
+- **Bug**: The type definitions for `@shopify/flash-list@2.0.2` do not declare `estimatedItemSize` (it was deprecated/removed in the v2 API). Adding `estimatedItemSize={N}` to any FlashList caused a `tsc` error: "Property 'estimatedItemSize' does not exist on type 'FlashListProps'". This was a latent build-breaking issue that would fail any CI type-check step.
+- **Fix**: Removed `estimatedItemSize` from all three FlashList instances (Logs, Models, Providers). FlashList v2 handles sizing automatically.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:

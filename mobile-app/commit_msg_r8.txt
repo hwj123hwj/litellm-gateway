@@ -1,0 +1,23 @@
+fix(mobile-app): R8 third audit — usePolling debounce, RequestGuard type safety, FlashList v2 fix
+
+Code-analysis sub-agent deep review of all source files.
+
+#42 (MEDIUM) usePolling lacked debounce:
+  On slow networks, each interval tick could fire while the previous fetch was
+  still pending, wasting requests. Added isRunning ref guard to skip overlapping
+  ticks at the source.
+
+#43 (HIGH) RequestGuard.set bypassed TypeScript safety:
+  set was typed as Partial<Record<string,unknown>> with dynamic string keys,
+  so a typo like dashbord would compile silently and break state updates.
+  Refactored to generic prefix-based key construction (template literals) with
+  compile-time validation against AppState. Fixed StoreSet type to match
+  zustand set signature.
+
+#44 (MEDIUM, build-breaking) FlashList v2 estimatedItemSize:
+  @shopify/flash-list@2.0.2 type defs do not declare estimatedItemSize.
+  Adding it caused tsc errors on all 3 list screens. Removed the prop; v2
+  handles sizing automatically.
+
+Wiki: updated mobile-app-performance.md (sections 42-44) and log.md.
+Validation: npx tsc --noEmit passes clean.

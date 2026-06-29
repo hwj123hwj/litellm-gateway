@@ -2,6 +2,15 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 8 third bug audit
+- **Updated synthesis page**: mobile-app-performance (sections 42–44)
+- **Context**: code-analysis sub-agent deep review of all source files
+- **Bugs found & fixed**:
+  - **#42 (MEDIUM)** usePolling had no debounce — on slow networks, each tick could fire while the previous fetch was still pending, wasting requests. Added isRunning ref guard to skip overlapping ticks.
+  - **#43 (HIGH)** RequestGuard.set was typed as Partial<Record<string,unknown>>, bypassing TypeScript safety — a typo in key strings would compile silently and silently break state updates. Refactored to generic prefix-based key construction with compile-time validation against AppState; fixed StoreSet type to match zustand set signature.
+  - **#44 (MEDIUM, build-breaking)** @shopify/flash-list@2.0.2 type defs do not declare estimatedItemSize — adding it caused tsc errors. Removed from all 3 FlashList instances.
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 7 bug audit
 - **Updated synthesis page**: mobile-app-performance (sections 37–41)
 - **Context**: second pass review after R6, focusing on dead code, UI consistency, and error-path robustness

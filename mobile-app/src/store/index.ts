@@ -19,62 +19,9 @@ import {
   ApiError,
 } from '../api'
 
-/**
- * 竞态保护：每个数据域维护独立的 generation 计数器，
- * 保证只有最后一次请求的响应才能写入 store。
- * 保留完整的 ApiError 对象（而非仅 message），以便 UI 根据 code 做差异化处理。
- */
-class RequestGuard<T> {
-  private generation = 0
-  /** 当前活跃请求的 AbortController，新的请求发起时会 abort 上一个 */
-  private currentController: AbortController | null = null
-
-  constructor(
-    private set: (partial: Partial<Record<string, unknown>>) => void,
-    private keys: { data: string; loading: string; error: string },
-  ) {}
-
-  async run(fetcher: (signal: AbortSignal) => Promise<T>) {
-    // 竞态保护核心：新请求到来时，立即 abort 上一个尚未完成的请求
-    // 这样旧请求的 fetch 网络层会被真正取消，而非空跑浪费带宽
-    if (this.currentController) {
-      this.currentController.abort()
-    }
-
-    const controller = new AbortController()
-    this.currentController = controller
-    const gen = ++this.generation
-    this.set({
-      [this.keys.loading]: true,
-      [this.keys.error]: null,
-    })
-
-    try {
-      const data = await fetcher(controller.signal)
-      // 仅当本次请求仍是最新一次时才写入
-      if (gen === this.generation) {
-        this.set({ [this.keys.data]: data, [this.keys.loading]: false })
-      }
-    } catch (e: any) {
-      // fetchJSON 已将所有 AbortError 包装为 ApiError('TIMEOUT')，
-      // 所以这里不会收到原始 AbortError。
-      // 对于被新请求取代的旧请求，gen !== this.generation，
-      // 其错误被自然忽略，不会写入 store。
-      if (gen === this.generation) {
-        const err =
-          e instanceof ApiError
-            ? e
-            : new ApiError(e?.message || '未知错误', 'NETWORK')
-        this.set({ [this.keys.error]: err, [this.keys.loading]: false })
-      }
-    } finally {
-      // 清理 currentController 引用，避免对一个已完成的请求反复 abort
-      if (this.currentController === controller) {
-        this.currentController = null
-      }
-    }
-  }
-}
+// ---------------------------------------------------------------------------
+// 类型定义
+// ---------------------------------------------------------------------------
 
 interface AppState {
   // Backend URL
@@ -120,81 +67,137 @@ interface AppState {
   fetchLogs: (limit?: number) => Promise<void>
 }
 
+// 使用 zustand 的原生 setter 类型，避免与 StoreSet 自定义类型冲突
+type StoreSet = (
+  partial:
+    | Partial<AppState>
+    | ((state: AppState) => Partial<AppState>),
+) => void
+
+// ---------------------------------------------------------------------------
+// RequestGuard: 竞态保护 + 自动 abort 旧请求
+// ---------------------------------------------------------------------------
+
+/**
+ * 每个数据域拥有独立的 RequestGuard。
+ *
+ * - generation 计数器：保证只有最后一次请求的响应才能写入 store
+ * - currentController：新请求到来时 abort 上一个尚未完成的请求
+ *
+ * `K` 是该数据域在 AppState 中的键前缀（如 'dashboard'），
+ * set 调用全部由 TypeScript 编译期检查，杜绝字符串拼写错误。
+ */
+class RequestGuard<
+  K extends string,
+  D,
+> {
+  private generation = 0
+  private currentController: AbortController | null = null
+
+  constructor(
+    private set: StoreSet,
+    private prefix: K,
+  ) {}
+
+  async run(fetcher: (signal: AbortSignal) => Promise<D>) {
+    // 竞态保护：立即 abort 上一个尚未完成的请求
+    if (this.currentController) {
+      this.currentController.abort()
+    }
+
+    const controller = new AbortController()
+    this.currentController = controller
+    const gen = ++this.generation
+
+    this.set({
+      [`${this.prefix}Loading`]: true,
+      [`${this.prefix}Error`]: null,
+    } as Partial<AppState>)
+
+    try {
+      const data = await fetcher(controller.signal)
+      if (gen === this.generation) {
+        this.set({
+          [this.prefix]: data,
+          [`${this.prefix}Loading`]: false,
+        } as Partial<AppState>)
+      }
+    } catch (e: any) {
+      // 被取代的旧请求 (gen !== generation) 的错误被自然忽略
+      if (gen === this.generation) {
+        const err =
+          e instanceof ApiError
+            ? e
+            : new ApiError(e?.message || '未知错误', 'NETWORK')
+        this.set({
+          [`${this.prefix}Error`]: err,
+          [`${this.prefix}Loading`]: false,
+        } as Partial<AppState>)
+      }
+    } finally {
+      if (this.currentController === controller) {
+        this.currentController = null
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Store 创建
+// ---------------------------------------------------------------------------
+
 export const useStore = create<AppState>((set) => {
-  // 每个数据域独立的 RequestGuard，互不干扰
-  const healthGuard = new RequestGuard<HealthResponse>(set, {
-    data: 'health',
-    loading: 'healthLoading',
-    error: 'healthError',
-  })
-  const dashboardGuard = new RequestGuard<DashboardResponse>(set, {
-    data: 'dashboard',
-    loading: 'dashboardLoading',
-    error: 'dashboardError',
-  })
-  const providersGuard = new RequestGuard<ProvidersResponse>(set, {
-    data: 'providers',
-    loading: 'providersLoading',
-    error: 'providersError',
-  })
-  const modelsGuard = new RequestGuard<ModelsResponse>(set, {
-    data: 'models',
-    loading: 'modelsLoading',
-    error: 'modelsError',
-  })
-  const logsGuard = new RequestGuard<LogsResponse>(set, {
-    data: 'logs',
-    loading: 'logsLoading',
-    error: 'logsError',
-  })
+  const healthGuard = new RequestGuard<'health', HealthResponse>(set, 'health')
+  const dashboardGuard = new RequestGuard<'dashboard', DashboardResponse>(
+    set,
+    'dashboard',
+  )
+  const providersGuard = new RequestGuard<'providers', ProvidersResponse>(
+    set,
+    'providers',
+  )
+  const modelsGuard = new RequestGuard<'models', ModelsResponse>(set, 'models')
+  const logsGuard = new RequestGuard<'logs', LogsResponse>(set, 'logs')
 
   return {
-    // Backend URL
     backendUrl: '',
-    setBackendUrl: async (url: string) => {
+    setBackendUrl: async (url) => {
       await saveBackendUrl(url)
       set({ backendUrl: url })
     },
 
-    // Auth
     apiKey: '',
-    setApiKey: async (key: string) => {
+    setApiKey: async (key) => {
       await saveApiKey(key)
       set({ apiKey: key })
     },
 
-    // Initialization
     initialized: false,
     init: async () => {
       const [url, key] = await Promise.all([getBackendUrl(), getApiKey()])
       set({ backendUrl: url, apiKey: key, initialized: true })
     },
 
-    // Health
     health: null,
     healthLoading: false,
     healthError: null,
     fetchHealth: () => healthGuard.run((s) => getHealth(s)),
 
-    // Dashboard
     dashboard: null,
     dashboardLoading: false,
     dashboardError: null,
     fetchDashboard: () => dashboardGuard.run((s) => getDashboard(s)),
 
-    // Providers
     providers: null,
     providersLoading: false,
     providersError: null,
     fetchProviders: () => providersGuard.run((s) => getProviders(s)),
 
-    // Models
     models: null,
     modelsLoading: false,
     modelsError: null,
     fetchModels: () => modelsGuard.run((s) => getModels(s)),
 
-    // Logs
     logs: null,
     logsLoading: false,
     logsError: null,
