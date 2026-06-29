@@ -37,6 +37,11 @@ function SetupScreen() {
     }
   }, [url, key, setBackendUrl, setApiKey])
 
+  // 快捷填充按钮
+  const quickFill = useCallback((value: string) => {
+    setUrl(value)
+  }, [])
+
   return (
     <KeyboardAvoidingView
       style={styles.setupContainer}
@@ -65,6 +70,12 @@ function SetupScreen() {
               autoCorrect={false}
               keyboardType="url"
             />
+            <View style={styles.quickFillRow}>
+              <Text style={styles.quickFillHint}>快捷填充：</Text>
+              <TouchableOpacity onPress={() => quickFill('http://8.141.97.21:4001')}>
+                <Text style={styles.quickFillBtn}>生产服务器</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.setupInputGroup}>
@@ -108,8 +119,20 @@ export default function App() {
     init()
   }, [init])
 
-  // showSetup 是派生状态，无需独立 useState
-  const showSetup = initialized && !backendUrl
+  // 检查 URL 是否合法：不仅要有值，还必须有有效的 host
+  const isValidUrl = (url: string) => {
+    if (!url) return false
+    try {
+      const u = new URL(url)
+      // 'http://' 会被 URL 解析成功，但没有 host
+      return !!u.host
+    } catch {
+      return false
+    }
+  }
+
+  // showSetup 是派生状态：未初始化、或 URL 无效（如之前版本残留的 'http://'）时都显示
+  const showSetup = initialized && !isValidUrl(backendUrl)
 
   let content: React.ReactNode
   if (!initialized) {
@@ -230,6 +253,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: Typography.fontSize.lg,
     fontWeight: Typography.fontWeight.bold,
+    fontFamily: Typography.fontFamily.body,
+  },
+  quickFillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing[2],
+    gap: Spacing[2],
+  },
+  quickFillHint: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textMuted,
+    fontFamily: Typography.fontFamily.body,
+  },
+  quickFillBtn: {
+    fontSize: Typography.fontSize.sm,
+    color: Colors.terracotta[700],
+    fontWeight: Typography.fontWeight.semibold,
+    textDecorationLine: 'underline',
     fontFamily: Typography.fontFamily.body,
   },
 })

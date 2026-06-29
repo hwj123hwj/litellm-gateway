@@ -2,6 +2,15 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 11 setup screen self-heal
+- **Updated synthesis page**: mobile-app-performance (sections 49–51)
+- **Context**: user reported app stuck on broken state after upgrading — old 'http://' default from v1.0.0 was still in AsyncStorage, bypassing setup screen
+- **Fixes**:
+  - **#49 (HIGH)** Replaced truthy `!backendUrl` check with `isValidUrl()` validation. Invalid URLs like 'http://' (no host) now correctly trigger the setup screen. Self-healing on next launch.
+  - **#50 (MEDIUM)** Added quick-fill button for production server URL on setup screen
+  - **#51** Bumped version to 1.2.0
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 10 fix: cleartext HTTP blocked
 - **Updated synthesis page**: mobile-app-performance (section 48)
 - **Context**: user reported runtime error: `CLEARTEXT communication to 8.141.97.21 not permitted by network security policy`

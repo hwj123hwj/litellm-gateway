@@ -295,6 +295,19 @@ A code-analysis sub-agent performed a deep review of all files. This round addre
   1. Added `android:usesCleartextTraffic="true"` to the `<application>` tag in `main/AndroidManifest.xml`.
   2. Created a dedicated `network_security_config.xml` that explicitly permits cleartext traffic, and referenced it via `android:networkSecurityConfig="@xml/network_security_config"`. This is the Android-recommended approach and works across all build variants (debug + release).
 
+## Round 11 — Setup screen usability & broken initial state recovery (2026-06-29)
+
+### 49. Stuck on broken state due to invalid `http://` URL persisted in storage (HIGH)
+- **Bug**: Users who had installed v1.0.0 and saved the old `'http://'` default still had that broken URL in AsyncStorage. After upgrading, the app loaded `'http://'`, which is truthy (non-empty), so `showSetup = initialized && !backendUrl` was `false`. The app jumped to the main screen with a broken URL, showing only "NETWORK" errors with no way back to setup.
+- **Fix**: Replaced the truthy check with `isValidUrl()` using `new URL(url)`. A URL like `'http://'` has no host and now correctly triggers the setup screen. Self-healing on next launch.
+
+### 50. Setup screen lacks quick-fill for known backends (MEDIUM)
+- **Bug**: Users had to manually type the IP and port on a mobile keyboard.
+- **Fix**: Added a "快捷填充" row with a "生产服务器" button that auto-fills `http://8.141.97.21:4001`.
+
+### 51. Bump version to 1.2.0
+- Bumped `app.json` version `1.1.1` → `1.2.0` for the setup-screen UX overhaul and self-healing URL validation.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:
