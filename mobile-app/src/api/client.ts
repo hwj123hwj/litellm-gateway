@@ -31,7 +31,6 @@ async function getBaseUrl(): Promise<string> {
   // 如果打包出来在真机上，会弹配置页让用户手动输入，不会用到这个默认值
   return 'http://10.0.2.2:4001/admin'
 }
-}
 
 /**
  * 将外部 AbortSignal 与超时 signal 合并。
