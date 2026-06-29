@@ -2,6 +2,15 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 9 fourth audit
+- **Updated synthesis page**: mobile-app-performance (sections 45–47)
+- **Context**: final deep code review via code-reviewer sub-agent
+- **Bugs found & fixed**:
+  - **#45 (HIGH)** App.tsx SetupScreen initialized URL input with 'http://' — clicking start without editing saved a malformed URL with no host, causing all subsequent API requests to fail with NETWORK error; user got stuck since URL was non-empty (setup screen skipped). Changed to empty string.
+  - **#46 (MEDIUM)** client.ts getBaseUrl unconditionally appended /admin — a user pasting http://server:4001/admin would get double-pathed to /admin/admin causing 404s. Added regex check to skip appending if /admin suffix already present.
+  - **#47 (LOW)** getLogs default limit=50 in client.ts vs limit=100 in store — inconsistency was a latent trap if client was called directly. Aligned both to 100.
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 8 third bug audit
 - **Updated synthesis page**: mobile-app-performance (sections 42–44)
 - **Context**: code-analysis sub-agent deep review of all source files

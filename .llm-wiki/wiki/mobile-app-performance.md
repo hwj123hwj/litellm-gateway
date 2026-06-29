@@ -273,6 +273,20 @@ A code-analysis sub-agent performed a deep review of all files. This round addre
 - **Bug**: The type definitions for `@shopify/flash-list@2.0.2` do not declare `estimatedItemSize` (it was deprecated/removed in the v2 API). Adding `estimatedItemSize={N}` to any FlashList caused a `tsc` error: "Property 'estimatedItemSize' does not exist on type 'FlashListProps'". This was a latent build-breaking issue that would fail any CI type-check step.
 - **Fix**: Removed `estimatedItemSize` from all three FlashList instances (Logs, Models, Providers). FlashList v2 handles sizing automatically.
 
+## Round 9 — Fourth audit: initial-state & URL construction bugs (2026-06-29)
+
+### 45. SetupScreen initialized URL with a broken `'http://'` prefix (HIGH)
+- **Bug**: `App.tsx` `SetupScreen` used `useState('http://')` as the initial value for the backend URL input. If a user clicked "开始使用" without editing, the store would be set to `http://` — a malformed URL with no host. Every subsequent API request would fail with a `NETWORK` error, and since the URL is "set" (non-empty), the app would skip the setup screen on next launch, leaving the user stuck in a broken state with no obvious recovery.
+- **Fix**: Changed initial value to `useState('')` (empty string). The `handleStart` callback already guards with `if (url.trim())`, so an empty submit no longer writes a broken URL. If left empty, the app falls through to the default `http://10.0.2.2:4001/admin` dev address.
+
+### 46. `getBaseUrl()` unconditionally appended `/admin` (MEDIUM)
+- **Bug**: `client.ts` `getBaseUrl()` always appended `/admin` to the configured URL. If a user pasted `http://server:4001/admin` (a natural thing to do), the result was `http://server:4001/admin/admin`, causing all requests to 404. This is a common failure mode for self-hosted tools where the admin path is part of the base URL.
+- **Fix**: Added a regex check (`/\/admin\/?$/i`) — if the user's URL already ends with `/admin`, it is used as-is; otherwise `/admin` is appended. Prevents double-pathing.
+
+### 47. `getLogs` default `limit` mismatch between client and store (LOW)
+- **Bug**: `client.ts getLogs` had a default `limit=50`, but `store/index.ts fetchLogs` had a default `limit=100`. Since the store always passes its default explicitly, the client default was never used in practice — but the inconsistency was a latent trap: if any future code called `getLogs()` directly (without going through the store), it would silently fetch half the expected logs.
+- **Fix**: Aligned both defaults to `100`.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:

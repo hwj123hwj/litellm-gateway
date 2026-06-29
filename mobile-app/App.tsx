@@ -19,7 +19,7 @@ import { Colors, Typography, Spacing, Radius, Shadow } from './src/theme'
 function SetupScreen() {
   const setBackendUrl = useStore((s) => s.setBackendUrl)
   const setApiKey = useStore((s) => s.setApiKey)
-  const [url, setUrl] = useState('http://')
+  const [url, setUrl] = useState('')
   const [key, setKey] = useState('')
   const [saving, setSaving] = useState(false)
 

@@ -16,10 +16,16 @@ const STORAGE_KEYS = {
 const DEFAULT_TIMEOUT_MS = 15_000
 
 // 获取后端地址（支持运行时配置）
+// 智能拼接 /admin 路径：如果用户已配置了 /admin 后缀则不重复添加
 async function getBaseUrl(): Promise<string> {
   const configured = await AsyncStorage.getItem(STORAGE_KEYS.BACKEND_URL)
   if (configured) {
-    return configured.replace(/\/$/, '') + '/admin'
+    const cleanUrl = configured.replace(/\/$/, '')
+    // 用户可能已手动输入了 /admin 后缀，避免产生 /admin/admin
+    if (/\/admin\/?$/i.test(cleanUrl)) {
+      return cleanUrl
+    }
+    return cleanUrl + '/admin'
   }
   // 默认地址（局域网开发）
   return 'http://10.0.2.2:4001/admin'
@@ -159,7 +165,7 @@ export function getModels(signal?: AbortSignal): Promise<ModelsResponse> {
 }
 
 export function getLogs(
-  limit = 50,
+  limit = 100,
   signal?: AbortSignal,
 ): Promise<LogsResponse> {
   return fetchJSON(`/logs?limit=${limit}`, signal)
