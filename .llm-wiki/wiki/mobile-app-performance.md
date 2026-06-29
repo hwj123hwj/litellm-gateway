@@ -317,6 +317,19 @@ A code-analysis sub-agent performed a deep review of all files. This round addre
 ### 53. Bump version to 1.2.1
 - Bumped version for the config plugin fix.
 
+## Round 13 — CI build pipeline: prebuild override + JS syntax fix (2026-06-29)
+
+### 54. `expo prebuild` overwrites manual native config (HIGH)
+- **Bug**: R10 manually edited `android/` files for cleartext HTTP. But `expo prebuild` (run in CI) regenerates the entire `android/` directory, discarding manual changes. APKs were built without cleartext permission.
+- **Fix**: Added a `Patch Android Manifest for Cleartext HTTP` step in the CI workflow that runs *after* `expo prebuild`. Uses `sed` to inject `usesCleartextTraffic` + `networkSecurityConfig` into the `<application>` tag, and `printf` to generate `network_security_config.xml` reliably (heredoc had indentation issues).
+
+### 55. Duplicate closing brace in `client.ts` caused JS bundle SyntaxError (HIGH)
+- **Bug**: R12's edit left an extra `}` after `getBaseUrl()`. Metro bundler rejected the bundle with `SyntaxError: Unexpected token (34:0)`, failing `:app:createBundleReleaseJsAndAssets`. `tsc --noEmit` didn't catch it (extra `}` at module level is syntactically valid JS but invalid for the parser position).
+- **Fix**: Removed the duplicate brace.
+
+### 56. Version bumps 1.2.1 → 1.2.5
+- Multiple iterations to fix CI issues.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:

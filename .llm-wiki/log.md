@@ -2,6 +2,16 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-29] synthesis | Mobile app (React Native) — Round 13 CI pipeline fixes
+- **Updated synthesis page**: mobile-app-performance (sections 54–56)
+- **Context**: v1.2.1–v1.2.4 builds failed due to CI pipeline issues; v1.2.5 succeeded
+- **Bugs found & fixed**:
+  - **#54 (HIGH)** expo prebuild overwrites manual native config: added CI step to patch AndroidManifest + create network_security_config.xml after prebuild via sed + printf
+  - **#55 (HIGH)** duplicate closing brace in client.ts caused JS bundle SyntaxError in Metro: removed extra brace
+  - **#56** version bumped through 1.2.1 → 1.2.5 across iterations
+- **Result**: v1.2.5 APK built and released successfully (81MB)
+- **Validation**: `npx tsc --noEmit` passes clean
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 12 expo prebuild fix
 - **Updated synthesis page**: mobile-app-performance (sections 52–53)
 - **Context**: v1.2.0 still showed 'CLEARTEXT communication not permitted' on real device. User screenshot confirmed the error persisted.
