@@ -1,5 +1,6 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
-import { Text, StyleSheet } from 'react-native'
+import { Text, StyleSheet, Platform } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   DashboardScreen,
   ModelsScreen,
@@ -27,28 +28,39 @@ const TAB_LABELS: Record<string, string> = {
   SettingsTab: '设置',
 }
 
-/**
- * screenOptions 提取为模块级稳定对象，避免每次 render 都创建新的函数闭包，
- * 从而导致所有 tab 的 header/tabBar 配置重新计算。
- * tabBarIcon 内部仅依赖 route.name（从常量表取值），可安全地提到顶层。
- */
-const screenOptions = ({ route }: { route: { name: string } }) => ({
-  headerShown: false,
-  tabBarIcon: ({ focused }: { focused: boolean }) => (
-    <Text style={[styles.icon, focused && styles.iconActive]}>
-      {TAB_ICONS[route.name] ?? '📄'}
-    </Text>
-  ),
-  tabBarLabel: TAB_LABELS[route.name] ?? route.name,
-  tabBarActiveTintColor: Colors.terracotta[700],
-  tabBarInactiveTintColor: Colors.textMuted,
-  tabBarStyle: styles.tabBar,
-  tabBarLabelStyle: styles.tabLabel,
-})
-
 export default function TabNavigator() {
+  // 获取底部安全区域高度（Android 手势导航栏 / iOS Home Indicator）
+  // 确保底部 Tab 按钮不被系统导航栏遮挡
+  const insets = useSafeAreaInsets()
+  const bottomInset = Math.max(insets.bottom, 0)
+
+  // 基础高度 + 底部安全区域
+  const baseHeight = Platform.OS === 'ios' ? 50 : 56
+  const tabBarHeight = baseHeight + bottomInset
+
   return (
-    <Tab.Navigator screenOptions={screenOptions}>
+    <Tab.Navigator
+      screenOptions={({ route }: { route: { name: string } }) => ({
+        headerShown: false,
+        tabBarIcon: ({ focused }: { focused: boolean }) => (
+          <Text style={[styles.icon, focused && styles.iconActive]}>
+            {TAB_ICONS[route.name] ?? '📄'}
+          </Text>
+        ),
+        tabBarLabel: TAB_LABELS[route.name] ?? route.name,
+        tabBarActiveTintColor: Colors.terracotta[700],
+        tabBarInactiveTintColor: Colors.textMuted,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height: tabBarHeight,
+          paddingBottom: bottomInset + 6,
+        },
+        tabBarLabelStyle: styles.tabLabel,
+        tabBarItemStyle: {
+          paddingVertical: 4,
+        },
+      })}
+    >
       <Tab.Screen name="DashboardTab" component={DashboardScreen} />
       <Tab.Screen name="ModelsTab" component={ModelsScreen} />
       <Tab.Screen name="ProvidersTab" component={ProvidersScreen} />
@@ -63,8 +75,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.warmWhite,
     borderTopColor: Colors.border,
     borderTopWidth: 1,
-    height: 64,
-    paddingBottom: 8,
     paddingTop: 4,
   },
   tabLabel: {
