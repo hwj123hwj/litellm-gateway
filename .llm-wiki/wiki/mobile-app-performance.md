@@ -330,6 +330,14 @@ A code-analysis sub-agent performed a deep review of all files. This round addre
 ### 56. Version bumps 1.2.1 → 1.2.5
 - Multiple iterations to fix CI issues.
 
+## Round 14 — Bottom tab bar occluded by system nav (2026-06-29)
+
+### 57. Bottom tab buttons hidden behind Android gesture navigation bar (UI)
+- **Bug**: The 5 bottom tab buttons (首页/模型/提供商/日志/设置) were nearly hidden behind the system gesture navigation bar on the user's device.
+- **Root cause**: `TabNavigator` used a fixed `height: 64px` + `paddingBottom: 8px` in `tabBarStyle`. This didn't account for the device's bottom safe area inset. On phones with gesture navigation (no hardware buttons), the system navigation bar overlaps the bottom of the app, occluding the tab labels and icons.
+- **Fix**: `TabNavigator` now calls `useSafeAreaInsets()` to dynamically compute the bottom inset. The tab bar height is now `baseHeight + bottomInset` and `paddingBottom` is `bottomInset + 6`. This ensures the tabs sit above the system navigation bar on all devices (Android gesture nav, Android 3-button nav, iOS home indicator).
+- Also added `tabBarItemStyle: { paddingVertical: 4 }` for better touch target sizing.
+
 ## Follow-ups (remaining)
 
 These items from the RN best-practices skill are still open; apply only when a measured problem exists:
