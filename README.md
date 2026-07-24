@@ -2,6 +2,14 @@
 
 轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团、EasyClaw、DeepV 五家提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
 
+## 一键安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.sh | bash
+```
+
+安装脚本会自动完成：下载二进制 → 配置 PATH → 引导填入 API Key → 完成。
+
 ## 快速启动
 
 ### 本地开发
@@ -210,3 +218,11 @@ litellm-gateway/
 - 内存：~18 MB
 - 启动时间：<1 秒
 - Docker 镜像：~50 MB
+
+## 相关项目
+
+- [π-go](https://github.com/hwj123hwj/pi-go) — AI 编程搭档，写代码、搜知识、放音乐
+
+## 展示页
+
+访问 [hwj123hwj.github.io](https://hwj123hwj.github.io) 查看所有项目。

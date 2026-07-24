@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>hwj123hwj - 开源项目</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f8fafc;
+            color: #334155;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* Header */
+        header {
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 60px 0 48px;
+            text-align: center;
+        }
+
+        .avatar {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            margin-bottom: 20px;
+            border: 3px solid #e2e8f0;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 8px;
+        }
+
+        header .bio {
+            font-size: 1.1rem;
+            color: #64748b;
+            margin-bottom: 24px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            margin-bottom: 24px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-num {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #94a3b8;
+        }
+
+        .links {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .links a {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            background: #f1f5f9;
+            color: #475569;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            border: 1px solid #e2e8f0;
+        }
+
+        .links a:hover {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .links a.primary {
+            background: #0f172a;
+            color: white;
+            border-color: #0f172a;
+        }
+
+        .links a.primary:hover {
+            background: #1e293b;
+        }
+
+        /* Section */
+        .section {
+            padding: 48px 0;
+        }
+
+        .section-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title .icon {
+            font-size: 1.5rem;
+        }
+
+        .section-desc {
+            color: #64748b;
+            margin-bottom: 28px;
+            font-size: 0.95rem;
+        }
+
+        /* Project Grid */
+        .project-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .project-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .project-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+            border-color: #cbd5e1;
+            transform: translateY(-2px);
+        }
+
+        .project-header {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .project-icon {
+            font-size: 1.8rem;
+            margin-right: 14px;
+            flex-shrink: 0;
+        }
+
+        .project-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .project-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #0f172a;
+            margin-bottom: 2px;
+        }
+
+        .project-title a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .project-title a:hover {
+            color: #2563eb;
+        }
+
+        .project-lang {
+            font-size: 0.8rem;
+            color: #94a3b8;
+        }
+
+        .project-desc {
+            color: #64748b;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+            flex: 1;
+        }
+
+        .install-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 14px;
+        }
+
+        .install-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #64748b;
+            padding: 8px 12px 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .install-cmd {
+            display: flex;
+            align-items: center;
+            background: #1e293b;
+            margin: 6px;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .install-cmd code {
+            flex: 1;
+            padding: 10px 12px;
+            color: #e2e8f0;
+            font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+            font-size: 0.75rem;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .copy-btn {
+            padding: 10px 12px;
+            background: #334155;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .copy-btn:hover {
+            background: #475569;
+            color: #e2e8f0;
+        }
+
+        .copy-btn.copied {
+            background: #059669;
+            color: white;
+        }
+
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 3px 10px;
+            background: #eff6ff;
+            color: #2563eb;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .tag.green {
+            background: #f0fdf4;
+            color: #16a34a;
+        }
+
+        .tag.purple {
+            background: #faf5ff;
+            color: #9333ea;
+        }
+
+        .tag.orange {
+            background: #fff7ed;
+            color: #ea580c;
+        }
+
+        .tag.red {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        /* Footer */
+        footer {
+            background: white;
+            border-top: 1px solid #e2e8f0;
+            padding: 32px 0;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 0.85rem;
+        }
+
+        footer a {
+            color: #64748b;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            color: #2563eb;
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            header {
+                padding: 40px 0 32px;
+            }
+
+            header h1 {
+                font-size: 1.5rem;
+            }
+
+            .stats {
+                gap: 20px;
+            }
+
+            .project-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .install-cmd code {
+                font-size: 0.7rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <img src="https://github.com/hwj123hwj.png" alt="hwj123hwj" class="avatar">
+            <h1>hwj123hwj</h1>
+            <p class="bio">全栈开发者 · AI 工具链探索者 · 用 Go/TypeScript/Python 构建实用工具</p>
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-num">14</div>
+                    <div class="stat-label">公开项目</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-num">4</div>
+                    <div class="stat-label">Stars</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-num">5</div>
+                    <div class="stat-label">语言</div>
+                </div>
+            </div>
+            <div class="links">
+                <a href="https://github.com/hwj123hwj" target="_blank" class="primary">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                    GitHub
+                </a>
+                <a href="https://github.com/hwj123hwj?tab=repositories" target="_blank">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1h-8a1 1 0 00-1 1v6.708A2.486 2.486 0 014.5 9h8V1.5z"/></svg>
+                    所有仓库
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- AI 工具链 -->
+        <section class="section">
+            <div class="container">
+                <h2 class="section-title"><span class="icon">🤖</span> AI 工具链</h2>
+                <p class="section-desc">AI 编程助手、Agent 框架、技能系统</p>
+                <div class="project-grid">
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🌐</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/litellm-gateway" target="_blank">LLM Gateway</a></div>
+                                <div class="project-lang">Go</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">轻量级 LLM API 网关，18MB 内存，支持智谱/小米/美团/EasyClaw，自动 fallback</p>
+                        <div class="install-box">
+                            <div class="install-label">一键安装</div>
+                            <div class="install-cmd">
+                                <code>curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.sh | bash</code>
+                                <button class="copy-btn" onclick="copyInstall(this)">复制</button>
+                            </div>
+                        </div>
+                        <div class="tags">
+                            <span class="tag">API Gateway</span>
+                            <span class="tag">LLM</span>
+                            <span class="tag">OpenAI 兼容</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🧠</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/pi-go" target="_blank">π-go</a></div>
+                                <div class="project-lang">Go</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">AI 编程搭档，写代码、搜知识、放音乐，一个终端全搞定</p>
+                        <div class="install-box">
+                            <div class="install-label">一键安装</div>
+                            <div class="install-cmd">
+                                <code>curl -fsSL https://raw.githubusercontent.com/hwj123hwj/pi-go/main/scripts/install.sh | bash</code>
+                                <button class="copy-btn" onclick="copyInstall(this)">复制</button>
+                            </div>
+                        </div>
+                        <div class="tags">
+                            <span class="tag">AI Agent</span>
+                            <span class="tag">TUI</span>
+                            <span class="tag">编程助手</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">⚡</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/custom-skills" target="_blank">Custom Skills</a></div>
+                                <div class="project-lang">HTML · ⭐ 4</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">AI Agent 自定义技能集合，扩展 AI 能力边界</p>
+                        <div class="tags">
+                            <span class="tag">AI Skills</span>
+                            <span class="tag">Agent</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">💻</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/hwjcode" target="_blank">HWJCode</a></div>
+                                <div class="project-lang">TypeScript</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">Easy Code / DeepV Code - AI 驱动的智能编程助手</p>
+                        <div class="tags">
+                            <span class="tag">IDE</span>
+                            <span class="tag">AI Coding</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🎵</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/VibeCheck" target="_blank">VibeCheck</a></div>
+                                <div class="project-lang">Python</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">AI 驱动的音乐情感分析与情绪索引平台</p>
+                        <div class="tags">
+                            <span class="tag purple">AI</span>
+                            <span class="tag purple">音乐</span>
+                            <span class="tag purple">情感分析</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- 自动化工具 -->
+        <section class="section" style="background: white; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;">
+            <div class="container">
+                <h2 class="section-title"><span class="icon">🔧</span> 自动化工具</h2>
+                <p class="section-desc">RPA、视频生成、工作流自动化</p>
+                <div class="project-grid">
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">📱</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/WePilot" target="_blank">WePilot</a></div>
+                                <div class="project-lang">Python</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">桌面微信自动化工具，RPA 驱动的微信助手</p>
+                        <div class="tags">
+                            <span class="tag green">微信</span>
+                            <span class="tag green">RPA</span>
+                            <span class="tag green">自动化</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🎬</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/auto-video-ai" target="_blank">Auto Video AI</a></div>
+                                <div class="project-lang">JavaScript</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">AI 自动视频生成工具</p>
+                        <div class="tags">
+                            <span class="tag green">视频</span>
+                            <span class="tag green">AI 生成</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- 可视化平台 -->
+        <section class="section">
+            <div class="container">
+                <h2 class="section-title"><span class="icon">📊</span> 可视化平台</h2>
+                <p class="section-desc">数据分析、可视化展示、行业 Demo</p>
+                <div class="project-grid">
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🚗</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/car-ai-platform" target="_blank">赛豆 · 汽车智能分析</a></div>
+                                <div class="project-lang">HTML</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">汽车智能分析平台 Demo，AI 驱动的汽车行业数据分析</p>
+                        <div class="tags">
+                            <span class="tag orange">汽车</span>
+                            <span class="tag orange">数据分析</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🚢</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/multimodal-transport" target="_blank">多式联运可视化</a></div>
+                                <div class="project-lang">JavaScript</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">多式联运稳定匹配可视化平台</p>
+                        <div class="tags">
+                            <span class="tag orange">物流</span>
+                            <span class="tag orange">可视化</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🚁</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/dut-drone-delivery" target="_blank">大工无人机配送</a></div>
+                                <div class="project-lang">HTML</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">大连理工大学无人机配送系统，已部署到 GitHub Pages</p>
+                        <div class="tags">
+                            <span class="tag orange">无人机</span>
+                            <span class="tag orange">配送</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- 学习与教育 -->
+        <section class="section" style="background: white; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;">
+            <div class="container">
+                <h2 class="section-title"><span class="icon">📚</span> 学习与教育</h2>
+                <p class="section-desc">编程学习、AI 考试、问卷系统</p>
+                <div class="project-grid">
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🐹</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/go-learning-for-java-dev" target="_blank">Go 学习指南</a></div>
+                                <div class="project-lang">Go</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">Java 开发者转 Go 语言学习项目，基础语法 + Gin+GORM 实战</p>
+                        <div class="tags">
+                            <span class="tag red">Go</span>
+                            <span class="tag red">学习</span>
+                            <span class="tag red">Java 转 Go</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">📝</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/ai-class-survey" target="_blank">AI 成熟度诊断</a></div>
+                                <div class="project-lang">TypeScript</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">企业 AI Native 成熟度诊断问卷系统</p>
+                        <div class="tags">
+                            <span class="tag red">问卷</span>
+                            <span class="tag red">AI 评估</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🎯</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/ai-exam" target="_blank">AI Exam</a></div>
+                                <div class="project-lang">TypeScript</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">Vibe Coding AI 考试系统 - EasyCode-1.0.300</p>
+                        <div class="tags">
+                            <span class="tag red">考试</span>
+                            <span class="tag red">Vibe Coding</span>
+                        </div>
+                    </div>
+
+                    <div class="project-card">
+                        <div class="project-header">
+                            <span class="project-icon">🎨</span>
+                            <div class="project-info">
+                                <div class="project-title"><a href="https://github.com/hwj123hwj/easystudio-demo" target="_blank">EasyStudio Demo</a></div>
+                                <div class="project-lang">HTML</div>
+                            </div>
+                        </div>
+                        <p class="project-desc">EasyStudio 产品演示页面</p>
+                        <div class="tags">
+                            <span class="tag red">Demo</span>
+                            <span class="tag red">展示</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>
+                <a href="https://github.com/hwj123hwj" target="_blank">github.com/hwj123hwj</a>
+                <span style="margin: 0 12px; color: #e2e8f0;">·</span>
+                <span>最后更新：2026-07-24</span>
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        function copyInstall(btn) {
+            const code = btn.parentElement.querySelector('code');
+            const text = code.textContent;
+
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => {
+                    showCopied(btn);
+                });
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showCopied(btn);
+            }
+        }
+
+        function showCopied(btn) {
+            btn.textContent = '已复制!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = '复制';
+                btn.classList.remove('copied');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

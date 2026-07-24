@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build binary
+        working-directory: go-gateway
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -ldflags "-s -w" -o gateway-${{ matrix.suffix }} .
+          ls -lh gateway-${{ matrix.suffix }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-${{ matrix.suffix }}
+          path: go-gateway/gateway-${{ matrix.suffix }}
+
+  publish:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          # 复制二进制
+          cp artifacts/gateway-linux-amd64/gateway-linux-amd64 release/
+          cp artifacts/gateway-linux-arm64/gateway-linux-arm64 release/
+          cp artifacts/gateway-darwin-amd64/gateway-darwin-amd64 release/
+          cp artifacts/gateway-darwin-arm64/gateway-darwin-arm64 release/
+          # 复制配置文件
+          cp go-gateway/providers.yaml release/
+          cp go-gateway/.env.example release/
+          # 复制安装脚本
+          cp scripts/install.sh release/
+          # 列出文件
+          ls -lh release/
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # 获取上一个 tag
+          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+
+          # 生成 changelog
+          CHANGELOG=$(git log ${PREV_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --no-merges 2>/dev/null || echo "- 初始版本")
+
+          cat > release_notes.md << EOF
+          ## LLM Gateway ${CURRENT_TAG}
+
+          ### 安装
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.sh | bash
+          \`\`\`
+
+          ### 更新日志
+          ${CHANGELOG}
+
+          ### 下载
+          | 平台 | 文件 |
+          |------|------|
+          | Linux x86_64 | \`gateway-linux-amd64\` |
+          | Linux ARM64 | \`gateway-linux-arm64\` |
+          | macOS Intel | \`gateway-darwin-amd64\` |
+          | macOS Apple Silicon | \`gateway-darwin-arm64\` |
+
+          ### 快速使用
+          \`\`\`bash
+          # 下载对应平台的二进制
+          chmod +x gateway-*
+
+          # 创建配置
+          cp .env.example .env
+          nano .env  # 填入 API Key
+
+          # 启动
+          ./gateway-*
+          \`\`\`
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "LLM Gateway ${{ github.ref_name }}"
+          body_path: release_notes.md
+          files: |
+            release/gateway-linux-amd64
+            release/gateway-linux-arm64
+            release/gateway-darwin-amd64
+            release/gateway-darwin-arm64
+            release/providers.yaml
+            release/.env.example
+            release/install.sh
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
