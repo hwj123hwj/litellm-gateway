@@ -28,6 +28,9 @@ jobs:
           - goos: darwin
             goarch: arm64
             suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
 
     steps:
       - name: Checkout
@@ -45,14 +48,28 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags "-s -w" -o gateway-${{ matrix.suffix }} .
-          ls -lh gateway-${{ matrix.suffix }}
+          SUFFIX="${{ matrix.suffix }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            go build -ldflags "-s -w" -o "gateway-${SUFFIX}.exe" .
+            ls -lh "gateway-${SUFFIX}.exe"
+          else
+            go build -ldflags "-s -w" -o "gateway-${SUFFIX}" .
+            ls -lh "gateway-${SUFFIX}"
+          fi
 
-      - name: Upload artifact
+      - name: Upload artifact (Unix)
+        if: matrix.goos != 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: gateway-${{ matrix.suffix }}
           path: go-gateway/gateway-${{ matrix.suffix }}
+
+      - name: Upload artifact (Windows)
+        if: matrix.goos == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-${{ matrix.suffix }}
+          path: go-gateway/gateway-${{ matrix.suffix }}.exe
 
   publish:
     name: Create Release
@@ -75,11 +92,13 @@ jobs:
           cp artifacts/gateway-linux-arm64/gateway-linux-arm64 release/
           cp artifacts/gateway-darwin-amd64/gateway-darwin-amd64 release/
           cp artifacts/gateway-darwin-arm64/gateway-darwin-arm64 release/
+          cp artifacts/gateway-windows-amd64/gateway-windows-amd64.exe release/
           # 复制配置文件
           cp go-gateway/providers.yaml release/
           cp go-gateway/.env.example release/
           # 复制安装脚本
           cp scripts/install.sh release/
+          cp scripts/install.bat release/
           # 列出文件
           ls -lh release/
 
@@ -112,6 +131,7 @@ jobs:
           | Linux ARM64 | \`gateway-linux-arm64\` |
           | macOS Intel | \`gateway-darwin-amd64\` |
           | macOS Apple Silicon | \`gateway-darwin-arm64\` |
+          | Windows x86_64 | \`gateway-windows-amd64.exe\` |
 
           ### 快速使用
           \`\`\`bash
@@ -137,9 +157,11 @@ jobs:
             release/gateway-linux-arm64
             release/gateway-darwin-amd64
             release/gateway-darwin-arm64
+            release/gateway-windows-amd64.exe
             release/providers.yaml
             release/.env.example
             release/install.sh
+            release/install.bat
           draft: false
           prerelease: false
         env:

@@ -395,9 +395,16 @@
                         </div>
                         <p class="project-desc">轻量级 LLM API 网关，18MB 内存，支持智谱/小米/美团/EasyClaw，自动 fallback</p>
                         <div class="install-box">
-                            <div class="install-label">一键安装</div>
+                            <div class="install-label">一键安装 (Linux/macOS)</div>
                             <div class="install-cmd">
                                 <code>curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.sh | bash</code>
+                                <button class="copy-btn" onclick="copyInstall(this)">复制</button>
+                            </div>
+                        </div>
+                        <div class="install-box">
+                            <div class="install-label">一键安装 (Windows CMD)</div>
+                            <div class="install-cmd">
+                                <code>curl -o install.bat https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && install.bat</code>
                                 <button class="copy-btn" onclick="copyInstall(this)">复制</button>
                             </div>
                         </div>

@@ -4,8 +4,16 @@
 
 ## 一键安装
 
+### Linux / macOS
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.sh | bash
+```
+
+### Windows (CMD)
+
+```cmd
+curl -o install.bat https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && install.bat
 ```
 
 安装脚本会自动完成：下载二进制 → 配置 PATH → 引导填入 API Key → 完成。
