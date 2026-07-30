@@ -23,7 +23,7 @@ $installer = Join-Path $env:TEMP 'llm-gateway-install.ps1'; Invoke-WebRequest -U
 ```
 
 安装脚本会自动完成：下载二进制 → 配置 PATH → 引导填入 API Key → 完成。
-Windows 请直接在 CMD 或 PowerShell 中运行对应命令，不需要 WSL 或 Bash。重复运行会自动去除 PATH 中的重复安装项，并保留已有 `.env` 配置。
+Windows 请直接在 CMD 或 PowerShell 中运行对应命令，不需要 WSL 或 Bash。配置向导可逐个启用多个供应商，API Key 会掩码输入。重复运行会自动去除 PATH 中的重复安装项，并可在保留 Master Key 和自定义变量的前提下重新配置供应商。
 
 ## 快速启动
 

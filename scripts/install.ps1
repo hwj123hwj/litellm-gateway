@@ -10,6 +10,7 @@ param(
 
     [switch]$Force,
     [switch]$NonInteractive,
+    [switch]$Reconfigure,
     [switch]$SkipDownload,
     [switch]$SkipPath
 )
@@ -157,54 +158,239 @@ function Write-Utf8FileWithoutBom {
     )
 }
 
+function Read-YesNo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$Default
+    )
+
+    $suffix = if ($Default) { '[Y/n]' } else { '[y/N]' }
+    while ($true) {
+        $answer = Read-Host "  $Message $suffix"
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            return $Default
+        }
+        if ($answer -match '^(?i:y|yes)$') {
+            return $true
+        }
+        if ($answer -match '^(?i:n|no)$') {
+            return $false
+        }
+        Write-InstallerMessage Warning 'Please enter y or n.'
+    }
+}
+
+function ConvertFrom-MaskedInput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [Security.SecureString]$SecureValue
+    )
+
+    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureValue)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+    }
+}
+
+function Read-ProviderApiKey {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProviderName,
+
+        [AllowEmptyString()]
+        [string]$ExistingValue
+    )
+
+    $hasExistingValue = -not [string]::IsNullOrWhiteSpace($ExistingValue)
+    $prompt = if ($hasExistingValue) {
+        "  $ProviderName API Key (masked, Enter keeps existing)"
+    } else {
+        "  $ProviderName API Key (masked)"
+    }
+
+    $secureValue = Read-Host $prompt -AsSecureString
+    $plainValue = ConvertFrom-MaskedInput -SecureValue $secureValue
+    if ([string]::IsNullOrEmpty($plainValue) -and $hasExistingValue) {
+        return $ExistingValue
+    }
+    if ([string]::IsNullOrEmpty($plainValue)) {
+        Write-InstallerMessage Warning "$ProviderName is enabled without an API key."
+    }
+    return $plainValue
+}
+
+function Get-EnvFileValues {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $values = @{}
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $values
+    }
+
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            $values[$matches[1]] = $matches[2]
+        }
+    }
+    return $values
+}
+
+function Update-EnvFileValues {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [Collections.IDictionary]$Updates
+    )
+
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' (
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    $updatedLines = New-Object 'System.Collections.Generic.List[string]'
+
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            $key = $matches[1]
+            if ($Updates.Contains($key)) {
+                $updatedLines.Add("$key=$($Updates[$key])")
+                [void]$seen.Add($key)
+                continue
+            }
+        }
+        $updatedLines.Add($line)
+    }
+
+    foreach ($key in $Updates.Keys) {
+        if ($seen.Add([string]$key)) {
+            $updatedLines.Add("$key=$($Updates[$key])")
+        }
+    }
+
+    Write-Utf8FileWithoutBom `
+        -Path $Path `
+        -Content (($updatedLines -join "`n") + "`n")
+}
+
+function Read-ProviderConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [Collections.IDictionary]$ExistingValues,
+
+        [scriptblock]$YesNoReader,
+        [scriptblock]$ApiKeyReader
+    )
+
+    if ($null -eq $YesNoReader) {
+        $YesNoReader = {
+            param($Message, $Default)
+            Read-YesNo -Message $Message -Default $Default
+        }
+    }
+    if ($null -eq $ApiKeyReader) {
+        $ApiKeyReader = {
+            param($ProviderName, $ExistingValue)
+            Read-ProviderApiKey `
+                -ProviderName $ProviderName `
+                -ExistingValue $ExistingValue
+        }
+    }
+
+    $providers = @(
+        @{ Name = 'GLM'; Key = 'GLM_API_KEY' }
+        @{ Name = 'MiMo'; Key = 'MIMO_API_KEY' }
+        @{ Name = 'LongCat'; Key = 'LONGCAT_API_KEY' }
+        @{ Name = 'EasyClaw'; Key = 'EASYCLAW_API_KEY' }
+    )
+    $updates = [ordered]@{}
+
+    Write-Host ''
+    Write-Host '  Configure LLM providers:'
+    Write-Host '  - Answer y for every provider you want to enable.'
+    Write-Host '  - API Key input is masked.'
+    Write-Host '  - Press Enter to accept the displayed default.'
+    Write-Host ''
+
+    foreach ($provider in $providers) {
+        $existingValue = if ($ExistingValues.Contains($provider.Key)) {
+            [string]$ExistingValues[$provider.Key]
+        } else {
+            ''
+        }
+        $enabledByDefault = -not [string]::IsNullOrWhiteSpace($existingValue)
+        $enabled = & $YesNoReader `
+            "Enable $($provider.Name)?" `
+            $enabledByDefault
+
+        if ($enabled) {
+            $updates[$provider.Key] = & $ApiKeyReader `
+                $provider.Name `
+                $existingValue
+        } else {
+            $updates[$provider.Key] = ''
+        }
+    }
+
+    return $updates
+}
+
 function New-GatewayConfig {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ConfigPath,
 
-        [switch]$NonInteractiveMode
+        [switch]$NonInteractiveMode,
+        [switch]$ForceReconfigure,
+        [scriptblock]$YesNoReader,
+        [scriptblock]$ApiKeyReader
     )
 
     if (Test-Path -LiteralPath $ConfigPath) {
-        Write-InstallerMessage Success "Config already exists: $ConfigPath"
+        if ($NonInteractiveMode) {
+            Write-InstallerMessage Success "Config already exists: $ConfigPath"
+            return
+        }
+
+        $shouldReconfigure = $ForceReconfigure -or (
+            Read-YesNo `
+                -Message 'Config exists. Reconfigure provider API keys?' `
+                -Default $false
+        )
+        if (-not $shouldReconfigure) {
+            Write-InstallerMessage Success "Keeping existing config: $ConfigPath"
+            return
+        }
+
+        $existingValues = Get-EnvFileValues -Path $ConfigPath
+        $providerUpdates = Read-ProviderConfiguration `
+            -ExistingValues $existingValues `
+            -YesNoReader $YesNoReader `
+            -ApiKeyReader $ApiKeyReader
+        Update-EnvFileValues -Path $ConfigPath -Updates $providerUpdates
+        Write-InstallerMessage Success "Provider config updated: $ConfigPath"
         return
     }
 
-    $glmKey = ''
-    $mimoKey = ''
-    $longCatKey = ''
-    $easyClawKey = ''
-    $choices = @('5')
-
+    $providerUpdates = [ordered]@{
+        GLM_API_KEY = ''
+        MIMO_API_KEY = ''
+        LONGCAT_API_KEY = ''
+        EASYCLAW_API_KEY = ''
+    }
     if (-not $NonInteractiveMode) {
-        Write-Host ''
-        Write-Host '  Configure LLM providers (space-separated choices):'
-        Write-Host '  1) GLM'
-        Write-Host '  2) MiMo'
-        Write-Host '  3) LongCat'
-        Write-Host '  4) EasyClaw'
-        Write-Host '  5) Skip and configure later'
-        Write-Host ''
-
-        $choiceInput = Read-Host '  Select [1 2 3 4 / 5]'
-        if (-not [string]::IsNullOrWhiteSpace($choiceInput)) {
-            $choices = $choiceInput.Trim() -split '\s+'
-        }
-
-        if ($choices -notcontains '5') {
-            if ($choices -contains '1') {
-                $glmKey = Read-Host '  GLM API Key'
-            }
-            if ($choices -contains '2') {
-                $mimoKey = Read-Host '  MiMo API Key'
-            }
-            if ($choices -contains '3') {
-                $longCatKey = Read-Host '  LongCat API Key'
-            }
-            if ($choices -contains '4') {
-                $easyClawKey = Read-Host '  EasyClaw API Key'
-            }
-        }
+        $providerUpdates = Read-ProviderConfiguration `
+            -ExistingValues @{} `
+            -YesNoReader $YesNoReader `
+            -ApiKeyReader $ApiKeyReader
     }
 
     $masterKey = New-RandomMasterKey
@@ -214,10 +400,10 @@ function New-GatewayConfig {
         "LITELLM_MASTER_KEY=$masterKey"
         ''
         '# Provider API keys'
-        "GLM_API_KEY=$glmKey"
-        "MIMO_API_KEY=$mimoKey"
-        "LONGCAT_API_KEY=$longCatKey"
-        "EASYCLAW_API_KEY=$easyClawKey"
+        "GLM_API_KEY=$($providerUpdates['GLM_API_KEY'])"
+        "MIMO_API_KEY=$($providerUpdates['MIMO_API_KEY'])"
+        "LONGCAT_API_KEY=$($providerUpdates['LONGCAT_API_KEY'])"
+        "EASYCLAW_API_KEY=$($providerUpdates['EASYCLAW_API_KEY'])"
         ''
         '# Gateway port'
         'PORT=4001'
@@ -436,7 +622,8 @@ function Invoke-GatewayInstaller {
 
     New-GatewayConfig `
         -ConfigPath $configPath `
-        -NonInteractiveMode:$NonInteractive
+        -NonInteractiveMode:$NonInteractive `
+        -ForceReconfigure:$Reconfigure
     Write-GatewayLauncher `
         -LauncherPath $launcherPath `
         -GatewayHome $resolvedInstallRoot `
