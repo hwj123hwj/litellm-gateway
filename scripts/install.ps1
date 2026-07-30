@@ -15,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
 
 $script:Repository = 'hwj123hwj/litellm-gateway'
@@ -232,6 +233,41 @@ function New-GatewayConfig {
     Write-InstallerMessage Success "Config created: $ConfigPath"
 }
 
+function Invoke-CurlFileDownload {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )
+
+    $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
+    if ($null -eq $curl) {
+        throw 'curl.exe is not available.'
+    }
+
+    & $curl.Source `
+        --fail `
+        --location `
+        --silent `
+        --show-error `
+        --retry 3 `
+        --retry-delay 1 `
+        --output $Destination `
+        --url $Uri
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "curl.exe failed with exit code $LASTEXITCODE while downloading $Uri"
+    }
+    if (-not (Test-Path -LiteralPath $Destination)) {
+        throw "curl.exe completed without creating: $Destination"
+    }
+    if ((Get-Item -LiteralPath $Destination).Length -eq 0) {
+        throw "curl.exe downloaded an empty file from: $Uri"
+    }
+}
+
 function Invoke-FileDownload {
     param(
         [Parameter(Mandatory = $true)]
@@ -243,16 +279,37 @@ function Invoke-FileDownload {
 
     $temporaryPath = "$Destination.download"
     try {
-        Invoke-WebRequest `
-            -UseBasicParsing `
-            -Uri $Uri `
-            -OutFile $temporaryPath
+        if (Get-Command 'curl.exe' -ErrorAction SilentlyContinue) {
+            Invoke-CurlFileDownload -Uri $Uri -Destination $temporaryPath
+        } else {
+            Invoke-WebRequest `
+                -UseBasicParsing `
+                -Uri $Uri `
+                -OutFile $temporaryPath
+        }
         Move-Item -LiteralPath $temporaryPath -Destination $Destination -Force
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
             Remove-Item -LiteralPath $temporaryPath -Force
         }
+    }
+}
+
+function Write-InstallerFailure {
+    param(
+        [Parameter(Mandatory = $true)]
+        [Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    $message = $ErrorRecord.Exception.Message
+    try {
+        [Console]::Error.WriteLine('')
+        [Console]::Error.WriteLine("  [ERROR] $message")
+        [Console]::Error.WriteLine('')
+    }
+    catch {
+        # Never let console rendering hide the original installer failure.
     }
 }
 
@@ -397,9 +454,7 @@ if ($env:LLM_GATEWAY_INSTALLER_TEST_MODE -ne '1') {
         Invoke-GatewayInstaller
     }
     catch {
-        Write-Host ''
-        Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host ''
+        Write-InstallerFailure -ErrorRecord $_
         exit 1
     }
 }
