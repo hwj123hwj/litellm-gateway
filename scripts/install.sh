@@ -69,24 +69,15 @@ if [ -f "${BINARY_PATH}" ]; then
 fi
 
 if [ "$NEEDS_DOWNLOAD" = true ]; then
-    # 获取最新 release tag
-    info "获取最新版本..."
-    TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
-        | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
-
     DOWNLOADED=false
-
-    if [ -n "$TAG" ]; then
-        # 尝试下载预编译二进制
-        BINARY_ARTIFACT="gateway-${OS}-${ARCH}"
-        URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY_ARTIFACT}"
-        info "下载 gateway ${TAG}..."
-        if curl -fSL "${URL}" -o "${BINARY_PATH}.tmp" 2>/dev/null; then
-            mv "${BINARY_PATH}.tmp" "${BINARY_PATH}"
-            chmod +x "${BINARY_PATH}"
-            DOWNLOADED=true
-            ok "下载完成 ${TAG}"
-        fi
+    BINARY_ARTIFACT="gateway-${OS}-${ARCH}"
+    URL="https://github.com/${REPO}/releases/latest/download/${BINARY_ARTIFACT}"
+    info "下载最新 gateway..."
+    if curl -fSL "${URL}" -o "${BINARY_PATH}.tmp" 2>/dev/null; then
+        mv "${BINARY_PATH}.tmp" "${BINARY_PATH}"
+        chmod +x "${BINARY_PATH}"
+        DOWNLOADED=true
+        ok "下载完成"
     fi
 
     if [ "$DOWNLOADED" = false ]; then

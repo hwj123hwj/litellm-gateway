@@ -404,7 +404,14 @@
                         <div class="install-box">
                             <div class="install-label">一键安装 (Windows CMD)</div>
                             <div class="install-cmd">
-                                <code>curl -o install.bat https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && install.bat</code>
+                                <code>curl.exe -fsSL -o "%TEMP%\llm-gateway-install.bat" https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && call "%TEMP%\llm-gateway-install.bat"</code>
+                                <button class="copy-btn" onclick="copyInstall(this)">复制</button>
+                            </div>
+                        </div>
+                        <div class="install-box">
+                            <div class="install-label">一键安装 (Windows PowerShell)</div>
+                            <div class="install-cmd">
+                                <code>$installer = Join-Path $env:TEMP 'llm-gateway-install.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.ps1 -OutFile $installer; powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer</code>
                                 <button class="copy-btn" onclick="copyInstall(this)">复制</button>
                             </div>
                         </div>
