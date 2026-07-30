@@ -52,10 +52,8 @@ $originalModuleAnalysisCachePath = $env:PSModuleAnalysisCachePath
 
 try {
     New-Item -ItemType Directory -Path $installBin -Force | Out-Null
-    [IO.File]::WriteAllText(
-        (Join-Path $installBin 'gateway.exe'),
-        'test binary',
-        [Text.UTF8Encoding]::new($false)
+    Copy-Item -LiteralPath $env:ComSpec -Destination (
+        Join-Path $installBin 'gateway.exe'
     )
     [IO.File]::WriteAllText(
         (Join-Path $installRoot 'providers.yaml'),
@@ -81,6 +79,26 @@ try {
     $launcherPath = Join-Path $installBin 'llm-gateway.cmd'
     Assert-True (Test-Path -LiteralPath $configPath) 'installer should create .env'
     Assert-True (Test-Path -LiteralPath $launcherPath) 'installer should create llm-gateway.cmd'
+
+    $launcherText = [IO.File]::ReadAllText($launcherPath)
+    Assert-True (
+        $launcherText -match [regex]::Escape('"%~dp0gateway.exe" %*')
+    ) 'launcher should resolve the binary relative to its own ASCII path'
+    Assert-True (
+        $launcherText -notmatch [regex]::Escape($testRoot)
+    ) 'launcher should not embed a Unicode installation path'
+    $launcherBytes = [IO.File]::ReadAllBytes($launcherPath)
+    Assert-True (
+        -not ($launcherBytes | Where-Object { $_ -gt 0x7F })
+    ) 'launcher should contain ASCII bytes only for CMD code-page compatibility'
+
+    $launcherOutput = & cmd.exe /d /s /c (
+        'call "{0}" /d /c exit 0' -f $launcherPath
+    ) 2>&1
+    Assert-Equal 0 $LASTEXITCODE (
+        "launcher should execute from a Unicode path. Output:`n{0}" -f
+        ($launcherOutput -join [Environment]::NewLine)
+    )
 
     $configBytes = [IO.File]::ReadAllBytes($configPath)
     $hasUtf8Bom = $configBytes.Length -ge 3 -and
