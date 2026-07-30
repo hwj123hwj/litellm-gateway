@@ -140,6 +140,25 @@ try {
         'PATH merge should compare expanded variables while preserving stored variables'
     )
 
+    $downloadSource = Join-Path $testRoot 'download source.bin'
+    $downloadDestination = Join-Path $testRoot 'download destination.bin'
+    [IO.File]::WriteAllText(
+        $downloadSource,
+        'curl download regression content',
+        [Text.UTF8Encoding]::new($false)
+    )
+    Invoke-CurlFileDownload `
+        -Uri ([Uri]$downloadSource).AbsoluteUri `
+        -Destination $downloadDestination
+    Assert-True (
+        (Test-Path -LiteralPath $downloadDestination)
+    ) 'native curl download should create the destination file'
+    Assert-Equal (
+        'curl download regression content'
+    ) ([IO.File]::ReadAllText($downloadDestination)) (
+        'native curl download should preserve file contents'
+    )
+
     $bootstrapDirectory = Join-Path $testRoot 'bootstrap-only'
     New-Item -ItemType Directory -Path $bootstrapDirectory -Force | Out-Null
     $bootstrapBatch = Join-Path $bootstrapDirectory 'install.bat'
