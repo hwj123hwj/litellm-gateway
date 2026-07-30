@@ -13,10 +13,17 @@ curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scri
 ### Windows (CMD)
 
 ```cmd
-curl -o install.bat https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && install.bat
+curl.exe -fsSL -o "%TEMP%\llm-gateway-install.bat" https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && call "%TEMP%\llm-gateway-install.bat"
+```
+
+### Windows (PowerShell)
+
+```powershell
+$installer = Join-Path $env:TEMP 'llm-gateway-install.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.ps1 -OutFile $installer; powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer
 ```
 
 安装脚本会自动完成：下载二进制 → 配置 PATH → 引导填入 API Key → 完成。
+Windows 请直接在 CMD 或 PowerShell 中运行对应命令，不需要 WSL 或 Bash。重复运行会自动去除 PATH 中的重复安装项，并保留已有 `.env` 配置。
 
 ## 快速启动
 

@@ -10,6 +10,30 @@ permissions:
   contents: write
 
 jobs:
+  installer-tests:
+    name: Installer Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Unix installer
+        if: runner.os != 'Windows'
+        run: bash scripts/tests/install-unix.Tests.sh
+
+      - name: Test Windows installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File scripts\tests\install-windows.Tests.ps1
+
   release:
     name: Build and Release
     runs-on: ubuntu-latest
@@ -74,7 +98,9 @@ jobs:
   publish:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: release
+    needs:
+      - installer-tests
+      - release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,6 +125,7 @@ jobs:
           # 复制安装脚本
           cp scripts/install.sh release/
           cp scripts/install.bat release/
+          cp scripts/install.ps1 release/
           # 列出文件
           ls -lh release/
 
@@ -119,6 +146,14 @@ jobs:
 
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.sh | bash
+          \`\`\`
+
+          \`\`\`cmd
+          curl.exe -fsSL -o "%TEMP%\llm-gateway-install.bat" https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.bat && call "%TEMP%\llm-gateway-install.bat"
+          \`\`\`
+
+          \`\`\`powershell
+          \$installer = Join-Path \$env:TEMP 'llm-gateway-install.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install.ps1 -OutFile \$installer; powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File \$installer
           \`\`\`
 
           ### 更新日志
@@ -162,6 +197,7 @@ jobs:
             release/.env.example
             release/install.sh
             release/install.bat
+            release/install.ps1
           draft: false
           prerelease: false
         env:
