@@ -48,6 +48,7 @@ $originalUserProfile = $env:USERPROFILE
 $originalPath = $env:Path
 $originalTestMode = $env:LLM_GATEWAY_INSTALLER_TEST_MODE
 $originalInstallerUrl = $env:LLM_GATEWAY_INSTALLER_URL
+$originalModuleAnalysisCachePath = $env:PSModuleAnalysisCachePath
 
 try {
     New-Item -ItemType Directory -Path $installBin -Force | Out-Null
@@ -64,6 +65,7 @@ try {
 
     $env:USERPROFILE = $testRoot
     $env:Path = "$installBin;$originalPath"
+    $env:PSModuleAnalysisCachePath = Join-Path $testRoot 'ModuleAnalysisCache'
 
     $batchOutput = & cmd.exe /d /s /c (
         'echo n| call "{0}" -NonInteractive -SkipDownload -SkipPath' -f $batchInstaller
@@ -175,6 +177,83 @@ try {
         ($bootstrapOutput -join [Environment]::NewLine)
     )
 
+    $reconfigureRoot = Join-Path $testRoot 'reconfigure install'
+    $reconfigureBin = Join-Path $reconfigureRoot 'bin'
+    New-Item -ItemType Directory -Path $reconfigureBin -Force | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $reconfigureBin 'gateway.exe'),
+        'test binary',
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $reconfigureRoot 'providers.yaml'),
+        'providers: []',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $reconfigureConfig = @(
+        'LITELLM_MASTER_KEY=sk-existing-master-key'
+        'GLM_API_KEY=glm-existing-key'
+        'MIMO_API_KEY='
+        'LONGCAT_API_KEY='
+        'EASYCLAW_API_KEY='
+        'PORT=4001'
+        'LOG_LEVEL=debug'
+        'CUSTOM_SETTING=keep-me'
+        ''
+    ) -join "`n"
+    [IO.File]::WriteAllText(
+        (Join-Path $reconfigureRoot '.env'),
+        $reconfigureConfig,
+        [Text.UTF8Encoding]::new($false)
+    )
+
+    $providerDecisions = New-Object 'System.Collections.Generic.Queue[bool]'
+    $providerDecisions.Enqueue($true)
+    $providerDecisions.Enqueue($true)
+    $providerDecisions.Enqueue($false)
+    $providerDecisions.Enqueue($false)
+    $providerKeys = New-Object 'System.Collections.Generic.Queue[string]'
+    $providerKeys.Enqueue('')
+    $providerKeys.Enqueue('mimo-new-secret')
+
+    $yesNoReader = {
+        param($Message, $Default)
+        return $providerDecisions.Dequeue()
+    }
+    $apiKeyReader = {
+        param($ProviderName, $ExistingValue)
+        $value = $providerKeys.Dequeue()
+        if ([string]::IsNullOrEmpty($value)) {
+            return $ExistingValue
+        }
+        return $value
+    }
+    New-GatewayConfig `
+        -ConfigPath (Join-Path $reconfigureRoot '.env') `
+        -ForceReconfigure `
+        -YesNoReader $yesNoReader `
+        -ApiKeyReader $apiKeyReader
+
+    $reconfiguredText = [IO.File]::ReadAllText(
+        (Join-Path $reconfigureRoot '.env')
+    )
+    Assert-True (
+        $reconfiguredText -match '(?m)^LITELLM_MASTER_KEY=sk-existing-master-key$'
+    ) 'reconfiguration should preserve the existing master key'
+    Assert-True (
+        $reconfiguredText -match '(?m)^GLM_API_KEY=glm-existing-key$'
+    ) 'a blank masked input should preserve an existing provider key'
+    Assert-True (
+        $reconfiguredText -match '(?m)^MIMO_API_KEY=mimo-new-secret$'
+    ) 'reconfiguration should support enabling an additional provider'
+    Assert-True (
+        $reconfiguredText -match '(?m)^CUSTOM_SETTING=keep-me$'
+    ) 'reconfiguration should preserve custom environment variables'
+    Assert-True (
+        ([IO.File]::ReadAllText($powerShellInstaller)) -match
+        'Read-Host \$prompt -AsSecureString'
+    ) 'interactive API key input should use masked secure-string input'
+
     $interactiveRoot = Join-Path $testRoot 'interactive install'
     $interactiveBin = Join-Path $interactiveRoot 'bin'
     New-Item -ItemType Directory -Path $interactiveBin -Force | Out-Null
@@ -190,7 +269,7 @@ try {
     )
 
     $interactiveOutput = & cmd.exe /d /s /c (
-        'echo 5| call "{0}" -InstallRoot "{1}" -SkipDownload -SkipPath' -f
+        'call "{0}" -InstallRoot "{1}" -SkipDownload -SkipPath -NonInteractive' -f
         $batchInstaller,
         $interactiveRoot
     ) 2>&1
@@ -201,7 +280,7 @@ try {
     )
     Assert-True (
         (Test-Path -LiteralPath (Join-Path $interactiveRoot '.env'))
-    ) 'interactive CMD installer should create .env after choosing option 5'
+    ) 'CMD installer should create .env in non-interactive mode'
 
     Write-Host 'PASS: Windows installer integration and PATH regression tests'
 }
@@ -210,6 +289,7 @@ finally {
     $env:Path = $originalPath
     $env:LLM_GATEWAY_INSTALLER_TEST_MODE = $originalTestMode
     $env:LLM_GATEWAY_INSTALLER_URL = $originalInstallerUrl
+    $env:PSModuleAnalysisCachePath = $originalModuleAnalysisCachePath
 
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
