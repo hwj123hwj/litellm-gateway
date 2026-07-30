@@ -549,19 +549,17 @@ function Install-GatewayBinary {
 function Write-GatewayLauncher {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$LauncherPath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$GatewayHome,
-
-        [Parameter(Mandatory = $true)]
-        [string]$BinaryPath
+        [string]$LauncherPath
     )
 
     $launcher = @(
         '@echo off'
-        ('cd /d "{0}"' -f $GatewayHome)
-        ('"{0}" %*' -f $BinaryPath)
+        'setlocal'
+        'pushd "%~dp0.." || exit /b 1'
+        '"%~dp0gateway.exe" %*'
+        'set "gateway_exit_code=%errorlevel%"'
+        'popd'
+        'exit /b %gateway_exit_code%'
         ''
     ) -join "`r`n"
 
@@ -624,10 +622,7 @@ function Invoke-GatewayInstaller {
         -ConfigPath $configPath `
         -NonInteractiveMode:$NonInteractive `
         -ForceReconfigure:$Reconfigure
-    Write-GatewayLauncher `
-        -LauncherPath $launcherPath `
-        -GatewayHome $resolvedInstallRoot `
-        -BinaryPath $binaryPath
+    Write-GatewayLauncher -LauncherPath $launcherPath
 
     Write-Host ''
     Write-InstallerMessage Success 'Installation completed.'
