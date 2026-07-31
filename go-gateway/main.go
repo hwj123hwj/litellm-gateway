@@ -161,11 +161,17 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			APIKey: cfg.GLMAPIKey,
 		}))
 	}
-	if cfg.DashscopeAPIKey != "" {
-		router.RegisterProvider("dashscope", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "dashscope",
-			URL:    "https://coding.dashscope.aliyuncs.com/v1/chat/completions",
-			APIKey: cfg.DashscopeAPIKey,
+	if cfg.AliAPIKey != "" {
+		router.RegisterProvider("ali-anthropic", provider.NewAnthropicProvider(&provider.Config{
+			Name:      "ali-anthropic",
+			URL:       "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages",
+			APIKey:    cfg.AliAPIKey,
+			UseBearer: true,
+		}))
+		router.RegisterProvider("ali", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "ali",
+			URL:    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+			APIKey: cfg.AliAPIKey,
 		}))
 	}
 	// 注册 fallback 链（与 providers.yaml 别名规则一致）
@@ -173,8 +179,8 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 	if cfg.GLMAPIKey != "" {
 		codingProviders = append(codingProviders, "glm")
 	}
-	if cfg.DashscopeAPIKey != "" {
-		codingProviders = append(codingProviders, "dashscope")
+	if cfg.AliAPIKey != "" {
+		codingProviders = append(codingProviders, "ali")
 	}
 	if len(codingProviders) == 0 {
 		codingProviders = []string{"glm"}
@@ -185,8 +191,8 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 	if cfg.GLMAPIKey != "" {
 		codingAnthropicProviders = append(codingAnthropicProviders, "glm-anthropic")
 	}
-	if cfg.DashscopeAPIKey != "" {
-		codingAnthropicProviders = append(codingAnthropicProviders, "dashscope")
+	if cfg.AliAPIKey != "" {
+		codingAnthropicProviders = append(codingAnthropicProviders, "ali-anthropic")
 	}
 	if len(codingAnthropicProviders) == 0 {
 		codingAnthropicProviders = []string{"glm-anthropic"}
@@ -200,12 +206,9 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 		router.RegisterChain("glm-opus", []string{"glm"})
 		router.RegisterChain("glm-flash", []string{"glm-free"})
 	}
-	// DashScope 核心别名
-	if cfg.DashscopeAPIKey != "" {
-		router.RegisterChain("qwen-plus", []string{"dashscope"})
-		router.RegisterChain("qwen-coder", []string{"dashscope"})
-		router.RegisterChain("qwen-sonnet", []string{"dashscope"})
-		router.RegisterChain("qwen-opus", []string{"dashscope"})
+	// Ali 核心别名
+	if cfg.AliAPIKey != "" {
+		router.RegisterChain("ali-opus", []string{"ali"})
 	}
 }
 

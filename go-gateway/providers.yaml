@@ -19,27 +19,24 @@ providers:
         aliases: [glm-haiku]
       - id: glm-4.7-flash
 
-  # 阿里 DashScope / 百炼（Qwen 通义千问）
-  - name: dashscope
+  # 阿里 MaaS（Qwen 3.8 Max）
+  - name: ali
     type: openai
-    url: https://coding.dashscope.aliyuncs.com/v1/chat/completions
-    api_key_env: DASHSCOPE_API_KEY
+    url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
+    api_key_env: ALI_API_KEY
     models:
-      - id: qwen3.5-plus
-        aliases: [qwen-plus, qwen-sonnet]
-      - id: qwen3-coder-plus
-        aliases: [qwen-coder, qwen-opus]
-      - id: qwen3-coder-next
-      - id: qwen3-max-2026-01-23
+      - id: qwen3.8-max-preview
+        aliases: [ali-opus]
 
 chains:
   coding:
     - glm-glm-5-turbo
-    - dashscope-qwen3.5-plus
+    - ali-qwen3.8-max-preview
 
   coding-anthropic:
     - glm-glm-5-turbo
-    - dashscope-qwen3.5-plus
+    - ali-qwen3.8-max-preview
+
 
 
 

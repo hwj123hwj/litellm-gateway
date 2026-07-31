@@ -307,7 +307,7 @@ function Read-ProviderConfiguration {
 
     $providers = @(
         @{ Name = 'GLM'; Key = 'GLM_API_KEY' }
-        @{ Name = 'DashScope (Alibaba Qwen)'; Key = 'DASHSCOPE_API_KEY' }
+        @{ Name = 'Ali MaaS (qwen3.8-max-preview)'; Key = 'ALI_API_KEY' }
     )
     $updates = [ordered]@{}
 
@@ -380,7 +380,7 @@ function New-GatewayConfig {
 
     $providerUpdates = [ordered]@{
         GLM_API_KEY = ''
-        DASHSCOPE_API_KEY = ''
+        ALI_API_KEY = ''
     }
     if (-not $NonInteractiveMode) {
         $providerUpdates = Read-ProviderConfiguration `
@@ -397,7 +397,7 @@ function New-GatewayConfig {
         ''
         '# Provider API keys'
         "GLM_API_KEY=$($providerUpdates['GLM_API_KEY'])"
-        "DASHSCOPE_API_KEY=$($providerUpdates['DASHSCOPE_API_KEY'])"
+        "ALI_API_KEY=$($providerUpdates['ALI_API_KEY'])"
         ''
         '# Gateway port'
         'PORT=4001'

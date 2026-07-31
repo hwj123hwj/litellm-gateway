@@ -16,7 +16,7 @@ type Config struct {
 	MasterKey          string
 	AdminToken         string // 独立的管理端点 token（可选）
 	GLMAPIKey          string
-	DashscopeAPIKey    string
+	AliAPIKey          string
 	CopilotToken       string // GitHub Copilot token（短期有效，需要定期刷新）
 	CopilotGithubToken string // GitHub OAuth token（用于刷新 Copilot token）
 	HTTPProxy          string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
@@ -33,7 +33,7 @@ func Load() (*Config, error) {
 		MasterKey:          getEnv("LITELLM_MASTER_KEY", ""),
 		AdminToken:         getEnv("ADMIN_TOKEN", ""),
 		GLMAPIKey:          getEnv("GLM_API_KEY", ""),
-		DashscopeAPIKey:    getEnv("DASHSCOPE_API_KEY", ""),
+		AliAPIKey:          getEnv("ALI_API_KEY", ""),
 		CopilotToken:       getEnv("COPILOT_TOKEN", ""),
 		CopilotGithubToken: getEnv("COPILOT_GITHUB_TOKEN", ""),
 		HTTPProxy:          getEnv("HTTP_PROXY", ""),
