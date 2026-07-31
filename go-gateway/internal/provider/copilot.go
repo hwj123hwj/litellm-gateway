@@ -65,10 +65,19 @@ func (p *CopilotProvider) URL() string     { return p.apiURL }
 func (p *CopilotProvider) APIKey() string  { return p.token }
 func (p *CopilotProvider) UseBearer() bool { return true }
 
+func (p *CopilotProvider) mapModel(reqModel string) string {
+	switch reqModel {
+	case "gpt-4o-mini", "copilot-haiku":
+		return "gpt-4o-mini"
+	default:
+		return "gpt-4o"
+	}
+}
+
 // ForwardRequest 将 Anthropic 格式请求转为 OpenAI 格式，发出后将响应转回 Anthropic 格式
 func (p *CopilotProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
 	oaiReq := toOpenAIRequest(req)
-	oaiReq.Model = "auto"
+	oaiReq.Model = p.mapModel(req.Model)
 
 	body, err := json.Marshal(oaiReq)
 	if err != nil {
@@ -107,7 +116,7 @@ func (p *CopilotProvider) ForwardRequest(ctx context.Context, req *Request) (*Re
 // ForwardStream 将 Anthropic 格式请求转为 OpenAI 流式请求，把 OpenAI SSE 转为 Anthropic SSE 写入 w
 func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {
 	streamReq := toOpenAIRequest(req)
-	streamReq.Model = "auto"
+	streamReq.Model = p.mapModel(req.Model)
 	streamReq.Stream = true
 
 	body, err := json.Marshal(streamReq)
