@@ -211,8 +211,6 @@ try {
     $reconfigureConfig = @(
         'LITELLM_MASTER_KEY=sk-existing-master-key'
         'GLM_API_KEY=glm-existing-key'
-        'MIMO_API_KEY='
-        'LONGCAT_API_KEY='
         'PORT=4001'
         'LOG_LEVEL=debug'
         'CUSTOM_SETTING=keep-me'

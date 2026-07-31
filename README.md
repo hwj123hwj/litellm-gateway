@@ -1,6 +1,6 @@
 # LLM Gateway
 
-轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团等多家提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
+轻量级 LLM API 网关，用 Go 编写。支持智谱 GLM、GitHub Copilot、ChatGPT 等提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
 
 ## 一键安装
 
@@ -96,21 +96,22 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
 | `o4-mini` | o4-mini | 推理模型 |
 
+### GitHub Copilot
+
+| 模型别名 | 实际转发模型 | 说明 |
+|----------|--------------|------|
+| `copilot` / `auto` / `copilot-auto` | `auto` | GitHub Copilot Chat (自动选择模型) |
+| `copilot-opus` / `copilot-sonnet` / `copilot-haiku` | `auto` | 兼容旧别名，统一转发至 `auto` |
+
 ### 外部提供商
 
 | 模型名 | 提供商 | 说明 |
 |--------|--------|------|
-| `coding` | GLM → MiMo → LongCat | **推荐**，OpenAI 风格，自动 fallback |
-| `coding-anthropic` | GLM → MiMo → LongCat | Anthropic 风格 |
-| `free` | OpenRouter 免费模型 | **零成本**，自动 fallback |
+| `coding` | 智谱 GLM | **推荐**，OpenAI 风格 |
+| `coding-anthropic` | 智谱 GLM | Anthropic 风格 |
 | `glm-flash` | 智谱 GLM | 免费模型 |
 | `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
 | `glm-opus` | 智谱 GLM coding plan | 旗舰模型 |
-| `mimo-sonnet` | 小米 MiMo | 思考模型 |
-| `longcat-sonnet` | 美团 LongCat | 长上下文 |
-| `copilot-opus` | GitHub Copilot (Gemini 3.1 Pro) | 免费教育套餐 |
-| `copilot-sonnet` | GitHub Copilot (Gemini 3 Flash) | 免费教育套餐 |
-| `copilot-haiku` | GitHub Copilot (GPT-4o) | 免费教育套餐 |
 
 ## 配置 Claude Code
 
@@ -183,8 +184,6 @@ litellm-gateway/
 |------|------|------|
 | `LITELLM_MASTER_KEY` | 是 | 网关认证 token |
 | `GLM_API_KEY` | 否 | 智谱 API key |
-| `MIMO_API_KEY` | 否 | 小米 API key |
-| `LONGCAT_API_KEY` | 否 | 美团 API key |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |

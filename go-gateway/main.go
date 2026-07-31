@@ -161,52 +161,15 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			APIKey: cfg.GLMAPIKey,
 		}))
 	}
-	if cfg.MIMOAPIKey != "" {
-		router.RegisterProvider("mimo-anthropic", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "mimo-anthropic",
-			URL:       "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages",
-			APIKey:    cfg.MIMOAPIKey,
-			UseBearer: false,
-		}))
-		router.RegisterProvider("mimo", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "mimo",
-			URL:    "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
-			APIKey: cfg.MIMOAPIKey,
-		}))
-	}
-	if cfg.LongcatAPIKey != "" {
-		router.RegisterProvider("longcat-anthropic", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "longcat-anthropic",
-			URL:       "https://api.longcat.chat/anthropic/v1/messages",
-			APIKey:    cfg.LongcatAPIKey,
-			UseBearer: true,
-		}))
-		router.RegisterProvider("longcat", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "longcat",
-			URL:    "https://api.longcat.chat/openai/chat/completions",
-			APIKey: cfg.LongcatAPIKey,
-		}))
-	}
-
 	// 注册 fallback 链（与 providers.yaml 别名规则一致）
-	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
-	router.RegisterChain("coding-anthropic", []string{"glm-anthropic", "mimo-anthropic", "longcat-anthropic"})
+	router.RegisterChain("coding", []string{"glm"})
+	router.RegisterChain("coding-anthropic", []string{"glm-anthropic"})
 	// GLM 核心别名
 	if cfg.GLMAPIKey != "" {
 		router.RegisterChain("glm-sonnet", []string{"glm"})
 		router.RegisterChain("glm-haiku", []string{"glm"})
 		router.RegisterChain("glm-opus", []string{"glm"})
 		router.RegisterChain("glm-flash", []string{"glm-free"})
-	}
-	// MiMo 核心别名
-	if cfg.MIMOAPIKey != "" {
-		router.RegisterChain("mimo-sonnet", []string{"mimo"})
-		router.RegisterChain("mimo-opus", []string{"mimo"})
-	}
-	// LongCat 核心别名
-	if cfg.LongcatAPIKey != "" {
-		router.RegisterChain("longcat-sonnet", []string{"longcat"})
-		router.RegisterChain("longcat-opus", []string{"longcat"})
 	}
 }
 
@@ -230,6 +193,9 @@ func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *
 	}
 
 	router.RegisterProvider("copilot", provider.NewCopilotProvider(copilotConfig, cfg.CopilotGithubToken))
+	router.RegisterChain("copilot", []string{"copilot"})
+	router.RegisterChain("copilot-auto", []string{"copilot"})
+	router.RegisterChain("auto", []string{"copilot"})
 	router.RegisterChain("copilot-opus", []string{"copilot"})
 	router.RegisterChain("copilot-sonnet", []string{"copilot"})
 	router.RegisterChain("copilot-haiku", []string{"copilot"})

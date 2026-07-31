@@ -307,8 +307,6 @@ function Read-ProviderConfiguration {
 
     $providers = @(
         @{ Name = 'GLM'; Key = 'GLM_API_KEY' }
-        @{ Name = 'MiMo'; Key = 'MIMO_API_KEY' }
-        @{ Name = 'LongCat'; Key = 'LONGCAT_API_KEY' }
     )
     $updates = [ordered]@{}
 
@@ -381,8 +379,6 @@ function New-GatewayConfig {
 
     $providerUpdates = [ordered]@{
         GLM_API_KEY = ''
-        MIMO_API_KEY = ''
-        LONGCAT_API_KEY = ''
     }
     if (-not $NonInteractiveMode) {
         $providerUpdates = Read-ProviderConfiguration `
@@ -399,8 +395,6 @@ function New-GatewayConfig {
         ''
         '# Provider API keys'
         "GLM_API_KEY=$($providerUpdates['GLM_API_KEY'])"
-        "MIMO_API_KEY=$($providerUpdates['MIMO_API_KEY'])"
-        "LONGCAT_API_KEY=$($providerUpdates['LONGCAT_API_KEY'])"
         ''
         '# Gateway port'
         'PORT=4001'
