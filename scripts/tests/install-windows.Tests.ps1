@@ -115,8 +115,8 @@ try {
         $configText -match '(?m)^PORT=4001$'
     ) 'installer should configure the default port'
     Assert-True (
-        $configText -match '(?m)^LONGCAT_API_KEY=$'
-    ) 'installer should use the documented LONGCAT_API_KEY variable'
+        $configText -match '(?m)^ALI_API_KEY=$'
+    ) 'installer should use the documented ALI_API_KEY variable'
 
     Assert-True (
         (Test-Path -LiteralPath $powerShellInstaller)
@@ -225,11 +225,9 @@ try {
     $providerDecisions = New-Object 'System.Collections.Generic.Queue[bool]'
     $providerDecisions.Enqueue($true)
     $providerDecisions.Enqueue($true)
-    $providerDecisions.Enqueue($false)
-    $providerDecisions.Enqueue($false)
     $providerKeys = New-Object 'System.Collections.Generic.Queue[string]'
     $providerKeys.Enqueue('')
-    $providerKeys.Enqueue('mimo-new-secret')
+    $providerKeys.Enqueue('ali-new-secret')
 
     $yesNoReader = {
         param($Message, $Default)
@@ -259,7 +257,7 @@ try {
         $reconfiguredText -match '(?m)^GLM_API_KEY=glm-existing-key$'
     ) 'a blank masked input should preserve an existing provider key'
     Assert-True (
-        $reconfiguredText -match '(?m)^MIMO_API_KEY=mimo-new-secret$'
+        $reconfiguredText -match '(?m)^ALI_API_KEY=ali-new-secret$'
     ) 'reconfiguration should support enabling an additional provider'
     Assert-True (
         $reconfiguredText -match '(?m)^CUSTOM_SETTING=keep-me$'
