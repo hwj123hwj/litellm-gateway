@@ -56,11 +56,6 @@ func TestRouterMapModelName(t *testing.T) {
 		{"mimo-sonnet", "mimo", "mimo-v2.5"},
 		{"mimo-opus", "mimo", "mimo-v2.5-pro"},
 		{"longcat-opus", "longcat", "LongCat-2.0-Preview"},
-		{"easyclaw-sonnet", "easyclaw", "claude-sonnet-4-6"},
-		{"deepv-deepseek-flash", "deepv-deepseek", "deepseek-v4-flash"},
-		{"deepv-glm5", "deepv-glm5", "glm-5"},
-		{"deepv-claude-sonnet", "deepv-claude", "claude-sonnet-4-6"},
-		{"deepv-kimi", "deepv-kimi", "kimi-k2.6"},
 	}
 
 	for _, tt := range tests {

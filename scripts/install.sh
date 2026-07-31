@@ -172,17 +172,15 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     echo -e "  ${CYAN}1${NC}) 智谱 GLM"
     echo -e "  ${CYAN}2${NC}) 小米 MiMo"
     echo -e "  ${CYAN}3${NC}) 美团 LongCat"
-    echo -e "  ${CYAN}4${NC}) EasyClaw"
-    echo -e "  ${CYAN}5${NC}) 跳过，稍后配置"
+    echo -e "  ${CYAN}4${NC}) 跳过，稍后配置"
     echo ""
-    read -rp "$(echo -e ${CYAN}ℹ${NC}  选择 [1 2 3 4 / 5]: )" CHOICES < /dev/tty 2>/dev/null || CHOICES="5"
+    read -rp "$(echo -e ${CYAN}ℹ${NC}  选择 [1 2 3 / 4]: )" CHOICES < /dev/tty 2>/dev/null || CHOICES="4"
 
     GLM_KEY=""
     MIMO_KEY=""
     LONGCAT_KEY=""
-    EASYCLAW_KEY=""
 
-    if [[ "$CHOICES" != *"5"* ]]; then
+    if [[ "$CHOICES" != *"4"* ]]; then
         for choice in $CHOICES; do
             case "$choice" in
                 1)
@@ -193,9 +191,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
                     ;;
                 3)
                     read -rp "$(echo -e ${CYAN}ℹ${NC}  美团 LongCat API Key: )" LONGCAT_KEY < /dev/tty 2>/dev/null || LONGCAT_KEY=""
-                    ;;
-                4)
-                    read -rp "$(echo -e ${CYAN}ℹ${NC}  EasyClaw API Key: )" EASYCLAW_KEY < /dev/tty 2>/dev/null || EASYCLAW_KEY=""
                     ;;
             esac
         done
@@ -210,7 +205,6 @@ LITELLM_MASTER_KEY=${MASTER_KEY}
 GLM_API_KEY=${GLM_KEY}
 MIMO_API_KEY=${MIMO_KEY}
 LONGCAT_API_KEY=${LONGCAT_KEY}
-EASYCLAW_API_KEY=${EASYCLAW_KEY}
 
 # 网关端口
 PORT=4001

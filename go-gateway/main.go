@@ -62,10 +62,6 @@ func main() {
 		setupDefaultProviders(router, cfg, logger)
 	}
 
-	// DeepV Server 提供商（需要特殊认证，始终在代码中处理）
-	if cfg.DeepVEnabled {
-		setupDeepVProviders(router, cfg, logger)
-	}
 
 	// ChatGPT Codex（使用 OAuth token，需要代理）
 	proxyURL := cfg.HTTPProxy
@@ -191,13 +187,6 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			APIKey: cfg.LongcatAPIKey,
 		}))
 	}
-	if cfg.EasyClawAPIKey != "" {
-		router.RegisterProvider("easyclaw", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "easyclaw",
-			URL:    "https://api.easyclaw.work/v1/chat/completions",
-			APIKey: cfg.EasyClawAPIKey,
-		}))
-	}
 
 	// 注册 fallback 链（与 providers.yaml 别名规则一致）
 	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
@@ -219,49 +208,6 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 		router.RegisterChain("longcat-sonnet", []string{"longcat"})
 		router.RegisterChain("longcat-opus", []string{"longcat"})
 	}
-	// EasyClaw
-	if cfg.EasyClawAPIKey != "" {
-		router.RegisterChain("easyclaw-sonnet", []string{"easyclaw"})
-		router.RegisterChain("easyclaw-opus", []string{"easyclaw"})
-	}
-}
-
-// setupDeepVProviders 设置 DeepV Server 提供商
-func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
-	workDir := cfg.DeepVWorkDir
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
-	deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
-
-	router.RegisterProvider("deepv-deepseek", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-deepseek",
-		URL:  deepvURL,
-	}, workDir, "deepseek-v4-flash"))
-	router.RegisterProvider("deepv-deepseek-pro", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-deepseek-pro",
-		URL:  deepvURL,
-	}, workDir, "deepseek-v4-pro"))
-	router.RegisterProvider("deepv-glm5", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-glm5",
-		URL:  deepvURL,
-	}, workDir, "glm-5"))
-	router.RegisterProvider("deepv-claude", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-claude",
-		URL:  deepvURL,
-	}, workDir, "claude-sonnet-4-6"))
-	router.RegisterProvider("deepv-kimi", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-kimi",
-		URL:  deepvURL,
-	}, workDir, "kimi-k2.6"))
-
-	router.RegisterChain("deepv-deepseek-flash", []string{"deepv-deepseek"})
-	router.RegisterChain("deepv-deepseek-pro", []string{"deepv-deepseek-pro"})
-	router.RegisterChain("deepv-glm5", []string{"deepv-glm5"})
-	router.RegisterChain("deepv-claude-sonnet", []string{"deepv-claude"})
-	router.RegisterChain("deepv-kimi", []string{"deepv-kimi"})
-
-	logger.Printf("DeepV Server enabled, workdir=%s", workDir)
 }
 
 // setupCopilotProviders 设置 GitHub Copilot 提供商
