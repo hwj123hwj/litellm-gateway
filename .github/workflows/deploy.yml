@@ -123,6 +123,7 @@ jobs:
           cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
           Environment=LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
           Environment=GLM_API_KEY=${GLM_API_KEY}
+          Environment=DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
           SERVICEOF
 
           cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
@@ -150,6 +151,7 @@ jobs:
         env:
           LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
           GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
 
   deploy-mini-pc:
     name: Deploy to Mini PC

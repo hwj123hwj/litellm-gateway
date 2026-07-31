@@ -170,17 +170,22 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     echo ""
     echo -e "  选择要启用的提供商（可多选，用空格分隔）:"
     echo -e "  ${CYAN}1${NC}) 智谱 GLM"
-    echo -e "  ${CYAN}2${NC}) 跳过，稍后配置"
+    echo -e "  ${CYAN}2${NC}) 阿里 DashScope / 百炼"
+    echo -e "  ${CYAN}3${NC}) 跳过，稍后配置"
     echo ""
-    read -rp "$(echo -e ${CYAN}ℹ${NC}  选择 [1 / 2]: )" CHOICES < /dev/tty 2>/dev/null || CHOICES="2"
+    read -rp "$(echo -e ${CYAN}ℹ${NC}  选择 [1 2 / 3]: )" CHOICES < /dev/tty 2>/dev/null || CHOICES="3"
 
     GLM_KEY=""
+    DASHSCOPE_KEY=""
 
-    if [[ "$CHOICES" != *"2"* ]]; then
+    if [[ "$CHOICES" != *"3"* ]]; then
         for choice in $CHOICES; do
             case "$choice" in
                 1)
                     read -rp "$(echo -e ${CYAN}ℹ${NC}  智谱 GLM API Key: )" GLM_KEY < /dev/tty 2>/dev/null || GLM_KEY=""
+                    ;;
+                2)
+                    read -rp "$(echo -e ${CYAN}ℹ${NC}  阿里 DashScope API Key: )" DASHSCOPE_KEY < /dev/tty 2>/dev/null || DASHSCOPE_KEY=""
                     ;;
             esac
         done
@@ -193,6 +198,7 @@ LITELLM_MASTER_KEY=${MASTER_KEY}
 
 # 提供商 API Key（按需填写）
 GLM_API_KEY=${GLM_KEY}
+DASHSCOPE_API_KEY=${DASHSCOPE_KEY}
 
 # 网关端口
 PORT=4001

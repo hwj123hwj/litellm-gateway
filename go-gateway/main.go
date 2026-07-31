@@ -161,15 +161,51 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			APIKey: cfg.GLMAPIKey,
 		}))
 	}
+	if cfg.DashscopeAPIKey != "" {
+		router.RegisterProvider("dashscope", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "dashscope",
+			URL:    "https://coding.dashscope.aliyuncs.com/v1/chat/completions",
+			APIKey: cfg.DashscopeAPIKey,
+		}))
+	}
 	// 注册 fallback 链（与 providers.yaml 别名规则一致）
-	router.RegisterChain("coding", []string{"glm"})
-	router.RegisterChain("coding-anthropic", []string{"glm-anthropic"})
+	codingProviders := []string{}
+	if cfg.GLMAPIKey != "" {
+		codingProviders = append(codingProviders, "glm")
+	}
+	if cfg.DashscopeAPIKey != "" {
+		codingProviders = append(codingProviders, "dashscope")
+	}
+	if len(codingProviders) == 0 {
+		codingProviders = []string{"glm"}
+	}
+	router.RegisterChain("coding", codingProviders)
+
+	codingAnthropicProviders := []string{}
+	if cfg.GLMAPIKey != "" {
+		codingAnthropicProviders = append(codingAnthropicProviders, "glm-anthropic")
+	}
+	if cfg.DashscopeAPIKey != "" {
+		codingAnthropicProviders = append(codingAnthropicProviders, "dashscope")
+	}
+	if len(codingAnthropicProviders) == 0 {
+		codingAnthropicProviders = []string{"glm-anthropic"}
+	}
+	router.RegisterChain("coding-anthropic", codingAnthropicProviders)
+
 	// GLM 核心别名
 	if cfg.GLMAPIKey != "" {
 		router.RegisterChain("glm-sonnet", []string{"glm"})
 		router.RegisterChain("glm-haiku", []string{"glm"})
 		router.RegisterChain("glm-opus", []string{"glm"})
 		router.RegisterChain("glm-flash", []string{"glm-free"})
+	}
+	// DashScope 核心别名
+	if cfg.DashscopeAPIKey != "" {
+		router.RegisterChain("qwen-plus", []string{"dashscope"})
+		router.RegisterChain("qwen-coder", []string{"dashscope"})
+		router.RegisterChain("qwen-sonnet", []string{"dashscope"})
+		router.RegisterChain("qwen-opus", []string{"dashscope"})
 	}
 }
 

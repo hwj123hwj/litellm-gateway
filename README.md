@@ -103,15 +103,26 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `copilot` / `auto` / `copilot-auto` | `auto` | GitHub Copilot Chat (自动选择模型) |
 | `copilot-opus` / `copilot-sonnet` / `copilot-haiku` | `auto` | 兼容旧别名，统一转发至 `auto` |
 
+### 阿里 DashScope / 百炼（通义千问 Qwen）
+
+| 模型别名 | 实际模型 | 说明 |
+|----------|----------|------|
+| `qwen3.5-plus` / `qwen-plus` | `qwen3.5-plus` | 通义千问 3.5 Plus |
+| `qwen3-coder-plus` / `qwen-coder` | `qwen3-coder-plus` | 阿里云 Coder 旗舰模型 |
+| `qwen3-coder-next` | `qwen3-coder-next` | 阿里云 Coder 次世代模型 |
+| `qwen3-max-2026-01-23` | `qwen3-max-2026-01-23` | Qwen3 Max 最新版本 |
+
 ### 外部提供商
 
 | 模型名 | 提供商 | 说明 |
 |--------|--------|------|
-| `coding` | 智谱 GLM | **推荐**，OpenAI 风格 |
-| `coding-anthropic` | 智谱 GLM | Anthropic 风格 |
+| `coding` | 智谱 GLM / 阿里 DashScope | **推荐**，OpenAI 风格，自动 fallback |
+| `coding-anthropic` | 智谱 GLM / 阿里 DashScope | Anthropic 风格，自动 fallback |
 | `glm-flash` | 智谱 GLM | 免费模型 |
 | `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
 | `glm-opus` | 智谱 GLM coding plan | 旗舰模型 |
+| `qwen-plus` | 阿里 DashScope | Qwen3.5 Plus 主力模型 |
+| `qwen-coder` | 阿里 DashScope | Qwen3 Coder 代码模型 |
 
 ## 配置 Claude Code
 
@@ -184,6 +195,7 @@ litellm-gateway/
 |------|------|------|
 | `LITELLM_MASTER_KEY` | 是 | 网关认证 token |
 | `GLM_API_KEY` | 否 | 智谱 API key |
+| `DASHSCOPE_API_KEY` | 否 | 阿里 DashScope / 百炼 API key |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
