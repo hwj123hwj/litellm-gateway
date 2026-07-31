@@ -25,19 +25,17 @@ func TestRouterRegisterChain(t *testing.T) {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	router := NewRouter(logger)
 
-	for _, name := range []string{"glm", "mimo", "longcat"} {
-		router.RegisterProvider(name, NewAnthropicProvider(&Config{
-			Name: name, URL: "https://api.example.com", APIKey: "test-key",
-		}))
-	}
-	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
+	router.RegisterProvider("glm", NewAnthropicProvider(&Config{
+		Name: "glm", URL: "https://api.example.com", APIKey: "test-key",
+	}))
+	router.RegisterChain("coding", []string{"glm"})
 
 	providers, err := router.Route("coding")
 	if err != nil {
 		t.Fatalf("Route() failed: %v", err)
 	}
-	if len(providers) != 3 {
-		t.Errorf("Expected 3 providers, got %d", len(providers))
+	if len(providers) != 1 {
+		t.Errorf("Expected 1 provider, got %d", len(providers))
 	}
 }
 
@@ -53,9 +51,6 @@ func TestRouterMapModelName(t *testing.T) {
 		{"glm-sonnet", "glm", "glm-5-turbo"},
 		{"glm-opus", "glm", "glm-5.2"},
 		{"glm-haiku", "glm", "glm-4.7"},
-		{"mimo-sonnet", "mimo", "mimo-v2.5"},
-		{"mimo-opus", "mimo", "mimo-v2.5-pro"},
-		{"longcat-opus", "longcat", "LongCat-2.0-Preview"},
 	}
 
 	for _, tt := range tests {
@@ -83,7 +78,7 @@ func TestRouterListProviders(t *testing.T) {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	router := NewRouter(logger)
 
-	for _, name := range []string{"glm", "mimo", "longcat"} {
+	for _, name := range []string{"glm"} {
 		router.RegisterProvider(name, NewAnthropicProvider(&Config{
 			Name: name, URL: "https://api.example.com", APIKey: "key",
 		}))
@@ -91,7 +86,7 @@ func TestRouterListProviders(t *testing.T) {
 
 	providers := router.ListProviders()
 	sort.Strings(providers)
-	if len(providers) != 3 {
-		t.Errorf("Expected 3 providers, got %d: %v", len(providers), providers)
+	if len(providers) != 1 {
+		t.Errorf("Expected 1 provider, got %d: %v", len(providers), providers)
 	}
 }

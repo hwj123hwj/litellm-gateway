@@ -123,8 +123,7 @@ jobs:
           cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
           Environment=LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
           Environment=GLM_API_KEY=${GLM_API_KEY}
-          Environment=MIMO_API_KEY=${MIMO_API_KEY}
-          Environment=LONGCAT_API_KEY=${LONGCAT_API_KEY}
+          Environment=ALI_API_KEY=${ALI_API_KEY}
           SERVICEOF
 
           cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
@@ -152,8 +151,7 @@ jobs:
         env:
           LITELLM_MASTER_KEY: ${{ secrets.LITELLM_MASTER_KEY }}
           GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
-          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-          LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
+          ALI_API_KEY: ${{ secrets.ALI_API_KEY }}
 
   deploy-mini-pc:
     name: Deploy to Mini PC

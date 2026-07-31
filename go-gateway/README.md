@@ -87,7 +87,7 @@ tail -50 /tmp/gw.log
 tail -f /tmp/gw.log
 
 # 搜索特定模型的错误
-tail -100 /tmp/gw.log | grep -E "mimo|glm|longcat|copilot|chatgpt"
+tail -100 /tmp/gw.log | grep -E "glm|copilot|chatgpt"
 
 # 只看错误
 tail -100 /tmp/gw.log | grep -E "error|Error|failed"

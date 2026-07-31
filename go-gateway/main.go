@@ -161,36 +161,44 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 			APIKey: cfg.GLMAPIKey,
 		}))
 	}
-	if cfg.MIMOAPIKey != "" {
-		router.RegisterProvider("mimo-anthropic", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "mimo-anthropic",
-			URL:       "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages",
-			APIKey:    cfg.MIMOAPIKey,
-			UseBearer: false,
-		}))
-		router.RegisterProvider("mimo", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "mimo",
-			URL:    "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
-			APIKey: cfg.MIMOAPIKey,
-		}))
-	}
-	if cfg.LongcatAPIKey != "" {
-		router.RegisterProvider("longcat-anthropic", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "longcat-anthropic",
-			URL:       "https://api.longcat.chat/anthropic/v1/messages",
-			APIKey:    cfg.LongcatAPIKey,
+	if cfg.AliAPIKey != "" {
+		router.RegisterProvider("ali-anthropic", provider.NewAnthropicProvider(&provider.Config{
+			Name:      "ali-anthropic",
+			URL:       "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages",
+			APIKey:    cfg.AliAPIKey,
 			UseBearer: true,
 		}))
-		router.RegisterProvider("longcat", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "longcat",
-			URL:    "https://api.longcat.chat/openai/chat/completions",
-			APIKey: cfg.LongcatAPIKey,
+		router.RegisterProvider("ali", provider.NewOpenAIProvider(&provider.Config{
+			Name:   "ali",
+			URL:    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+			APIKey: cfg.AliAPIKey,
 		}))
 	}
-
 	// 注册 fallback 链（与 providers.yaml 别名规则一致）
-	router.RegisterChain("coding", []string{"glm", "mimo", "longcat"})
-	router.RegisterChain("coding-anthropic", []string{"glm-anthropic", "mimo-anthropic", "longcat-anthropic"})
+	codingProviders := []string{}
+	if cfg.GLMAPIKey != "" {
+		codingProviders = append(codingProviders, "glm")
+	}
+	if cfg.AliAPIKey != "" {
+		codingProviders = append(codingProviders, "ali")
+	}
+	if len(codingProviders) == 0 {
+		codingProviders = []string{"glm"}
+	}
+	router.RegisterChain("coding", codingProviders)
+
+	codingAnthropicProviders := []string{}
+	if cfg.GLMAPIKey != "" {
+		codingAnthropicProviders = append(codingAnthropicProviders, "glm-anthropic")
+	}
+	if cfg.AliAPIKey != "" {
+		codingAnthropicProviders = append(codingAnthropicProviders, "ali-anthropic")
+	}
+	if len(codingAnthropicProviders) == 0 {
+		codingAnthropicProviders = []string{"glm-anthropic"}
+	}
+	router.RegisterChain("coding-anthropic", codingAnthropicProviders)
+
 	// GLM 核心别名
 	if cfg.GLMAPIKey != "" {
 		router.RegisterChain("glm-sonnet", []string{"glm"})
@@ -198,15 +206,9 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 		router.RegisterChain("glm-opus", []string{"glm"})
 		router.RegisterChain("glm-flash", []string{"glm-free"})
 	}
-	// MiMo 核心别名
-	if cfg.MIMOAPIKey != "" {
-		router.RegisterChain("mimo-sonnet", []string{"mimo"})
-		router.RegisterChain("mimo-opus", []string{"mimo"})
-	}
-	// LongCat 核心别名
-	if cfg.LongcatAPIKey != "" {
-		router.RegisterChain("longcat-sonnet", []string{"longcat"})
-		router.RegisterChain("longcat-opus", []string{"longcat"})
+	// Ali 核心别名
+	if cfg.AliAPIKey != "" {
+		router.RegisterChain("ali-opus", []string{"ali"})
 	}
 }
 
@@ -230,6 +232,9 @@ func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *
 	}
 
 	router.RegisterProvider("copilot", provider.NewCopilotProvider(copilotConfig, cfg.CopilotGithubToken))
+	router.RegisterChain("copilot", []string{"copilot"})
+	router.RegisterChain("copilot-auto", []string{"copilot"})
+	router.RegisterChain("auto", []string{"copilot"})
 	router.RegisterChain("copilot-opus", []string{"copilot"})
 	router.RegisterChain("copilot-sonnet", []string{"copilot"})
 	router.RegisterChain("copilot-haiku", []string{"copilot"})

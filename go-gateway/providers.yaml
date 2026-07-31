@@ -1,6 +1,6 @@
 # 模型提供商配置
 # 命名规则：
-#   - GLM / MiMo / LongCat 核心供应商保留分级别名 (haiku/sonnet/opus)
+#   - GLM 核心供应商保留分级别名 (haiku/sonnet/opus)
 #   - 其他供应商统一用 供应商-模型名 格式，不占用通用别名
 #   - chain 中引用 model-bound provider（格式：供应商名-模型ID）
 
@@ -19,36 +19,26 @@ providers:
         aliases: [glm-haiku]
       - id: glm-4.7-flash
 
-  # 小米 MiMo — 使用原生 OpenAI API
-  - name: mimo
+  # 阿里 MaaS（Qwen 3.8 Max）
+  - name: ali
     type: openai
-    url: https://token-plan-cn.xiaomimimo.com/v1/chat/completions
-    api_key_env: MIMO_API_KEY
+    url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
+    api_key_env: ALI_API_KEY
     models:
-      - id: mimo-v2.5
-        aliases: [mimo-sonnet]
-      - id: mimo-v2.5-pro
-        aliases: [mimo-opus]
-
-  # 美团 LongCat
-  - name: longcat
-    type: openai
-    url: https://api.longcat.chat/openai/chat/completions
-    api_key_env: LONGCAT_API_KEY
-    models:
-      - id: LongCat-2.0-Preview
-        aliases: [longcat-opus]
-
+      - id: qwen3.8-max-preview
+        aliases: [ali-opus]
 
 
 chains:
   coding:
     - glm-glm-5-turbo
-    - mimo-mimo-v2.5
-    - longcat-LongCat-2.0-Preview
+    - ali-qwen3.8-max-preview
 
   coding-anthropic:
-    - mimo-mimo-v2.5
-    - longcat-LongCat-2.0-Preview
+    - glm-glm-5-turbo
+    - ali-qwen3.8-max-preview
+
+
+
 
 
