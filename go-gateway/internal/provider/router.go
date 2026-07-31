@@ -119,10 +119,10 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 			"deepv-glm5":           {"deepv-glm5": "glm-5"},
 			"deepv-claude-sonnet":  {"deepv-claude": "claude-sonnet-4-6"},
 			"deepv-kimi":           {"deepv-kimi": "kimi-k2.6"},
-			// GitHub Copilot（免费套餐，Gemini 为主）
-			"copilot-opus":   {"copilot": "gemini-3.1-pro-preview"},
-			"copilot-sonnet": {"copilot": "gemini-3-flash-preview"},
-			"copilot-haiku":  {"copilot": "gpt-4o-2024-11-20"},
+			// GitHub Copilot（免费教育套餐，仅支持 GPT 系列模型）
+			"copilot-opus":   {"copilot": "gpt-4.1"},
+			"copilot-sonnet": {"copilot": "gpt-4o-2024-11-20"},
+			"copilot-haiku":  {"copilot": "gpt-4o-mini"},
 		}
 
 	if mapping, ok := mappings[modelName]; ok {

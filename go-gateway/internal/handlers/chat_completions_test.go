@@ -241,3 +241,62 @@ func TestChatCompletionsHandlerStreamsOpenAISSE(t *testing.T) {
 		t.Fatalf("expected DONE sentinel, got %s", bodyText)
 	}
 }
+
+func TestChatCompletionsHandlerStreamsToolCalls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	stub := &stubChatProvider{
+		name: "stub",
+		streamData: strings.Join([]string{
+			"event: message_start",
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_999\",\"model\":\"glm-5-turbo\"}}",
+			"",
+			"event: content_block_start",
+			"data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_weather\",\"name\":\"get_weather\",\"input\":{}}}",
+			"",
+			"event: content_block_delta",
+			"data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\":\\\"Beijing\\\"}\"}}",
+			"",
+			"event: content_block_stop",
+			"data: {\"type\":\"content_block_stop\",\"index\":1}",
+			"",
+			"event: message_delta",
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":10}}",
+			"",
+			"event: message_stop",
+			"data: {\"type\":\"message_stop\"}",
+			"",
+		}, "\n"),
+	}
+	router.RegisterProvider("stub", stub)
+	router.RegisterChain("coding", []string{"stub"})
+
+	handler := NewChatCompletionsHandler(router, logger)
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", handler.Handle)
+
+	body := `{"model":"coding","stream":true,"messages":[{"role":"user","content":"what is weather"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	bodyText := w.Body.String()
+	if !strings.Contains(bodyText, `"index":0`) {
+		t.Fatalf("expected zero-based tool_call index 0, got %s", bodyText)
+	}
+	if !strings.Contains(bodyText, `"name":"get_weather"`) {
+		t.Fatalf("expected tool name get_weather, got %s", bodyText)
+	}
+	if !strings.Contains(bodyText, `"arguments":"{\"city\":\"Beijing\"}"`) {
+		t.Fatalf("expected arguments string, got %s", bodyText)
+	}
+	if !strings.Contains(bodyText, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("expected finish_reason tool_calls, got %s", bodyText)
+	}
+}

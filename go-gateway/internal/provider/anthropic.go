@@ -126,6 +126,7 @@ func (p *AnthropicProvider) IsHealthy(ctx context.Context) bool {
 func (p *AnthropicProvider) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "go-llm-gateway/1.0")
+	req.Header.Set("anthropic-version", "2023-06-01")
 	if p.config.UseBearer {
 		req.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 	} else {
