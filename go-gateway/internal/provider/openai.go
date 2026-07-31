@@ -18,8 +18,8 @@ import (
 // ─── OpenAI 请求/响应结构 ──────────────────────────────────────────────────────
 
 type openAIToolFunction struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 type openAIToolCall struct {
@@ -41,14 +41,15 @@ type chatTemplateKwargs struct {
 }
 
 type openAIRequest struct {
-	Model             string             `json:"model"`
-	Messages          []openAIMessage    `json:"messages"`
-	MaxTokens         int                `json:"max_tokens,omitempty"`
-	Temperature       float64            `json:"temperature,omitempty"`
-	TopP              float64            `json:"top_p,omitempty"`
-	TopK              int                `json:"top_k,omitempty"`
-	Stream            bool               `json:"stream,omitempty"`
-	Tools             []openAITool       `json:"tools,omitempty"`
+	Model              string              `json:"model"`
+	Messages           []openAIMessage     `json:"messages"`
+	MaxTokens          int                 `json:"max_tokens,omitempty"`
+	Temperature        float64             `json:"temperature,omitempty"`
+	TopP               float64             `json:"top_p,omitempty"`
+	TopK               int                 `json:"top_k,omitempty"`
+	Stream             bool                `json:"stream,omitempty"`
+	Tools              []openAITool        `json:"tools,omitempty"`
+	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
 	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
 }
 
@@ -212,18 +213,14 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 
 	msgID := "msg_oai_" + time.Now().Format("20060102150405")
 
-	// 用于拼装流式 tool_calls（key = index）
-	type toolCallAccum struct {
-		id        string
-		name      string
-		arguments strings.Builder
+	// 跟踪工具调用的 Anthropic block index 及发送状态
+	type toolCallState struct {
+		blockIdx int
+		started  bool
 	}
-	toolCalls := map[int]*toolCallAccum{}
-
-	// 文本内容 block 是否已开始
+	toolStates := map[int]*toolCallState{}
+	nextToolBlockIdx := 0
 	textBlockStarted := false
-	// tool_use block 的当前 Anthropic index（文本占 0，每个工具往后排）
-	toolBlockIndex := 1
 
 	writeSSE(w, "message_start", fmt.Sprintf(
 		`{"type":"message_start","message":{"id":%q,"type":"message","role":"assistant","model":%q,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}`,
@@ -267,6 +264,9 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		if delta.Content != "" {
 			if !textBlockStarted {
 				textBlockStarted = true
+				if nextToolBlockIdx == 0 {
+					nextToolBlockIdx = 1
+				}
 				writeSSE(w, "content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
 			}
 			writeSSE(w, "content_block_delta", fmt.Sprintf(
@@ -275,20 +275,31 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 			))
 		}
 
-		// --- 工具调用（增量拼装）---
+		// --- 工具调用（实时流式转发）---
 		for _, tc := range delta.ToolCalls {
 			idx := tc.Index
-			if _, ok := toolCalls[idx]; !ok {
-				toolCalls[idx] = &toolCallAccum{}
+			state, ok := toolStates[idx]
+			if !ok {
+				bIdx := nextToolBlockIdx
+				nextToolBlockIdx++
+				state = &toolCallState{blockIdx: bIdx, started: false}
+				toolStates[idx] = state
 			}
-			acc := toolCalls[idx]
-			if tc.ID != "" {
-				acc.id = tc.ID
+
+			if !state.started {
+				state.started = true
+				writeSSE(w, "content_block_start", fmt.Sprintf(
+					`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":%s,"name":%s,"input":{}}}`,
+					state.blockIdx, jsonString(tc.ID), jsonString(tc.Function.Name),
+				))
 			}
-			if tc.Function.Name != "" {
-				acc.name = tc.Function.Name
+
+			if tc.Function.Arguments != "" {
+				writeSSE(w, "content_block_delta", fmt.Sprintf(
+					`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%s}}`,
+					state.blockIdx, jsonString(tc.Function.Arguments),
+				))
 			}
-			acc.arguments.WriteString(tc.Function.Arguments)
 		}
 
 		// --- finish_reason ---
@@ -306,39 +317,11 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		writeSSE(w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
 	}
 
-	// 输出拼装完整的 tool_use blocks（按 index 顺序）
-	for i := 0; i < len(toolCalls); i++ {
-		acc, ok := toolCalls[i]
-		if !ok {
-			continue
+	// 关闭工具调用 blocks
+	for _, state := range toolStates {
+		if state.started {
+			writeSSE(w, "content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, state.blockIdx))
 		}
-		blockIdx := toolBlockIndex
-		if !textBlockStarted {
-			// 没有文本块时，tool_use 从 index 0 开始
-			blockIdx = i
-		} else {
-			blockIdx = 1 + i
-		}
-
-		// 把 arguments 字符串解析为 JSON object（确保合法）
-		var inputRaw json.RawMessage
-		if err := json.Unmarshal([]byte(acc.arguments.String()), &inputRaw); err != nil {
-			inputRaw = json.RawMessage(`{}`)
-		}
-		inputJSON, _ := json.Marshal(inputRaw)
-
-		writeSSE(w, "content_block_start", fmt.Sprintf(
-			`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":%s,"name":%s,"input":{}}}`,
-			blockIdx, jsonString(acc.id), jsonString(acc.name),
-		))
-		writeSSE(w, "content_block_delta", fmt.Sprintf(
-			`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%s}}`,
-			blockIdx, jsonString(string(inputJSON)),
-		))
-		writeSSE(w, "content_block_stop", fmt.Sprintf(
-			`{"type":"content_block_stop","index":%d}`, blockIdx,
-		))
-		_ = toolBlockIndex
 	}
 
 	stopReason := mapFinishReason(finishReason)
@@ -495,6 +478,9 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 	}
 	if v, ok := req.raw["top_p"]; ok {
 		_ = json.Unmarshal(v, &oaiReq.TopP)
+	}
+	if v, ok := req.raw["tool_choice"]; ok {
+		oaiReq.ToolChoice = v
 	}
 
 	// 转换 tools：Anthropic input_schema → OpenAI parameters

@@ -104,7 +104,7 @@ type openAIChatTool struct {
 }
 
 type openAIChatToolFunction struct {
-	Name        string          `json:"name"`
+	Name        string          `json:"name,omitempty"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Arguments   string          `json:"arguments,omitempty"`
@@ -436,6 +436,8 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 	accOutputTokens := 0
 	accCachedTokens := 0
 
+	toolIndexMap := make(map[int]int)
+
 	flushEvent := func() error {
 		if eventType == "" || len(dataLines) == 0 {
 			return nil
@@ -460,8 +462,8 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 		case "message_delta":
 			var md struct {
 				Usage struct {
-					InputTokens         int `json:"input_tokens"`
-					OutputTokens        int `json:"output_tokens"`
+					InputTokens          int `json:"input_tokens"`
+					OutputTokens         int `json:"output_tokens"`
 					CacheReadInputTokens int `json:"cache_read_input_tokens"`
 				} `json:"usage"`
 			}
@@ -474,7 +476,7 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 			}
 		}
 
-		chunk, done, err := anthropicEventToOpenAIChunk(eventType, payload, created, messageID, model, pendingToolCalls)
+		chunk, done, err := anthropicEventToOpenAIChunk(eventType, payload, created, messageID, model, pendingToolCalls, toolIndexMap)
 		if err != nil {
 			return err
 		}
@@ -543,7 +545,7 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 	return flushEvent()
 }
 
-func anthropicEventToOpenAIChunk(eventType, payload string, created int64, currentID, currentModel string, pendingToolCalls map[int]*openAIChatToolCall) (*openAIStreamChunkResponse, bool, error) {
+func anthropicEventToOpenAIChunk(eventType, payload string, created int64, currentID, currentModel string, pendingToolCalls map[int]*openAIChatToolCall, toolIndexMap map[int]int) (*openAIStreamChunkResponse, bool, error) {
 	switch eventType {
 	case "ping", "content_block_stop":
 		return nil, false, nil
@@ -583,6 +585,11 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 		if evt.Block.Type != "tool_use" {
 			return nil, false, nil
 		}
+		oaiIndex, ok := toolIndexMap[evt.Index]
+		if !ok {
+			oaiIndex = len(toolIndexMap)
+			toolIndexMap[evt.Index] = oaiIndex
+		}
 		if pendingToolCalls != nil {
 			pendingToolCalls[evt.Index] = &openAIChatToolCall{
 				ID:   evt.Block.ID,
@@ -600,7 +607,7 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 			Choices: []openAIStreamChunkChoice{{
 				Index: 0,
 				Delta: openAIStreamDelta{ToolCalls: []openAIStreamToolCallDelta{{
-					Index: evt.Index,
+					Index: oaiIndex,
 					ID:    evt.Block.ID,
 					Type:  "function",
 					Function: openAIChatToolFunction{
@@ -653,6 +660,11 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 				return nil, false, nil
 			}
 			call.Function.Arguments += evt.Delta.PartialJSON
+			oaiIndex, ok := toolIndexMap[evt.Index]
+			if !ok {
+				oaiIndex = len(toolIndexMap)
+				toolIndexMap[evt.Index] = oaiIndex
+			}
 			return &openAIStreamChunkResponse{
 				ID:      currentID,
 				Object:  "chat.completion.chunk",
@@ -661,7 +673,7 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 				Choices: []openAIStreamChunkChoice{{
 					Index: 0,
 					Delta: openAIStreamDelta{ToolCalls: []openAIStreamToolCallDelta{{
-						Index: evt.Index,
+						Index: oaiIndex,
 						Function: openAIChatToolFunction{
 							Arguments: evt.Delta.PartialJSON,
 						},
