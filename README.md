@@ -1,6 +1,6 @@
 # LLM Gateway
 
-轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团、EasyClaw、DeepV 五家提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
+轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团等多家提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
 
 ## 一键安装
 
@@ -66,17 +66,6 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 重启 gateway 即可使用新模型。
 
-> **注意：DeepV 模型需要重新编译**
->
-> DeepV Server 模型（如 `deepseek-flash`、`deepseek-pro`、`kimi`、`glm-5` 等）在 `main.go` 的 `setupDeepVProviders` 函数中硬编码注册。
->
-> 添加新的 DeepV 模型需要：
-> 1. 修改 `main.go` 中的 `setupDeepVProviders` 函数
-> 2. 重新编译：`go build -o gateway .`
-> 3. 重启服务：`pkill gateway; ./gateway &`
->
-> 这与 `providers.yaml` 配置的普通提供商不同，因为 DeepV 需要特殊的认证机制。
-
 ### 服务器部署
 
 通过 GitHub Actions 自动部署，推送到 `main` 分支即可触发。
@@ -106,28 +95,6 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `gpt-5.5-pro` | gpt-5.5-pro | ChatGPT Pro |
 | `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
 | `o4-mini` | o4-mini | 推理模型 |
-
-### DeepV Server（内部）
-
-| 模型别名 | 实际模型 | 工具调用 |
-|----------|----------|----------|
-| `deepseek-flash` | `deepseek-v4-flash` | ✅ |
-| `glm-5` | `glm-5` | ✅ |
-| `claude-sonnet-4-6` | `claude-sonnet-4-6` | ✅ |
-
-### EasyClaw（真实 Claude）
-
-| 模型别名 | 实际模型 | 工具调用 |
-|----------|----------|----------|
-| `easyclaw-sonnet` | `claude-sonnet-4-6` | ✅ |
-| `easyclaw-opus` | `claude-opus-4-6` | ✅ |
-
-### APIFree（SkyClaw Agent）
-
-| 模型别名 | 实际模型 | 说明 |
-|----------|----------|------|
-| `sky-opus` | `skywork-ai/skyclaw-v1` | SkyClaw Agent 模型 |
-| `sky-lite` | `skywork-ai/skyclaw-v1-lite` | SkyClaw 轻量版 |
 
 ### 外部提供商
 
@@ -218,14 +185,9 @@ litellm-gateway/
 | `GLM_API_KEY` | 否 | 智谱 API key |
 | `MIMO_API_KEY` | 否 | 小米 API key |
 | `LONGCAT_API_KEY` | 否 | 美团 API key |
-| `EASYCLAW_API_KEY` | 否 | EasyClaw API key |
-| `APIFREE_API_KEY` | 否 | APIFree key（启用 SkyClaw 模型） |
-| `OPENROUTER_API_KEY` | 否 | OpenRouter key（启用免费模型） |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
-| `DEEPV_ENABLED` | 否 | 启用 DeepV Server（true/false） |
-| `DEEPV_WORK_DIR` | 否 | DeepV 工作目录（用于获取 Git 信息） |
 | `PORT` | 否 | 监听端口（默认 4001） |
 
 ## 资源占用

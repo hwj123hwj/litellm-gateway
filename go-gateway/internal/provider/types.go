@@ -246,9 +246,8 @@ type StreamProvider interface {
 	ForwardStream(ctx context.Context, req *Request, w io.Writer) error
 }
 
-// BoundModelProvider 是可选接口：Provider 自身绑定了特定模型名。
-// handler 在路由时检查此接口，若实现则直接使用 BoundModel() 替代 MapModel() 的结果。
-// 用于需要动态绑定模型名的场景（如 DeepV、Copilot 等）。
+// BoundModelProvider 是可选接口，实现该接口的 Provider 表示它固定处理特定的模型 ID。
+// 用于需要动态绑定模型名的场景（如 Copilot 等）。
 type BoundModelProvider interface {
 	Provider
 	BoundModel() string

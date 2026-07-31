@@ -125,7 +125,6 @@ jobs:
           Environment=GLM_API_KEY=${GLM_API_KEY}
           Environment=MIMO_API_KEY=${MIMO_API_KEY}
           Environment=LONGCAT_API_KEY=${LONGCAT_API_KEY}
-          Environment=EASYCLAW_API_KEY=${EASYCLAW_API_KEY}
           SERVICEOF
 
           cat >> /etc/systemd/system/go-gateway.service << SERVICEOF
@@ -155,7 +154,6 @@ jobs:
           GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
           MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
           LONGCAT_API_KEY: ${{ secrets.LONGCAT_API_KEY }}
-          EASYCLAW_API_KEY: ${{ secrets.EASYCLAW_API_KEY }}
 
   deploy-mini-pc:
     name: Deploy to Mini PC

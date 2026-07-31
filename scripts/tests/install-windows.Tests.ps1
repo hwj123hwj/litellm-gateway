@@ -213,7 +213,6 @@ try {
         'GLM_API_KEY=glm-existing-key'
         'MIMO_API_KEY='
         'LONGCAT_API_KEY='
-        'EASYCLAW_API_KEY='
         'PORT=4001'
         'LOG_LEVEL=debug'
         'CUSTOM_SETTING=keep-me'

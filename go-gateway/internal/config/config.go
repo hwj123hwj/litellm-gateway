@@ -18,11 +18,8 @@ type Config struct {
 	GLMAPIKey          string
 	MIMOAPIKey         string
 	LongcatAPIKey      string
-	EasyClawAPIKey     string
 	CopilotToken       string // GitHub Copilot token（短期有效，需要定期刷新）
 	CopilotGithubToken string // GitHub OAuth token（用于刷新 Copilot token）
-	DeepVEnabled       bool   // DeepV Server 是否启用
-	DeepVWorkDir       string // DeepV 工作目录（用于获取 Git 信息）
 	HTTPProxy          string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
 	Env                string
 }
@@ -32,20 +29,17 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:             getEnvInt("PORT", 4000),
-		LogLevel:         getEnv("LOG_LEVEL", "info"),
-		MasterKey:        getEnv("LITELLM_MASTER_KEY", ""),
+		Port:               getEnvInt("PORT", 4000),
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
+		MasterKey:          getEnv("LITELLM_MASTER_KEY", ""),
 		AdminToken:         getEnv("ADMIN_TOKEN", ""),
-		GLMAPIKey:        getEnv("GLM_API_KEY", ""),
-		MIMOAPIKey:       getEnv("MIMO_API_KEY", ""),
-		LongcatAPIKey:    getEnv("LONGCAT_API_KEY", ""),
-		EasyClawAPIKey:   getEnv("EASYCLAW_API_KEY", ""),
+		GLMAPIKey:          getEnv("GLM_API_KEY", ""),
+		MIMOAPIKey:         getEnv("MIMO_API_KEY", ""),
+		LongcatAPIKey:      getEnv("LONGCAT_API_KEY", ""),
 		CopilotToken:       getEnv("COPILOT_TOKEN", ""),
 		CopilotGithubToken: getEnv("COPILOT_GITHUB_TOKEN", ""),
-		DeepVEnabled:       getEnvBool("DEEPV_ENABLED", false),
-		DeepVWorkDir:     getEnv("DEEPV_WORK_DIR", ""),
-		HTTPProxy:        getEnv("HTTP_PROXY", ""),
-		Env:              getEnv("ENV", "development"),
+		HTTPProxy:          getEnv("HTTP_PROXY", ""),
+		Env:                getEnv("ENV", "development"),
 	}
 
 	if cfg.MasterKey == "" {

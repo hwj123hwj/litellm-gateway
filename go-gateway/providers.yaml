@@ -39,16 +39,6 @@ providers:
       - id: LongCat-2.0-Preview
         aliases: [longcat-opus]
 
-  # EasyClaw（Claude 代理）
-  - name: easyclaw
-    type: openai
-    url: https://api.easyclaw.work/v1/chat/completions
-    api_key_env: EASYCLAW_API_KEY
-    models:
-      - id: claude-sonnet-4-6
-        aliases: [easyclaw-sonnet]
-      - id: claude-opus-4-6
-        aliases: [easyclaw-opus]
 
 chains:
   coding:
