@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -13,11 +15,20 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/handlers"
 	"github.com/weijian/go-llm-gateway/internal/metrics"
 	"github.com/weijian/go-llm-gateway/internal/middleware"
+	"github.com/weijian/go-llm-gateway/internal/piconfig"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 	"github.com/weijian/go-llm-gateway/internal/storage"
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		if err := runCommand(os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -61,7 +72,6 @@ func main() {
 		logger.Printf("providers.yaml not found, using default providers")
 		setupDefaultProviders(router, cfg, logger)
 	}
-
 
 	// ChatGPT Codex（使用 OAuth token，需要代理）
 	proxyURL := cfg.HTTPProxy
@@ -139,6 +149,83 @@ func main() {
 	if err := engine.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+func runCommand(args []string) error {
+	switch args[0] {
+	case "setup":
+		if len(args) < 2 || args[1] != "pi" {
+			return fmt.Errorf("usage: llm-gateway setup pi [--endpoint URL] [--dry-run]")
+		}
+		return setupPi(args[2:])
+	case "auth":
+		if len(args) != 2 || args[1] != "print-master-key" {
+			return fmt.Errorf("usage: llm-gateway auth print-master-key")
+		}
+		key, err := piconfig.MasterKey(defaultGatewayHome())
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprint(os.Stdout, key)
+		return err
+	default:
+		return fmt.Errorf("unknown command %q", args[0])
+	}
+}
+
+func setupPi(args []string) error {
+	flags := flag.NewFlagSet("setup pi", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	endpoint := flags.String("endpoint", "", "Gateway base URL (defaults to the local gateway)")
+	dryRun := flags.Bool("dry-run", false, "Print the resulting models.json without writing it")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+
+	merged, path, err := piconfig.Setup(piconfig.SetupOptions{
+		GatewayHome: defaultGatewayHome(),
+		PiHome:      defaultPiHome(),
+		Endpoint:    *endpoint,
+		DryRun:      *dryRun,
+	})
+	if err != nil {
+		return err
+	}
+	if *dryRun {
+		_, err = os.Stdout.Write(merged)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Would write: %s\n", path)
+		return nil
+	}
+	fmt.Fprintf(os.Stdout, "Pi configured: %s\nSelect llm-gateway/coding in Pi with /model.\n", path)
+	return nil
+}
+
+func defaultGatewayHome() string {
+	if home := os.Getenv("LLM_GATEWAY_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".llm-gateway"
+	}
+	return filepath.Join(userHome, ".llm-gateway")
+}
+
+func defaultPiHome() string {
+	if home := os.Getenv("PI_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".pi"
+	}
+	return filepath.Join(userHome, ".pi")
 }
 
 // setupDefaultProviders 设置默认提供商（当 providers.yaml 不存在时使用）

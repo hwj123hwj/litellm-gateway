@@ -36,6 +36,23 @@ go build -o gateway . && ./gateway
 make run
 ```
 
+## 配置 Pi
+
+安装版网关可一键写入 Pi 的自定义模型配置：
+
+```bash
+llm-gateway setup pi
+```
+
+命令只更新 `~/.pi/agent/models.json` 中的 `llm-gateway` Provider，保留已有配置。默认端点会读取 `~/.llm-gateway/.env` 的 `PORT`，认证密钥不会写入 Pi 配置文件；Pi 使用 `llm-gateway auth print-master-key` 在请求时读取网关主密钥。
+
+```bash
+llm-gateway setup pi --dry-run
+llm-gateway setup pi --endpoint https://gateway.example.com/v1
+```
+
+完成后在 Pi 的 `/model` 中选择 `llm-gateway/coding`。
+
 ### 3. 配置 Claude Code
 
 #### Anthropic 兼容客户端
