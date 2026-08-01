@@ -51,12 +51,20 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 	}
 
 	var result []Provider
+	var unavailable []string
 	for _, name := range providerNames {
 		p, ok := r.providers[name]
 		if !ok {
-			return nil, fmt.Errorf("provider not found: %s", name)
+			unavailable = append(unavailable, name)
+			continue
 		}
 		result = append(result, p)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no available providers for model %s (configured: %v)", modelName, providerNames)
+	}
+	if len(unavailable) > 0 {
+		r.logger.Printf("Skipping unavailable providers for model %s: %v", modelName, unavailable)
 	}
 	return result, nil
 }

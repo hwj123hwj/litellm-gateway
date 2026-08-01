@@ -34,6 +34,32 @@ func TestToOpenAIRequestConvertsAnthropicTools(t *testing.T) {
 	}
 }
 
+func TestToOpenAIRequestPreservesToolChoice(t *testing.T) {
+	req := &Request{Model: "coding"}
+	if err := req.SetRawField("tool_choice", map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name": "openwiki_read_personal_history_batch",
+		},
+	}); err != nil {
+		t.Fatalf("set raw tool_choice: %v", err)
+	}
+
+	oai := toOpenAIRequest(req)
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(oai.ToolChoice, &choice); err != nil {
+		t.Fatalf("unmarshal forwarded tool_choice: %v", err)
+	}
+	if choice.Type != "function" || choice.Function.Name != "openwiki_read_personal_history_batch" {
+		t.Fatalf("expected tool_choice to be preserved, got %#v", choice)
+	}
+}
+
 func TestFromOpenAIResponseConvertsToolCalls(t *testing.T) {
 	resp := fromOpenAIResponse(&openAIResponse{
 		ID:    "chatcmpl_1",
