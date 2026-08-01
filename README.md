@@ -42,6 +42,25 @@ go build -o gateway . && ./gateway
 
 网关默认监听 `:4001`。
 
+## 配置 Pi
+
+安装并启动本地网关后，执行：
+
+```bash
+llm-gateway setup pi
+```
+
+该命令会合并更新 `~/.pi/agent/models.json`，注册 `llm-gateway` 自定义 Provider 和网关模型。它不会覆盖其他 Pi Provider，也不会复制网关主密钥；Pi 会在每次请求时通过 `llm-gateway auth print-master-key` 从网关自己的 `.env` 读取认证信息。
+
+可先预览变更，或为远程网关指定地址：
+
+```bash
+llm-gateway setup pi --dry-run
+llm-gateway setup pi --endpoint https://gateway.example.com/v1
+```
+
+然后在 Pi 中运行 `/model` 并选择 `llm-gateway/coding`。
+
 ### 添加新提供商
 
 无需修改代码！只需编辑 `providers.yaml` 文件：
