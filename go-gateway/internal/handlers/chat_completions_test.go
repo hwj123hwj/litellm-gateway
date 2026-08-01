@@ -293,6 +293,9 @@ func TestChatCompletionsHandlerStreamsToolCalls(t *testing.T) {
 	if !strings.Contains(bodyText, `"name":"get_weather"`) {
 		t.Fatalf("expected tool name get_weather, got %s", bodyText)
 	}
+	if strings.Contains(bodyText, `"name":""`) {
+		t.Fatalf("arguments-only tool chunks must omit the name field, got %s", bodyText)
+	}
 	if !strings.Contains(bodyText, `"arguments":"{\"city\":\"Beijing\"}"`) {
 		t.Fatalf("expected arguments string, got %s", bodyText)
 	}

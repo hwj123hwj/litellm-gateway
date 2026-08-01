@@ -39,6 +39,33 @@ func TestRouterRegisterChain(t *testing.T) {
 	}
 }
 
+func TestRouterSkipsUnavailableFallbackProviders(t *testing.T) {
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	router := NewRouter(logger)
+	router.RegisterProvider("glm", NewAnthropicProvider(&Config{
+		Name: "glm", URL: "https://api.example.com", APIKey: "test-key",
+	}))
+	router.RegisterChain("coding", []string{"glm", "ali"})
+
+	providers, err := router.Route("coding")
+	if err != nil {
+		t.Fatalf("Route() failed when only an optional fallback was unavailable: %v", err)
+	}
+	if len(providers) != 1 || providers[0].Name() != "glm" {
+		t.Fatalf("expected the available primary provider, got %#v", providers)
+	}
+}
+
+func TestRouterReturnsErrorWhenAllProvidersUnavailable(t *testing.T) {
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	router := NewRouter(logger)
+	router.RegisterChain("coding", []string{"glm", "ali"})
+
+	if _, err := router.Route("coding"); err == nil {
+		t.Fatal("expected an error when all configured providers are unavailable")
+	}
+}
+
 func TestRouterMapModelName(t *testing.T) {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	router := NewRouter(logger)
