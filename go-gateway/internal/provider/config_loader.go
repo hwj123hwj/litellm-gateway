@@ -28,7 +28,7 @@ type ModelConfig struct {
 
 // ProvidersConfig 提供商配置文件
 type ProvidersConfig struct {
-	Providers []ProviderConfig `yaml:"providers"`
+	Providers []ProviderConfig    `yaml:"providers"`
 	Chains    map[string][]string `yaml:"chains"`
 }
 
@@ -88,7 +88,7 @@ func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
 
 // NewOpenAIProviderFromConfig 从配置创建 OpenAI 提供商
 func NewOpenAIProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
-	apiKey := os.Getenv(cfg.APIKeyEnv)
+	apiKey := providerAPIKeyFromEnv(cfg.APIKeyEnv)
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key not found: %s", cfg.APIKeyEnv)
 	}
@@ -102,7 +102,7 @@ func NewOpenAIProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 
 // NewAnthropicProviderFromConfig 从配置创建 Anthropic 提供商
 func NewAnthropicProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
-	apiKey := os.Getenv(cfg.APIKeyEnv)
+	apiKey := providerAPIKeyFromEnv(cfg.APIKeyEnv)
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key not found: %s", cfg.APIKeyEnv)
 	}
@@ -112,6 +112,19 @@ func NewAnthropicProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 		URL:    cfg.URL,
 		APIKey: apiKey,
 	}), nil
+}
+
+func providerAPIKeyFromEnv(envKey string) string {
+	keys := []string{envKey}
+	if envKey == "ALI_API_KEY" {
+		keys = append(keys, "ALIYUN_MAAS_API_KEY", "DASHSCOPE_API_KEY")
+	}
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // SetupProvidersFromConfig 从配置文件设置提供商和路由

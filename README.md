@@ -213,7 +213,7 @@ litellm-gateway/
 |------|------|------|
 | `LITELLM_MASTER_KEY` | 是 | 网关认证 token |
 | `GLM_API_KEY` | 否 | 智谱 API key |
-| `DASHSCOPE_API_KEY` / `ALI_API_KEY` | 否 | 阿里 MaaS (qwen3.8-max-preview) API key |
+| `ALI_API_KEY`（兼容 `ALIYUN_MAAS_API_KEY` / `DASHSCOPE_API_KEY`） | 否 | 阿里 MaaS (qwen3.8-max-preview) API key |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |

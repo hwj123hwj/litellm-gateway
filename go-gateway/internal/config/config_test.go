@@ -44,3 +44,18 @@ func TestLoadDefaultPort(t *testing.T) {
 		t.Errorf("Expected default port 4000, got %d", cfg.Port)
 	}
 }
+
+func TestLoadAliAPIKeyFallsBackToLegacyNames(t *testing.T) {
+	t.Setenv("LITELLM_MASTER_KEY", "test-key")
+	t.Setenv("ALI_API_KEY", "")
+	t.Setenv("DASHSCOPE_API_KEY", "")
+	t.Setenv("ALIYUN_MAAS_API_KEY", "legacy-ali-key")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if cfg.AliAPIKey != "legacy-ali-key" {
+		t.Fatalf("expected legacy Ali key to be loaded, got %q", cfg.AliAPIKey)
+	}
+}
