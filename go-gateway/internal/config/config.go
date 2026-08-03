@@ -33,7 +33,7 @@ func Load() (*Config, error) {
 		MasterKey:          getEnv("LITELLM_MASTER_KEY", ""),
 		AdminToken:         getEnv("ADMIN_TOKEN", ""),
 		GLMAPIKey:          getEnv("GLM_API_KEY", ""),
-		AliAPIKey:          getEnv("ALI_API_KEY", ""),
+		AliAPIKey:          getAliAPIKey(),
 		CopilotToken:       getEnv("COPILOT_TOKEN", ""),
 		CopilotGithubToken: getEnv("COPILOT_GITHUB_TOKEN", ""),
 		HTTPProxy:          getEnv("HTTP_PROXY", ""),
@@ -52,6 +52,23 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// getAliAPIKey keeps the documented ALI_API_KEY name authoritative while
+// accepting names used by older local gateway installations. The provider
+// config loader uses the same fallback so providers.yaml and the default
+// registration path behave consistently.
+func getAliAPIKey() string {
+	for _, key := range []string{
+		"ALI_API_KEY",
+		"ALIYUN_MAAS_API_KEY",
+		"DASHSCOPE_API_KEY",
+	} {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func getEnvInt(key string, defaultValue int) int {
