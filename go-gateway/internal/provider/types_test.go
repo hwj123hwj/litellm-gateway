@@ -48,6 +48,21 @@ func TestResponseContentIsSlice(t *testing.T) {
 	}
 }
 
+func TestContentBlockMarshalPreservesToolResultContent(t *testing.T) {
+	block := ContentBlock{Type: "tool_result", ToolUseID: "call_1", ContentStr: "sunny"}
+	data, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("marshal tool result: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("decode tool result: %v", err)
+	}
+	if decoded["content"] != "sunny" {
+		t.Fatalf("expected tool result content, got %s", data)
+	}
+}
+
 func TestConfigValidation(t *testing.T) {
 	cfg := &Config{
 		Name:      "test",

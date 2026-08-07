@@ -93,6 +93,26 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/messages` | POST | Bearer | `/v1/messages` 的短路径兼容别名 |
 | `/responses` | POST | Bearer | `/v1/responses` 的短路径兼容别名 |
 
+### 模型能力与多模态
+
+`GET /v1/models` 除了标准模型字段，还会返回 `capabilities`、`input_modalities`、`protocol` 和可选的 token 上限。网关会在转发前按这些能力筛选路由：如果请求包含图片而目标模型没有 `vision`，返回明确的 `400`，不会把图片静默降成文本或错误 fallback 到文本模型。
+
+当前配置中：
+
+- `glm-sonnet` 绑定文本模型 `glm-5-turbo`，不是视觉模型；
+- `glm-vision` 绑定 `glm-5v-turbo`，用于文本+图片/视频/文件请求；
+- 图片请求使用 OpenAI `image_url` content block，网关会保留原始块和 `extra_body`/`thinking` 等扩展字段。
+
+配置新模型时建议显式声明能力：
+
+```yaml
+models:
+  - id: glm-5v-turbo
+    aliases: [glm-vision]
+    capabilities: [text, vision, video, file, tool_calling, streaming, reasoning]
+    input_modalities: [text, image, video, file]
+```
+
 ### 日志查看
 
 ```bash

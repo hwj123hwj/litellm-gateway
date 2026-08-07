@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 )
 
@@ -11,6 +12,7 @@ import (
 type Router struct {
 	providers map[string]Provider
 	chains    map[string][]string // 模型名 -> 提供商名列表
+	models    map[string]ModelInfo
 	mu        sync.RWMutex
 	logger    *log.Logger
 }
@@ -20,6 +22,7 @@ func NewRouter(logger *log.Logger) *Router {
 	return &Router{
 		providers: make(map[string]Provider),
 		chains:    make(map[string][]string),
+		models:    make(map[string]ModelInfo),
 		logger:    logger,
 	}
 }
@@ -36,8 +39,59 @@ func (r *Router) RegisterProvider(name string, p Provider) {
 func (r *Router) RegisterChain(modelName string, providers []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.chains[modelName] = providers
+	r.chains[modelName] = append([]string(nil), providers...)
+	if _, exists := r.models[modelName]; !exists {
+		r.models[modelName] = r.inferChainModelInfoLocked(modelName, providers)
+	}
 	r.logger.Printf("Registered chain: %s -> %v", modelName, providers)
+}
+
+func (r *Router) inferChainModelInfoLocked(modelName string, providerNames []string) ModelInfo {
+	capabilities := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, providerName := range providerNames {
+		configured, exists := r.providers[providerName]
+		if !exists {
+			continue
+		}
+		declared := []string{CapabilityText}
+		if capable, ok := configured.(CapabilityProvider); ok {
+			declared = capable.Capabilities()
+		}
+		for _, capability := range declared {
+			if capability == "" || seen[capability] {
+				continue
+			}
+			seen[capability] = true
+			capabilities = append(capabilities, capability)
+		}
+	}
+	if len(capabilities) == 0 {
+		capabilities = []string{CapabilityText}
+	}
+	return ModelInfo{
+		ID:              modelName,
+		Provider:        "router",
+		Capabilities:    capabilities,
+		InputModalities: modelInputModalities(capabilities, nil),
+	}
+}
+
+// RegisterModel records public metadata for a model or alias. It is separate
+// from RegisterChain so routing remains compatible with manually registered
+// providers while /v1/models can expose capabilities and limits.
+func (r *Router) RegisterModel(info ModelInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if info.ID == "" {
+		return
+	}
+	if len(info.Capabilities) == 0 {
+		info.Capabilities = []string{CapabilityText}
+	}
+	info.Capabilities = append([]string(nil), info.Capabilities...)
+	info.InputModalities = append([]string(nil), info.InputModalities...)
+	r.models[info.ID] = info
 }
 
 // Route 返回模型对应的提供商链
@@ -69,14 +123,46 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 	return result, nil
 }
 
+// RouteForRequest applies capability filtering before a request reaches a
+// provider. If no configured provider supports the request, returning a client
+// error is safer than dropping an image and retrying a text-only provider.
+func (r *Router) RouteForRequest(modelName string, req *Request) ([]Provider, error) {
+	providers, err := r.Route(modelName)
+	if err != nil {
+		return nil, err
+	}
+	if req == nil {
+		return providers, nil
+	}
+	required := req.RequiredCapabilities()
+	filtered := make([]Provider, 0, len(providers))
+	for _, p := range providers {
+		if supportsCapabilities(p, required) {
+			filtered = append(filtered, p)
+			continue
+		}
+		r.logger.Printf("Skipping provider %s for model %s: unsupported capabilities %v", p.Name(), modelName, required)
+	}
+	if len(filtered) == 0 {
+		return nil, &UnsupportedCapabilityError{Model: modelName, Required: required}
+	}
+	return filtered, nil
+}
+
 // RouteForStream 返回流式请求的提供商链（功能同 Route，供 handler 使用）
 func (r *Router) RouteForStream(modelName string) ([]Provider, error) {
 	return r.Route(modelName)
 }
 
+// RouteForStreamRequest is the capability-aware variant used by streaming
+// handlers. RouteForStream is retained for callers that only know the model.
+func (r *Router) RouteForStreamRequest(modelName string, req *Request) ([]Provider, error) {
+	return r.RouteForRequest(modelName, req)
+}
+
 // Forward 转发请求，带 fallback 逻辑（非流式）
 func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*Response, error) {
-	providers, err := r.Route(modelName)
+	providers, err := r.RouteForRequest(modelName, req)
 	if err != nil {
 		return nil, err
 	}
@@ -105,33 +191,33 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 	return nil, fmt.Errorf("all providers failed, last error: %w", lastErr)
 }
 
-	// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 providers.yaml）
-	// 仅在默认 setup 路径（无 providers.yaml）下使用
-	func (r *Router) mapModelName(modelName, providerName string) string {
-		mappings := map[string]map[string]string{
-			// GLM 核心：保留 haiku/sonnet/opus 别名
-			"glm-opus":     {"glm": "glm-5.2"},
-			"glm-sonnet":   {"glm": "glm-5-turbo"},
-			"glm-haiku":    {"glm": "glm-4.7"},
-			// MiMo 核心：保留 haiku/sonnet/opus 别名
-			"mimo-sonnet": {"mimo": "mimo-v2.5"},
-			"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
-			// LongCat 核心：保留 opus 别名
-			"longcat-opus": {"longcat": "LongCat-2.0-Preview"},
-			// EasyClaw：供应商+模型名
-			"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
-			"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
-			// DeepV Server：供应商+模型名（加 deepv- 前缀）
-			"deepv-deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
-			"deepv-deepseek-pro":   {"deepv-deepseek-pro": "deepseek-v4-pro"},
-			"deepv-glm5":           {"deepv-glm5": "glm-5"},
-			"deepv-claude-sonnet":  {"deepv-claude": "claude-sonnet-4-6"},
-			"deepv-kimi":           {"deepv-kimi": "kimi-k2.6"},
-			// GitHub Copilot（免费教育套餐，仅支持 GPT 系列模型）
-			"copilot-opus":   {"copilot": "gpt-4.1"},
-			"copilot-sonnet": {"copilot": "gpt-4o-2024-11-20"},
-			"copilot-haiku":  {"copilot": "gpt-4o-mini"},
-		}
+// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 providers.yaml）
+// 仅在默认 setup 路径（无 providers.yaml）下使用
+func (r *Router) mapModelName(modelName, providerName string) string {
+	mappings := map[string]map[string]string{
+		// GLM 核心：保留 haiku/sonnet/opus 别名
+		"glm-opus":   {"glm": "glm-5.2"},
+		"glm-sonnet": {"glm": "glm-5-turbo"},
+		"glm-haiku":  {"glm": "glm-4.7"},
+		// MiMo 核心：保留 haiku/sonnet/opus 别名
+		"mimo-sonnet": {"mimo": "mimo-v2.5"},
+		"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
+		// LongCat 核心：保留 opus 别名
+		"longcat-opus": {"longcat": "LongCat-2.0-Preview"},
+		// EasyClaw：供应商+模型名
+		"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
+		"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
+		// DeepV Server：供应商+模型名（加 deepv- 前缀）
+		"deepv-deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
+		"deepv-deepseek-pro":   {"deepv-deepseek-pro": "deepseek-v4-pro"},
+		"deepv-glm5":           {"deepv-glm5": "glm-5"},
+		"deepv-claude-sonnet":  {"deepv-claude": "claude-sonnet-4-6"},
+		"deepv-kimi":           {"deepv-kimi": "kimi-k2.6"},
+		// GitHub Copilot（免费教育套餐，仅支持 GPT 系列模型）
+		"copilot-opus":   {"copilot": "gpt-4.1"},
+		"copilot-sonnet": {"copilot": "gpt-4o-2024-11-20"},
+		"copilot-haiku":  {"copilot": "gpt-4o-mini"},
+	}
 
 	if mapping, ok := mappings[modelName]; ok {
 		if actualModel, ok := mapping[providerName]; ok {
@@ -166,4 +252,19 @@ func (r *Router) ListChains() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// ListModelInfos returns a stable snapshot for /v1/models and admin tooling.
+func (r *Router) ListModelInfos() []ModelInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]ModelInfo, 0, len(r.models))
+	for _, info := range r.models {
+		info.Capabilities = append([]string(nil), info.Capabilities...)
+		info.InputModalities = append([]string(nil), info.InputModalities...)
+		result = append(result, info)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
 }

@@ -30,7 +30,7 @@ type openAIToolCall struct {
 
 type openAIMessage struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content"`
+	Content    any              `json:"content,omitempty"`
 	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"` // for tool result messages
 }
@@ -41,16 +41,43 @@ type chatTemplateKwargs struct {
 }
 
 type openAIRequest struct {
-	Model              string              `json:"model"`
-	Messages           []openAIMessage     `json:"messages"`
-	MaxTokens          int                 `json:"max_tokens,omitempty"`
-	Temperature        float64             `json:"temperature,omitempty"`
-	TopP               float64             `json:"top_p,omitempty"`
-	TopK               int                 `json:"top_k,omitempty"`
-	Stream             bool                `json:"stream,omitempty"`
-	Tools              []openAITool        `json:"tools,omitempty"`
-	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
-	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
+	Model               string                     `json:"model"`
+	Messages            []openAIMessage            `json:"messages"`
+	MaxTokens           int                        `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                        `json:"max_completion_tokens,omitempty"`
+	Temperature         float64                    `json:"temperature,omitempty"`
+	TopP                float64                    `json:"top_p,omitempty"`
+	TopK                int                        `json:"top_k,omitempty"`
+	Stream              bool                       `json:"stream,omitempty"`
+	Tools               []openAITool               `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage            `json:"tool_choice,omitempty"`
+	Thinking            json.RawMessage            `json:"thinking,omitempty"`
+	ReasoningEffort     string                     `json:"reasoning_effort,omitempty"`
+	ExtraBody           json.RawMessage            `json:"extra_body,omitempty"`
+	ResponseFormat      json.RawMessage            `json:"response_format,omitempty"`
+	StreamOptions       json.RawMessage            `json:"stream_options,omitempty"`
+	ChatTemplateKwargs  *chatTemplateKwargs        `json:"chat_template_kwargs,omitempty"`
+	ExtraFields         map[string]json.RawMessage `json:"-"`
+}
+
+func (r openAIRequest) MarshalJSON() ([]byte, error) {
+	type alias openAIRequest
+	knownJSON, err := json.Marshal(alias(r))
+	if err != nil {
+		return nil, err
+	}
+	var known map[string]json.RawMessage
+	if err := json.Unmarshal(knownJSON, &known); err != nil {
+		return nil, err
+	}
+	out := make(map[string]json.RawMessage, len(r.ExtraFields)+len(known))
+	for key, value := range r.ExtraFields {
+		out[key] = append(json.RawMessage(nil), value...)
+	}
+	for key, value := range known {
+		out[key] = value
+	}
+	return json.Marshal(out)
 }
 
 // openAITool 是 OpenAI 格式的工具定义
@@ -117,10 +144,10 @@ type openAIStreamChunk struct {
 
 // openAIStreamUsage 流式 chunk 中的 usage（最后一条 chunk 携带）
 type openAIStreamUsage struct {
-	PromptTokens        int                       `json:"prompt_tokens"`
-	CompletionTokens    int                       `json:"completion_tokens"`
-	TotalTokens         int                       `json:"total_tokens"`
-	PromptTokensDetails *promptTokensDetails      `json:"prompt_tokens_details,omitempty"`
+	PromptTokens        int                  `json:"prompt_tokens"`
+	CompletionTokens    int                  `json:"completion_tokens"`
+	TotalTokens         int                  `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 type promptTokensDetails struct {
@@ -363,11 +390,11 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 
 	// 重建 system 消息（toProviderRequest 提取到了 raw["system"]，不在 Messages 里）
 	if sysRaw, ok := req.raw["system"]; ok {
-		var sysText string
-		if err := json.Unmarshal(sysRaw, &sysText); err == nil && sysText != "" {
+		var sysContent any
+		if err := json.Unmarshal(sysRaw, &sysContent); err == nil && sysContent != nil {
 			msgs = append(msgs, openAIMessage{
 				Role:    "system",
-				Content: sysText,
+				Content: sysContent,
 			})
 		}
 	}
@@ -381,24 +408,45 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 				continue
 			}
 
-			var textParts []string
-			flushUserText := func() {
-				if len(textParts) == 0 {
+			var contentParts []json.RawMessage
+			flushUserContent := func() {
+				if len(contentParts) == 0 {
 					return
+				}
+				content := any(nil)
+				allText := true
+				var textParts []string
+				for _, part := range contentParts {
+					var textBlock struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					}
+					if err := json.Unmarshal(part, &textBlock); err != nil || textBlock.Type != "text" {
+						allText = false
+						break
+					}
+					textParts = append(textParts, textBlock.Text)
+				}
+				if allText {
+					content = strings.Join(textParts, "")
+				} else {
+					content = contentParts
 				}
 				msgs = append(msgs, openAIMessage{
 					Role:    "user",
-					Content: strings.Join(textParts, ""),
+					Content: content,
 				})
-				textParts = nil
+				contentParts = nil
 			}
 
 			for _, b := range blocks {
 				switch b.Type {
 				case "text":
-					textParts = append(textParts, b.Text)
+					if part := openAIContentPart(b); len(part) > 0 {
+						contentParts = append(contentParts, part)
+					}
 				case "tool_result":
-					flushUserText()
+					flushUserContent()
 
 					var resultParts []string
 					for _, inner := range b.ContentBlocks {
@@ -419,10 +467,14 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 						Content:    resultContent,
 						ToolCallID: b.ToolUseID,
 					})
+				default:
+					if part := openAIContentPart(b); len(part) > 0 {
+						contentParts = append(contentParts, part)
+					}
 				}
 			}
 
-			flushUserText()
+			flushUserContent()
 		case "assistant":
 			// assistant 消息：可能含 text 和 tool_use block
 			// OpenAI 格式：tool_use 写进 ToolCalls，text 写进 Content
@@ -461,9 +513,17 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 	}
 
 	oaiReq := &openAIRequest{
-		Model:     req.Model,
-		Messages:  msgs,
-		MaxTokens: req.MaxTokens,
+		Model:       req.Model,
+		Messages:    msgs,
+		MaxTokens:   req.MaxTokens,
+		ExtraFields: make(map[string]json.RawMessage),
+	}
+	for key, value := range req.raw {
+		switch key {
+		case "messages", "system", "tools":
+			continue
+		}
+		oaiReq.ExtraFields[key] = append(json.RawMessage(nil), value...)
 	}
 
 	// 透传额外字段（例如 skyclaw 的 top_k、chat_template_kwargs 等）
@@ -481,6 +541,24 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 	}
 	if v, ok := req.raw["tool_choice"]; ok {
 		oaiReq.ToolChoice = v
+	}
+	if v, ok := req.raw["thinking"]; ok {
+		oaiReq.Thinking = append(json.RawMessage(nil), v...)
+	}
+	if v, ok := req.raw["reasoning_effort"]; ok {
+		_ = json.Unmarshal(v, &oaiReq.ReasoningEffort)
+	}
+	if v, ok := req.raw["extra_body"]; ok {
+		oaiReq.ExtraBody = append(json.RawMessage(nil), v...)
+	}
+	if v, ok := req.raw["response_format"]; ok {
+		oaiReq.ResponseFormat = append(json.RawMessage(nil), v...)
+	}
+	if v, ok := req.raw["stream_options"]; ok {
+		oaiReq.StreamOptions = append(json.RawMessage(nil), v...)
+	}
+	if v, ok := req.raw["max_completion_tokens"]; ok {
+		_ = json.Unmarshal(v, &oaiReq.MaxCompletionTokens)
 	}
 
 	// 转换 tools：Anthropic input_schema → OpenAI parameters
@@ -507,6 +585,101 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 	return oaiReq
 }
 
+// openAIContentPart converts one internal non-text block without reducing it
+// to text. Raw blocks from an OpenAI request are emitted unchanged so fields
+// added by a compatible provider are not lost in the round trip.
+func openAIContentPart(block ContentBlock) json.RawMessage {
+	if block.Type == "image" && len(block.Source) > 0 {
+		var source struct {
+			Type      string `json:"type"`
+			MediaType string `json:"media_type"`
+			Data      string `json:"data"`
+			URL       string `json:"url"`
+		}
+		if err := json.Unmarshal(block.Source, &source); err == nil {
+			url := source.URL
+			if url == "" && source.Data != "" {
+				mediaType := source.MediaType
+				if mediaType == "" {
+					mediaType = "image/*"
+				}
+				url = "data:" + mediaType + ";base64," + source.Data
+			}
+			if url != "" {
+				data, _ := json.Marshal(map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": url},
+				})
+				return data
+			}
+		}
+	}
+	if len(block.Raw) > 0 {
+		var responseBlock struct {
+			Type     string          `json:"type"`
+			Text     string          `json:"text"`
+			ImageURL json.RawMessage `json:"image_url"`
+			Detail   string          `json:"detail"`
+		}
+		if json.Unmarshal(block.Raw, &responseBlock) == nil {
+			switch responseBlock.Type {
+			case "input_text", "output_text":
+				data, _ := json.Marshal(map[string]any{
+					"type": "text",
+					"text": responseBlock.Text,
+				})
+				return data
+			case "input_image":
+				var imageURL any
+				var url string
+				if json.Unmarshal(responseBlock.ImageURL, &url) == nil {
+					image := map[string]any{"url": url}
+					if responseBlock.Detail != "" {
+						image["detail"] = responseBlock.Detail
+					}
+					imageURL = image
+				} else {
+					var image map[string]any
+					if json.Unmarshal(responseBlock.ImageURL, &image) == nil {
+						if responseBlock.Detail != "" && image["detail"] == nil {
+							image["detail"] = responseBlock.Detail
+						}
+						imageURL = image
+					}
+				}
+				if imageURL != nil {
+					data, _ := json.Marshal(map[string]any{
+						"type":      "image_url",
+						"image_url": imageURL,
+					})
+					return data
+				}
+			}
+		}
+		return append(json.RawMessage(nil), block.Raw...)
+	}
+	var value any
+	switch block.Type {
+	case "text":
+		value = map[string]any{"type": block.Type, "text": block.Text}
+	case "image_url":
+		value = map[string]any{"type": block.Type, "image_url": json.RawMessage(block.ImageURL)}
+	case "video_url":
+		value = map[string]any{"type": block.Type, "video_url": json.RawMessage(block.VideoURL)}
+	case "file", "file_url":
+		value = map[string]any{"type": block.Type, "file": json.RawMessage(block.File)}
+	case "input_audio", "audio":
+		value = map[string]any{"type": block.Type, "input_audio": json.RawMessage(block.InputAudio)}
+	default:
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 func fromOpenAIResponse(oai *openAIResponse) *Response {
 	var blocks []ContentBlock
 	var stopReason string
@@ -516,8 +689,8 @@ func fromOpenAIResponse(oai *openAIResponse) *Response {
 		stopReason = mapFinishReason(choice.FinishReason)
 
 		// 文本内容
-		if choice.Message.Content != "" {
-			blocks = append(blocks, ContentBlock{Type: "text", Text: choice.Message.Content})
+		if content := openAIResponseContentText(choice.Message.Content); content != "" {
+			blocks = append(blocks, ContentBlock{Type: "text", Text: content})
 		}
 
 		// 工具调用：OpenAI tool_calls → Anthropic tool_use
@@ -551,6 +724,25 @@ func fromOpenAIResponse(oai *openAIResponse) *Response {
 	resp.Usage.InputTokens = oai.Usage.PromptTokens
 	resp.Usage.OutputTokens = oai.Usage.CompletionTokens
 	return resp
+}
+
+func openAIResponseContentText(content any) string {
+	switch value := content.(type) {
+	case string:
+		return value
+	case []any:
+		var text strings.Builder
+		for _, item := range value {
+			if block, ok := item.(map[string]any); ok {
+				if value, ok := block["text"].(string); ok {
+					text.WriteString(value)
+				}
+			}
+		}
+		return text.String()
+	default:
+		return ""
+	}
 }
 
 // mapFinishReason 把 OpenAI finish_reason 转成 Anthropic stop_reason

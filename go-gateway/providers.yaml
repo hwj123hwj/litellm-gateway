@@ -13,11 +13,26 @@ providers:
     models:
       - id: glm-5.2
         aliases: [glm-opus]
+        capabilities: [text, tool_calling, streaming, reasoning]
       - id: glm-5-turbo
         aliases: [glm-sonnet]
+        capabilities: [text, tool_calling, streaming, reasoning]
       - id: glm-4.7
         aliases: [glm-haiku]
+        capabilities: [text, tool_calling, streaming, reasoning]
       - id: glm-4.7-flash
+        capabilities: [text, tool_calling, streaming]
+
+  # GLM 视觉模型：不要复用 glm-sonnet（它绑定的是文本 GLM-5-Turbo）。
+  - name: glm-vision
+    type: openai
+    url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+    api_key_env: GLM_API_KEY
+    models:
+      - id: glm-5v-turbo
+        aliases: [glm-vision]
+        capabilities: [text, vision, video, file, tool_calling, streaming, reasoning]
+        input_modalities: [text, image, video, file]
 
   # 阿里 MaaS（Qwen 3.8 Max）
   - name: ali
@@ -27,6 +42,7 @@ providers:
     models:
       - id: qwen3.8-max-preview
         aliases: [ali-opus]
+        capabilities: [text, tool_calling, streaming, reasoning]
 
 
 chains:
@@ -37,7 +53,6 @@ chains:
   coding-anthropic:
     - glm-glm-5-turbo
     - ali-qwen3.8-max-preview
-
 
 
 

@@ -81,7 +81,7 @@ type inputItem struct {
 	// function_call_output 字段
 	Output string `json:"output,omitempty"`
 	// custom_tool_call 字段
-	ID   string `json:"id,omitempty"`
+	ID    string `json:"id,omitempty"`
 	Input string `json:"input,omitempty"` // custom tool 的 input 是字符串
 }
 
@@ -96,13 +96,13 @@ type responsesTool struct {
 
 // responsesResponse 是 OpenAI Responses API 响应格式
 type responsesResponse struct {
-	ID        string          `json:"id"`
-	Object    string          `json:"object"` // "response"
-	CreatedAt int64           `json:"created_at"`
-	Status    string          `json:"status"` // "completed", "incomplete", "failed"
-	Model     string          `json:"model"`
-	Output    []outputItem    `json:"output"`
-	Usage     responsesUsage  `json:"usage"`
+	ID        string         `json:"id"`
+	Object    string         `json:"object"` // "response"
+	CreatedAt int64          `json:"created_at"`
+	Status    string         `json:"status"` // "completed", "incomplete", "failed"
+	Model     string         `json:"model"`
+	Output    []outputItem   `json:"output"`
+	Usage     responsesUsage `json:"usage"`
 }
 
 type responsesUsage struct {
@@ -193,7 +193,7 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 	resp, err := h.router.Forward(c.Request.Context(), providerReq.Model, providerReq)
 	if err != nil {
 		h.logger.Printf("Responses forward failed: %v", err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "server_error",
 		}})
@@ -274,8 +274,8 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 					Role: "user",
 					Content: provider.NewBlocksContent([]provider.ContentBlock{
 						{
-							Type:      "tool_result",
-							ToolUseID: item.CallID,
+							Type:       "tool_result",
+							ToolUseID:  item.CallID,
 							ContentStr: item.Output,
 						},
 					}),
@@ -327,8 +327,9 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 	return out, nil
 }
 
-// parseContentField 解析 Responses API 的 content 字段
-// 可能是字符串、input_text 数组、或 output_text 数组
+// parseContentField 解析 Responses API 的 content 字段。
+// 文本块和多模态块都保留到内部结构，避免 Responses → Chat/Anthropic
+// 转换时把 input_image、input_file 等内容压成空文本。
 func parseContentField(content json.RawMessage) provider.MessageContent {
 	if content == nil {
 		return provider.NewStringContent("")
@@ -340,17 +341,36 @@ func parseContentField(content json.RawMessage) provider.MessageContent {
 		return provider.NewStringContent(s)
 	}
 
-	// 尝试数组（input_text / output_text 格式）
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
+	// 尝试数组（input_text / input_image / input_file 等格式）。
+	var parts []json.RawMessage
 	if err := json.Unmarshal(content, &parts); err == nil {
-		var texts []string
-		for _, p := range parts {
-			texts = append(texts, p.Text)
+		blocks := make([]provider.ContentBlock, 0, len(parts))
+		for _, part := range parts {
+			var meta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(part, &meta); err != nil {
+				continue
+			}
+			switch meta.Type {
+			case "input_text", "output_text", "text":
+				blocks = append(blocks, provider.ContentBlock{Type: "text", Text: meta.Text})
+			case "input_image", "image_url":
+				blocks = append(blocks, provider.ContentBlock{Type: "image_url", Raw: append([]byte(nil), part...)})
+			case "input_file", "file", "file_url":
+				blocks = append(blocks, provider.ContentBlock{Type: "file", Raw: append([]byte(nil), part...)})
+			case "input_audio", "audio":
+				blocks = append(blocks, provider.ContentBlock{Type: "input_audio", Raw: append([]byte(nil), part...)})
+			default:
+				// Unknown blocks remain visible to capability validation and can be
+				// handled by a provider that understands the original shape.
+				blocks = append(blocks, provider.ContentBlock{Type: meta.Type, Raw: append([]byte(nil), part...)})
+			}
 		}
-		return provider.NewStringContent(strings.Join(texts, ""))
+		if len(blocks) > 0 {
+			return provider.NewBlocksContent(blocks)
+		}
 	}
 
 	return provider.NewStringContent(string(content))
