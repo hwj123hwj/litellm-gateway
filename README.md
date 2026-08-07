@@ -139,6 +139,7 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `coding-anthropic` | 智谱 GLM / 阿里 MaaS | Anthropic 风格，自动 fallback |
 | `glm-flash` | 智谱 GLM | 免费模型 |
 | `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
+| `glm-vision` | 智谱 GLM-5V-Turbo | 文本+图片/视频/文件识别 |
 | `glm-opus` | 智谱 GLM coding plan | 旗舰模型 |
 | `ali-opus` | 阿里 MaaS | Qwen 3.8 Max 旗舰模型 |
 

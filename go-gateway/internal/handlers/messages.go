@@ -57,16 +57,16 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) 
 	resp, err := h.router.Forward(c.Request.Context(), req.Model, req)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
 }
 
 func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
-	providerChain, err := h.router.RouteForStream(req.Model)
+	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 

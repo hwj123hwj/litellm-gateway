@@ -24,9 +24,9 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 		return
 	}
 
-	providerChain, err := h.router.RouteForStream(providerReq.Model)
+	providerChain, err := h.router.RouteForStreamRequest(providerReq.Model, providerReq)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "invalid_request_error",
 		}})
@@ -205,10 +205,10 @@ func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
 					"type":         "response.output_item.added",
 					"output_index": outputIndex,
 					"item": map[string]any{
-						"type":   "message",
-						"id":     fmt.Sprintf("msg_%d", outputIndex),
-						"status": "in_progress",
-						"role":   "assistant",
+						"type":    "message",
+						"id":      fmt.Sprintf("msg_%d", outputIndex),
+						"status":  "in_progress",
+						"role":    "assistant",
 						"content": []any{},
 					},
 				})
@@ -222,11 +222,11 @@ func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
 					"type":         "response.output_item.added",
 					"output_index": outputIndex,
 					"item": map[string]any{
-						"type":   "function_call",
-						"id":     fmt.Sprintf("fc_%s", evt.Block.ID),
+						"type":    "function_call",
+						"id":      fmt.Sprintf("fc_%s", evt.Block.ID),
 						"call_id": evt.Block.ID,
-						"name":   evt.Block.Name,
-						"status": "in_progress",
+						"name":    evt.Block.Name,
+						"status":  "in_progress",
 					},
 				})
 			}
@@ -254,10 +254,10 @@ func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
 				}
 				fullText.WriteString(evt.Delta.Text)
 				writeResponsesSSE(w, "response.output_text.delta", map[string]any{
-					"type":         "response.output_text.delta",
-					"output_index": outputIndex,
+					"type":          "response.output_text.delta",
+					"output_index":  outputIndex,
 					"content_index": 0,
-					"delta":        evt.Delta.Text,
+					"delta":         evt.Delta.Text,
 				})
 
 			case "input_json_delta":
@@ -306,12 +306,12 @@ func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
 					"type":         "response.output_item.done",
 					"output_index": outputIndex,
 					"item": map[string]any{
-						"type":   "function_call",
-						"id":     fmt.Sprintf("fc_%s", toolCallID),
-						"call_id": toolCallID,
-						"name":   toolCallName,
+						"type":      "function_call",
+						"id":        fmt.Sprintf("fc_%s", toolCallID),
+						"call_id":   toolCallID,
+						"name":      toolCallName,
 						"arguments": finalArgs,
-						"status": "completed",
+						"status":    "completed",
 					},
 				})
 				toolStarted = false

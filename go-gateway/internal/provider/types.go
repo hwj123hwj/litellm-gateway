@@ -84,10 +84,10 @@ type Message struct {
 // 所有字段保留为原始 JSON（raw map），仅解出 model/messages/stream/max_tokens
 // 用于路由和分发，其余字段（system数组、thinking、tools、context_management 等）原样透传。
 type Request struct {
-	Model     string    // 路由用，可能被改写
-	Messages  []Message // 路由用
-	MaxTokens int       // 路由用
-	Stream    bool      // 路由用
+	Model     string                     // 路由用，可能被改写
+	Messages  []Message                  // 路由用
+	MaxTokens int                        // 路由用
+	Stream    bool                       // 路由用
 	raw       map[string]json.RawMessage // 完整原始字段
 }
 
@@ -144,10 +144,22 @@ func (r *Request) RawField(key string) (json.RawMessage, bool) {
 	return v, ok
 }
 
-// ContentBlock 是 Anthropic content 数组中的一个元素，支持 text / tool_use / tool_result 等类型
+// ContentBlock 是网关内部的内容块。
+//
+// 这个结构保留了 OpenAI/Anthropic 常见的多模态字段。以前这里只保留
+// text/tool_use/tool_result，导致 OpenAI 的 image_url 在入口转换时被静默丢弃。
 type ContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+
+	// OpenAI 多模态块（image_url、video_url、file、input_audio 等）。
+	// 使用 RawMessage 是为了不限制不同兼容服务对字段内部结构的扩展。
+	ImageURL   json.RawMessage `json:"image_url,omitempty"`
+	VideoURL   json.RawMessage `json:"video_url,omitempty"`
+	File       json.RawMessage `json:"file,omitempty"`
+	InputAudio json.RawMessage `json:"input_audio,omitempty"`
+	Source     json.RawMessage `json:"source,omitempty"` // Anthropic image source
+
 	// tool_use 字段
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
@@ -160,21 +172,76 @@ type ContentBlock struct {
 	// thinking 字段（MiMo 思维链）
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
+
+	// Raw 保存入口收到的原始块，供同协议 provider 尽量无损地重新编码。
+	// 它不参与默认 JSON 输出，避免把内部元数据泄漏给上游。
+	Raw json.RawMessage `json:"-"`
+}
+
+func (c ContentBlock) MarshalJSON() ([]byte, error) {
+	if len(c.Raw) > 0 {
+		return c.Raw, nil
+	}
+	var content any
+	if len(c.ContentBlocks) > 0 {
+		content = c.ContentBlocks
+	} else if c.ContentStr != "" {
+		content = c.ContentStr
+	}
+	type serializedContentBlock struct {
+		Type       string          `json:"type"`
+		Text       string          `json:"text,omitempty"`
+		ImageURL   json.RawMessage `json:"image_url,omitempty"`
+		VideoURL   json.RawMessage `json:"video_url,omitempty"`
+		File       json.RawMessage `json:"file,omitempty"`
+		InputAudio json.RawMessage `json:"input_audio,omitempty"`
+		Source     json.RawMessage `json:"source,omitempty"`
+		ID         string          `json:"id,omitempty"`
+		Name       string          `json:"name,omitempty"`
+		Input      json.RawMessage `json:"input,omitempty"`
+		ToolUseID  string          `json:"tool_use_id,omitempty"`
+		Content    any             `json:"content,omitempty"`
+		IsError    bool            `json:"is_error,omitempty"`
+		Thinking   string          `json:"thinking,omitempty"`
+		Signature  string          `json:"signature,omitempty"`
+	}
+	return json.Marshal(serializedContentBlock{
+		Type:       c.Type,
+		Text:       c.Text,
+		ImageURL:   c.ImageURL,
+		VideoURL:   c.VideoURL,
+		File:       c.File,
+		InputAudio: c.InputAudio,
+		Source:     c.Source,
+		ID:         c.ID,
+		Name:       c.Name,
+		Input:      c.Input,
+		ToolUseID:  c.ToolUseID,
+		Content:    content,
+		IsError:    c.IsError,
+		Thinking:   c.Thinking,
+		Signature:  c.Signature,
+	})
 }
 
 func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 	// 用 alias 类型避免递归
 	type Alias struct {
-		Type      string          `json:"type"`
-		Text      string          `json:"text"`
-		ID        string          `json:"id"`
-		Name      string          `json:"name"`
-		Input     json.RawMessage `json:"input"`
-		ToolUseID string          `json:"tool_use_id"`
-		IsError   bool            `json:"is_error"`
-		Content   json.RawMessage `json:"content"`
-		Thinking  string          `json:"thinking"`
-		Signature string          `json:"signature"`
+		Type       string          `json:"type"`
+		Text       string          `json:"text"`
+		ImageURL   json.RawMessage `json:"image_url"`
+		VideoURL   json.RawMessage `json:"video_url"`
+		File       json.RawMessage `json:"file"`
+		InputAudio json.RawMessage `json:"input_audio"`
+		Source     json.RawMessage `json:"source"`
+		ID         string          `json:"id"`
+		Name       string          `json:"name"`
+		Input      json.RawMessage `json:"input"`
+		ToolUseID  string          `json:"tool_use_id"`
+		IsError    bool            `json:"is_error"`
+		Content    json.RawMessage `json:"content"`
+		Thinking   string          `json:"thinking"`
+		Signature  string          `json:"signature"`
 	}
 	var a Alias
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -182,6 +249,11 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 	}
 	c.Type = a.Type
 	c.Text = a.Text
+	c.ImageURL = a.ImageURL
+	c.VideoURL = a.VideoURL
+	c.File = a.File
+	c.InputAudio = a.InputAudio
+	c.Source = a.Source
 	c.ID = a.ID
 	c.Name = a.Name
 	c.Input = a.Input
@@ -189,6 +261,7 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 	c.IsError = a.IsError
 	c.Thinking = a.Thinking
 	c.Signature = a.Signature
+	c.Raw = append(c.Raw[:0], data...)
 
 	// 处理 tool_result 的 content 字段（字符串或数组）
 	if a.Content != nil {
@@ -208,8 +281,8 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 // Response 是 Anthropic API 响应体（对齐真实 Anthropic 格式）
 type Response struct {
 	ID           string         `json:"id"`
-	Type         string         `json:"type"`     // "message"
-	Role         string         `json:"role"`     // "assistant"
+	Type         string         `json:"type"` // "message"
+	Role         string         `json:"role"` // "assistant"
 	Model        string         `json:"model"`
 	Content      []ContentBlock `json:"content"` // 数组，非对象
 	StopReason   string         `json:"stop_reason"`

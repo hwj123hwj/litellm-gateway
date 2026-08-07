@@ -22,10 +22,10 @@ type stubChatProvider struct {
 	lastReq    *provider.Request
 }
 
-func (p *stubChatProvider) Name() string                    { return p.name }
-func (p *stubChatProvider) URL() string                     { return "http://example.com" }
-func (p *stubChatProvider) APIKey() string                  { return "" }
-func (p *stubChatProvider) UseBearer() bool                 { return true }
+func (p *stubChatProvider) Name() string                     { return p.name }
+func (p *stubChatProvider) URL() string                      { return "http://example.com" }
+func (p *stubChatProvider) APIKey() string                   { return "" }
+func (p *stubChatProvider) UseBearer() bool                  { return true }
 func (p *stubChatProvider) IsHealthy(_ context.Context) bool { return true }
 func (p *stubChatProvider) ForwardRequest(_ context.Context, req *provider.Request) (*provider.Response, error) {
 	p.lastReq = req
@@ -177,6 +177,90 @@ func TestChatCompletionsHandlerConvertsSystemAndToolMessages(t *testing.T) {
 	}
 	if choice["finish_reason"] != "tool_calls" {
 		t.Fatalf("expected finish_reason tool_calls, got %#v", choice["finish_reason"])
+	}
+}
+
+func TestChatCompletionsHandlerPreservesImageContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	stub := &stubChatProvider{
+		name: "vision-stub",
+		resp: &provider.Response{
+			ID:         "msg_vision",
+			Type:       "message",
+			Role:       "assistant",
+			Model:      "glm-5v-turbo",
+			StopReason: "end_turn",
+			Content:    []provider.ContentBlock{{Type: "text", Text: "cat"}},
+		},
+	}
+	router.RegisterProvider("vision", stub)
+	router.RegisterChain("glm-vision", []string{"vision"})
+
+	handler := NewChatCompletionsHandler(router, logger)
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", handler.Handle)
+	body := `{"model":"glm-vision","messages":[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if stub.lastReq == nil || len(stub.lastReq.Messages) != 1 {
+		t.Fatalf("expected one provider message, got %#v", stub.lastReq)
+	}
+	blocks := stub.lastReq.Messages[0].Content.Blocks()
+	if len(blocks) != 2 || blocks[1].Type != "image_url" {
+		t.Fatalf("expected text + image_url blocks, got %#v", blocks)
+	}
+	if len(blocks[1].ImageURL) == 0 || len(blocks[1].Raw) == 0 {
+		t.Fatalf("expected image payload to be retained, got %#v", blocks[1])
+	}
+}
+
+func TestChatCompletionsHandlerRejectsImageForTextOnlyModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	stub := &stubChatProvider{
+		name: "text-only",
+		resp: &provider.Response{
+			ID:         "must_not_be_called",
+			Type:       "message",
+			Role:       "assistant",
+			StopReason: "end_turn",
+		},
+	}
+	router.RegisterProvider("text", provider.NewBoundModelProviderWrapper(
+		stub,
+		"text-model",
+		[]string{provider.CapabilityText, provider.CapabilityStreaming},
+	))
+	router.RegisterChain("glm-sonnet", []string{"text"})
+
+	handler := NewChatCompletionsHandler(router, logger)
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", handler.Handle)
+	body := `{"model":"glm-sonnet","messages":[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if stub.lastReq != nil {
+		t.Fatal("text-only provider must not receive an image request")
+	}
+	if !strings.Contains(w.Body.String(), "vision") {
+		t.Fatalf("expected unsupported vision detail, got %s", w.Body.String())
 	}
 }
 

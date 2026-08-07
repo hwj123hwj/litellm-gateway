@@ -21,11 +21,11 @@ type openAIChatCompletionsHandler struct {
 }
 
 type openAIChatCompletionsRequest struct {
-	Model     string                `json:"model"`
-	Messages  []openAIChatMessage   `json:"messages"`
-	MaxTokens int                   `json:"max_tokens,omitempty"`
-	Stream    bool                  `json:"stream,omitempty"`
-	Tools     []openAIChatTool      `json:"tools,omitempty"`
+	Model     string              `json:"model"`
+	Messages  []openAIChatMessage `json:"messages"`
+	MaxTokens int                 `json:"max_tokens,omitempty"`
+	Stream    bool                `json:"stream,omitempty"`
+	Tools     []openAIChatTool    `json:"tools,omitempty"`
 	raw       map[string]json.RawMessage
 }
 
@@ -44,8 +44,32 @@ type openAIMessageContent struct {
 }
 
 type openAIContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type       string          `json:"type"`
+	Text       string          `json:"text,omitempty"`
+	ImageURL   json.RawMessage `json:"image_url,omitempty"`
+	VideoURL   json.RawMessage `json:"video_url,omitempty"`
+	File       json.RawMessage `json:"file,omitempty"`
+	InputAudio json.RawMessage `json:"input_audio,omitempty"`
+	Raw        json.RawMessage `json:"-"`
+}
+
+func (b *openAIContentBlock) UnmarshalJSON(data []byte) error {
+	type alias openAIContentBlock
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*b = openAIContentBlock(decoded)
+	b.Raw = append(b.Raw[:0], data...)
+	return nil
+}
+
+func (b openAIContentBlock) MarshalJSON() ([]byte, error) {
+	if len(b.Raw) > 0 {
+		return b.Raw, nil
+	}
+	type alias openAIContentBlock
+	return json.Marshal(alias(b))
 }
 
 func (c openAIMessageContent) String() string {
@@ -148,10 +172,10 @@ type openAIStreamChunkResponse struct {
 
 // openAIStreamUsage 流式最后一个 chunk 的 usage 字段
 type openAIStreamUsage struct {
-	PromptTokens        int                    `json:"prompt_tokens"`
-	CompletionTokens    int                    `json:"completion_tokens"`
-	TotalTokens         int                    `json:"total_tokens"`
-	PromptTokensDetails *promptTokensDetails   `json:"prompt_tokens_details,omitempty"`
+	PromptTokens        int                  `json:"prompt_tokens"`
+	CompletionTokens    int                  `json:"completion_tokens"`
+	TotalTokens         int                  `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 type promptTokensDetails struct {
@@ -220,7 +244,7 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	resp, err := h.router.Forward(c.Request.Context(), providerReq.Model, providerReq)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 
@@ -231,9 +255,9 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 }
 
 func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provider.Request) {
-	providerChain, err := h.router.RouteForStream(req.Model)
+	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 
@@ -294,7 +318,7 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 		Stream:    req.Stream,
 	}
 	for key, raw := range req.raw {
-		if key == "messages" || key == "tools" || key == "model" || key == "max_tokens" || key == "stream" || key == "stream_options" {
+		if key == "messages" || key == "tools" || key == "model" || key == "max_tokens" || key == "stream" {
 			continue
 		}
 		var decoded any
@@ -321,9 +345,18 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 				}}),
 			})
 		default:
-			blocks := make([]provider.ContentBlock, 0, len(msg.Content.TextBlocks())+len(msg.ToolCalls))
-			for _, tb := range msg.Content.TextBlocks() {
-				blocks = append(blocks, provider.ContentBlock{Type: "text", Text: tb.Text})
+			contentBlocks := msg.Content.TextBlocks()
+			blocks := make([]provider.ContentBlock, 0, len(contentBlocks)+len(msg.ToolCalls))
+			for _, tb := range contentBlocks {
+				blocks = append(blocks, provider.ContentBlock{
+					Type:       tb.Type,
+					Text:       tb.Text,
+					ImageURL:   tb.ImageURL,
+					VideoURL:   tb.VideoURL,
+					File:       tb.File,
+					InputAudio: tb.InputAudio,
+					Raw:        append([]byte(nil), tb.Raw...),
+				})
 			}
 			for _, tc := range msg.ToolCalls {
 				input := json.RawMessage(`{}`)
@@ -342,9 +375,16 @@ func toProviderRequest(req *openAIChatCompletionsRequest) (*provider.Request, er
 				})
 			}
 			content := provider.NewStringContent(textContent)
-			if len(blocks) > 0 && (len(blocks) > 1 || len(msg.ToolCalls) > 0 || msg.Role == "assistant") {
+			hasNonTextBlock := false
+			for _, block := range blocks {
+				if block.Type != "text" {
+					hasNonTextBlock = true
+					break
+				}
+			}
+			if len(blocks) > 0 && (len(blocks) > 1 || hasNonTextBlock || len(msg.ToolCalls) > 0 || msg.Role == "assistant") {
 				content = provider.NewBlocksContent(blocks)
-			} else if len(msg.Content.TextBlocks()) > 1 {
+			} else if len(contentBlocks) > 1 {
 				// 多 content block（如文件读取），即使无 tool_calls 也用数组格式
 				content = provider.NewBlocksContent(blocks)
 			}

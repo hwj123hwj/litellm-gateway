@@ -21,9 +21,14 @@ type ProviderConfig struct {
 
 // ModelConfig 模型配置
 type ModelConfig struct {
-	ID           string   `yaml:"id"`
-	Aliases      []string `yaml:"aliases"`
-	ProviderName string   `yaml:"provider_name,omitempty"` // 可选：自定义 provider 实例名，默认为 供应商名-模型ID
+	ID              string   `yaml:"id"`
+	Aliases         []string `yaml:"aliases"`
+	ProviderName    string   `yaml:"provider_name,omitempty"` // 可选：自定义 provider 实例名，默认为 供应商名-模型ID
+	Protocol        string   `yaml:"protocol,omitempty"`
+	Capabilities    []string `yaml:"capabilities,omitempty"`
+	InputModalities []string `yaml:"input_modalities,omitempty"`
+	MaxInputTokens  int      `yaml:"max_input_tokens,omitempty"`
+	MaxOutputTokens int      `yaml:"max_output_tokens,omitempty"`
 }
 
 // ProvidersConfig 提供商配置文件
@@ -153,19 +158,37 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 				providerName = fmt.Sprintf("%s-%s", pc.Name, mc.ID)
 			}
 
-			// 创建绑定模型的 provider
-			boundProvider := NewBoundModelProviderWrapper(baseProvider, mc.ID)
+			// 创建绑定模型的 provider，并把能力元数据绑定到这个具体模型。
+			capabilities := normalizeModelCapabilities(mc.Capabilities)
+			boundProvider := NewBoundModelProviderWrapper(baseProvider, mc.ID, capabilities)
 			router.RegisterProvider(providerName, boundProvider)
+			protocol := mc.Protocol
+			if protocol == "" {
+				protocol = pc.Type
+			}
+			registerModel := func(modelName string) {
+				router.RegisterModel(ModelInfo{
+					ID:              modelName,
+					Provider:        pc.Name,
+					Protocol:        protocol,
+					Capabilities:    capabilities,
+					InputModalities: modelInputModalities(capabilities, mc.InputModalities),
+					MaxInputTokens:  mc.MaxInputTokens,
+					MaxOutputTokens: mc.MaxOutputTokens,
+				})
+			}
 
 			// 有别名时只暴露别名，不对外暴露原始模型 ID（避免重复）
 			if len(mc.Aliases) > 0 {
 				for _, alias := range mc.Aliases {
 					router.RegisterChain(alias, []string{providerName})
+					registerModel(alias)
 					modelToProvider[alias] = providerName
 				}
 				logger.Printf("Registered model: %s -> aliases %v (provider=%s)", mc.ID, mc.Aliases, providerName)
 			} else {
 				router.RegisterChain(mc.ID, []string{providerName})
+				registerModel(mc.ID)
 				modelToProvider[mc.ID] = providerName
 				logger.Printf("Registered model: %s (provider=%s)", mc.ID, providerName)
 			}
@@ -186,20 +209,26 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 // BoundModelProviderWrapper 包装一个 provider 并绑定特定模型
 type BoundModelProviderWrapper struct {
 	Provider
-	boundModel string
+	boundModel   string
+	capabilities []string
 }
 
 // NewBoundModelProviderWrapper 创建绑定模型的 provider 包装器
-func NewBoundModelProviderWrapper(p Provider, model string) *BoundModelProviderWrapper {
-	return &BoundModelProviderWrapper{
-		Provider:   p,
-		boundModel: model,
+func NewBoundModelProviderWrapper(p Provider, model string, declared ...[]string) *BoundModelProviderWrapper {
+	capabilities := normalizeModelCapabilities(nil)
+	if len(declared) > 0 {
+		capabilities = normalizeModelCapabilities(declared[0])
 	}
+	return &BoundModelProviderWrapper{Provider: p, boundModel: model, capabilities: capabilities}
 }
 
 // BoundModel 返回绑定的模型名
 func (w *BoundModelProviderWrapper) BoundModel() string {
 	return w.boundModel
+}
+
+func (w *BoundModelProviderWrapper) Capabilities() []string {
+	return append([]string(nil), w.capabilities...)
 }
 
 // ForwardStream 转发到底层支持流式的 provider
@@ -209,4 +238,47 @@ func (w *BoundModelProviderWrapper) ForwardStream(ctx context.Context, req *Requ
 		return fmt.Errorf("provider %s does not support streaming", w.Provider.Name())
 	}
 	return sp.ForwardStream(ctx, req, out)
+}
+
+func normalizeModelCapabilities(capabilities []string) []string {
+	if len(capabilities) == 0 {
+		// Existing YAML files did not declare capabilities. Preserve their
+		// text/tool/streaming behavior; multimodal support must be explicit.
+		return []string{CapabilityText, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning}
+	}
+	seen := make(map[string]bool, len(capabilities))
+	result := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability == "" || seen[capability] {
+			continue
+		}
+		seen[capability] = true
+		result = append(result, capability)
+	}
+	if !seen[CapabilityText] {
+		result = append(result, CapabilityText)
+	}
+	return result
+}
+
+func modelInputModalities(capabilities, explicit []string) []string {
+	if len(explicit) > 0 {
+		return append([]string(nil), explicit...)
+	}
+	modalities := []string{}
+	for _, capability := range capabilities {
+		switch capability {
+		case CapabilityText:
+			modalities = append(modalities, "text")
+		case CapabilityVision:
+			modalities = append(modalities, "image")
+		case CapabilityVideo:
+			modalities = append(modalities, "video")
+		case CapabilityFile:
+			modalities = append(modalities, "file")
+		case CapabilityAudio:
+			modalities = append(modalities, "audio")
+		}
+	}
+	return modalities
 }
