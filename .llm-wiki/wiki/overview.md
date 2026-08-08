@@ -69,17 +69,15 @@ go-gateway/
 │   ├── metrics/         # In-memory metrics collector
 │   ├── storage/         # SQLite persistence
 │   └── provider/        # Provider implementations + router
-web/                     # Admin dashboard (React + Vite + Capacitor)
+web/                     # Browser admin dashboard (React + Vite)
 ├── src/
 │   ├── api/             # API client for /admin/* endpoints
 │   ├── components/      # Sidebar, Header, MobileTabBar
 │   ├── pages/           # Dashboard, Models, Providers, Logs, Settings
-│   ├── plugins/         # Capacitor native plugins
 │   ├── store/           # Zustand state management
 │   └── styles/          # Responsive CSS
-├── android/             # Android project (Capacitor)
-├── capacitor.config.json # Android packaging config
 └── vite.config.ts       # Dev proxy + build config
+mobile-app/              # Only Android client (React Native + Expo)
 ```
 
 ## Deployment
@@ -92,5 +90,5 @@ See [[server-deployment]] for details.
 - [[provider-config]] — How to add/modify providers
 - [[fallback-chains]] — Auto-fallback routing logic
 - [[model-aliases]] — Haiku/Sonnet/Opus tier naming
-- [[admin-dashboard]] — Admin dashboard (React + Capacitor)
+- [[admin-dashboard]] — Browser admin dashboard (React + Vite) and Android client boundary
 - [[source-codebase-2026-06-21]] — Latest state capture
