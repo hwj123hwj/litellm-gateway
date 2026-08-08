@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">LiteLLM Admin</string>
-    <string name="title_activity_main">LiteLLM Admin</string>
-    <string name="package_name">com.ezycode.litellm</string>
-    <string name="custom_url_scheme">com.ezycode.litellm</string>
-</resources>

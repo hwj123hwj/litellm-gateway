@@ -8,7 +8,7 @@ LiteLLM Gateway 管理面板，提供实时监控、模型管理、提供商状�
 
 - 浏览器 Dashboard：`web/`（React + Vite），只负责 Web 访问
 - Android 客户端：`mobile-app/`（React Native + Expo），唯一 Android 发布入口
-- 旧的 Capacitor Android 工程已移至 `archive/legacy-capacitor-dashboard/`，仅供历史排查，不再构建或发布
+- 旧的 Capacitor Android 工程已删除，Android 统一由 `mobile-app/` 构建和发布
 
 ## 技术栈
 
