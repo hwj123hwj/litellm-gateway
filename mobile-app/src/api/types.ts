@@ -9,6 +9,10 @@ export interface DashboardSummary {
 export interface ProviderInfo {
   name: string
   status: 'online' | 'degraded' | 'offline' | 'unknown'
+  state?: 'closed' | 'open' | 'half_open'
+  enabled?: boolean
+  consecutive_failures?: number
+  next_retry_at?: string
   requests: number
   successes?: number
   errors?: number
@@ -25,6 +29,9 @@ export interface ModelInfo {
   avg_latency: number
   successes?: number
   errors?: number
+  capabilities?: string[]
+  input_modalities?: string[]
+  providers?: string[]
 }
 
 export interface LogEntry {

@@ -266,14 +266,19 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 	originalModel := req.Model
 	var lastErr error
 	for _, p := range providerChain {
+		if !h.router.AllowProviderRequestFor(originalModel, p) {
+			continue
+		}
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
 		} else {
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
+			h.router.RecordProviderSuccessFor(originalModel, p)
 			return
 		} else {
+			h.router.RecordProviderFailureFor(originalModel, p, err)
 			lastErr = err
 			h.logger.Printf("chat.completions stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
@@ -286,6 +291,9 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 				return
 			}
 		}
+	}
+	if lastErr == nil {
+		lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 	}
 	if !c.Writer.Written() {
 		setProviderErrorHeaders(c, lastErr)

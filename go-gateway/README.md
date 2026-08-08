@@ -93,6 +93,20 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/messages` | POST | Bearer | `/v1/messages` 的短路径兼容别名 |
 | `/responses` | POST | Bearer | `/v1/responses` 的短路径兼容别名 |
 
+管理面板（使用 `ADMIN_TOKEN`，未配置时回退到 `LITELLM_MASTER_KEY`）：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/admin/providers` | GET | 查看 Provider 运行状态、熔断状态和用量 |
+| `/admin/providers/:name` | PATCH | 设置 `{"enabled":true/false}`，运行时启停 Provider |
+| `/admin/providers/:name/reset` | POST | 手动重置熔断器 |
+| `/admin/providers/:name/health-check` | POST | 执行一次 Provider 健康探测 |
+| `/admin/routes` | GET | 查看模型的故障转移顺序 |
+| `/admin/routes/:model` | PUT | 用 `{"providers":[...]}` 调整同一链路的优先级 |
+| `/admin/models/:model` | PUT | 调整模型 `capabilities` 和 `input_modalities` |
+
+Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后允许一次半开探测；可通过 `CIRCUIT_FAILURE_THRESHOLD`、`CIRCUIT_RECOVERY_SECONDS` 和 `CIRCUIT_SUCCESS_THRESHOLD` 调整。管理接口只返回脱敏的运行状态，API key 始终来自环境变量。
+
 ### 模型能力与多模态
 
 `GET /v1/models` 除了标准模型字段，还会返回 `capabilities`、`input_modalities`、`protocol` 和可选的 token 上限。网关会在转发前按这些能力筛选路由：如果请求包含图片而目标模型没有 `vision`，返回明确的 `400`，不会把图片静默降成文本或错误 fallback 到文本模型。
@@ -276,6 +290,10 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `HTTP_PROXY` | 否 | — | HTTP 代理地址（如 `http://127.0.0.1:7890`），启用 ChatGPT Codex |
 | `PORT` | 否 | 4001 | 监听端口 |
 | `LOG_LEVEL` | 否 | info | 日志级别 |
+| `ADMIN_TOKEN` | 否 | 使用 `LITELLM_MASTER_KEY` | 管理接口独立认证 token |
+| `CIRCUIT_FAILURE_THRESHOLD` | 否 | 3 | 连续可重试失败后打开熔断 |
+| `CIRCUIT_RECOVERY_SECONDS` | 否 | 30 | 打开后等待半开探测的秒数 |
+| `CIRCUIT_SUCCESS_THRESHOLD` | 否 | 1 | 半开状态连续成功后关闭熔断 |
 
 未配置 key 的 provider 会被自动跳过，不影响其他 provider 正常工作。
 

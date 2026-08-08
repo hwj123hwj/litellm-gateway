@@ -26,6 +26,14 @@ func extractToken(c *gin.Context) string {
 
 // BearerAuth 创建 Bearer token 认证中间件
 func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
+	return BearerAuthWithAdminToken(masterKey, "", logger)
+}
+
+// BearerAuthWithAdminToken keeps the data-plane protected by the master key
+// while allowing the separately configured admin token to reach /admin. The
+// admin group still runs AdminAuth afterwards, so this only changes the
+// outer gate and does not weaken non-admin endpoints.
+func BearerAuthWithAdminToken(masterKey string, adminToken string, logger *log.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// /health 和 OPTIONS 请求不需要认证
 		if c.Request.URL.Path == "/health" || c.Request.Method == "OPTIONS" {
@@ -34,6 +42,10 @@ func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
 		}
 
 		token := extractToken(c)
+		if adminToken != "" && isAdminPath(c.Request.URL.Path) && token == adminToken {
+			c.Next()
+			return
+		}
 
 		if token == "" {
 			logger.Printf("Missing Authorization header from %s", c.ClientIP())
@@ -51,6 +63,10 @@ func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func isAdminPath(path string) bool {
+	return path == "/admin" || strings.HasPrefix(path, "/admin/")
 }
 
 // AdminAuth 创建管理端点认证中间件

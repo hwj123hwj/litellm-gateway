@@ -9,6 +9,12 @@ export interface DashboardSummary {
 export interface ProviderInfo {
   name: string
   status: 'online' | 'degraded' | 'offline' | 'unknown'
+  state?: 'closed' | 'open' | 'half_open'
+  enabled?: boolean
+  consecutive_failures?: number
+  total_failures?: number
+  total_successes?: number
+  next_retry_at?: string
   requests: number
   successes?: number
   errors?: number
@@ -25,6 +31,21 @@ export interface ModelInfo {
   avg_latency: number
   successes?: number
   errors?: number
+  capabilities?: string[]
+  input_modalities?: string[]
+  providers?: string[]
+}
+
+export interface RouteProviderInfo {
+  name: string
+  enabled: boolean
+  state: 'closed' | 'open' | 'half_open'
+  status: 'online' | 'degraded' | 'offline' | 'unknown'
+}
+
+export interface RouteInfo {
+  model: string
+  providers: RouteProviderInfo[]
 }
 
 export interface LogEntry {
@@ -49,6 +70,11 @@ export interface DashboardResponse {
 
 export interface ProvidersResponse {
   providers: ProviderInfo[]
+  total: number
+}
+
+export interface RoutesResponse {
+  routes: RouteInfo[]
   total: number
 }
 

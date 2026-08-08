@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
@@ -6,6 +6,8 @@ const COLORS: Record<string, string> = {
   glm: '#9a3412', mimo: '#059669', longcat: '#6366f1',
   easyclaw: '#dc2626', deepv: '#2563eb', copilot: '#7c3aed',
 }
+
+const CAPABILITIES = ['text', 'vision', 'video', 'file', 'audio', 'tool_calling', 'streaming', 'reasoning']
 
 function color(name: string) {
   const k = name.toLowerCase()
@@ -22,7 +24,10 @@ function fmt(n: number) {
 }
 
 export default function Models() {
-  const { models, modelsLoading, modelsError, fetchModels } = useStore()
+  const { models, modelsLoading, modelsError, fetchModels, updateModel } = useStore()
+  const [drafts, setDrafts] = useState<Record<string, string[]>>({})
+  const [saving, setSaving] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchModels()
@@ -34,13 +39,39 @@ export default function Models() {
   if (modelsError) return <div className="error-banner">⚠ {modelsError}</div>
   if (!models) return null
 
+  const toggleCapability = (model: string, capability: string, current: string[]) => {
+    const next = current.includes(capability)
+      ? current.filter((item) => item !== capability)
+      : [...current, capability]
+    setDrafts((prev) => ({ ...prev, [model]: next }))
+  }
+
+  const saveCapabilities = async (model: string, capabilities: string[], modalities?: string[]) => {
+    setSaving(model)
+    setSaveError(null)
+    try {
+      await updateModel(model, capabilities, modalities)
+      setDrafts((prev) => {
+        const next = { ...prev }
+        delete next[model]
+        return next
+      })
+    } catch (e: any) {
+      setSaveError(e?.message || '模型能力更新失败')
+    } finally {
+      setSaving(null)
+    }
+  }
+
   const activeCount = models.models.filter((m) => m.status !== 'idle').length
 
   return (
     <>
       <PageHeader title="模型管理" subtitle={`共 ${models.total} 个模型，${activeCount} 个活跃`} />
+      {saveError && <div className="error-banner">⚠ {saveError}</div>}
       <div className="model-detail-list">
         {models.models
+          .slice()
           .sort((a, b) => b.requests - a.requests)
           .map((m) => (
             <div key={m.model} className="model-detail-card">
@@ -79,6 +110,41 @@ export default function Models() {
                   </div>
                   <div className="md-stat-label">延迟</div>
                 </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, color: '#78716c', marginBottom: 6 }}>能力（可调整路由校验）</div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {(drafts[m.model] || m.capabilities || []).map((capability) => (
+                    <button
+                      key={`${m.model}:${capability}`}
+                      type="button"
+                      onClick={() => toggleCapability(m.model, capability, drafts[m.model] || m.capabilities || [])}
+                      style={{ border: '1px solid #a8a29e', borderRadius: 999, padding: '3px 8px', fontSize: 11, background: '#292524', color: '#fff' }}
+                    >
+                      {capability} ×
+                    </button>
+                  ))}
+                  {CAPABILITIES.filter((capability) => !(drafts[m.model] || m.capabilities || []).includes(capability)).map((capability) => (
+                    <button
+                      key={`${m.model}:add:${capability}`}
+                      type="button"
+                      onClick={() => toggleCapability(m.model, capability, drafts[m.model] || m.capabilities || [])}
+                      style={{ border: '1px dashed #d6d3d1', borderRadius: 999, padding: '3px 8px', fontSize: 11, background: '#fff', color: '#78716c' }}
+                    >
+                      + {capability}
+                    </button>
+                  ))}
+                </div>
+                {drafts[m.model] && (
+                  <button
+                    type="button"
+                    disabled={saving === m.model}
+                    onClick={() => saveCapabilities(m.model, drafts[m.model])}
+                    style={{ marginTop: 8 }}
+                  >
+                    {saving === m.model ? '保存中...' : '保存能力'}
+                  </button>
+                )}
               </div>
             </div>
           ))}
