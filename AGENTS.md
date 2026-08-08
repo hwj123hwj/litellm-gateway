@@ -43,7 +43,7 @@ codex-model status           # 查看当前配置
 
 ### 文档维护
 - 详细文档放在 `go-gateway/README.md` 或 `docs/` 目录
-- CLAUDE.md 只写准则和引用，不重复详细内容
+- AGENTS.md 只写准则和引用，不重复详细内容
 - 重要变更需更新 README.md
 
 ### 常见操作
