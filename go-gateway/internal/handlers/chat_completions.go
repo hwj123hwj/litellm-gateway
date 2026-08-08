@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
 type openAIChatCompletionsHandler struct {
-	router *provider.Router
-	logger *log.Logger
+	router   *provider.Router
+	logger   *log.Logger
+	archiver *archive.Archiver
 }
 
 type openAIChatCompletionsRequest struct {
@@ -205,6 +207,11 @@ func NewChatCompletionsHandler(router *provider.Router, logger *log.Logger) *ope
 	return &openAIChatCompletionsHandler{router: router, logger: logger}
 }
 
+// SetArchiver injects the conversation archiver.
+func (h *openAIChatCompletionsHandler) SetArchiver(a *archive.Archiver) {
+	h.archiver = a
+}
+
 func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	rawBody, _ := io.ReadAll(c.Request.Body)
 	logRequestSummary(h.logger, c, "chat.completions", len(rawBody))
@@ -245,13 +252,25 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
+		if h.archiver != nil && h.archiver.Enabled() {
+			submitArchive(c, h.archiver, archive.ProtocolChatCompletions, rawBody,
+				[]byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+				archive.StatusError, routingErrorStatus(err), err.Error())
+		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 
 	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
-	c.JSON(http.StatusOK, toOpenAIChatCompletionResponse(resp))
+	responseObj := toOpenAIChatCompletionResponse(resp)
+	if h.archiver != nil && h.archiver.Enabled() {
+		submitArchive(c, h.archiver, archive.ProtocolChatCompletions, rawBody,
+			[]byte(marshalCompact(responseObj)),
+			archive.StatusCompleted, http.StatusOK, "")
+	}
+
+	c.JSON(http.StatusOK, responseObj)
 }
 
 func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provider.Request) {
@@ -262,8 +281,14 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 		return
 	}
 
+	var sink *archiveSink
+	if h.archiver != nil && h.archiver.Enabled() {
+		sink = &archiveSink{}
+	}
+
 	originalModel := req.Model
 	var lastErr error
+	streamOK := false
 	for _, p := range providerChain {
 		if !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
@@ -274,10 +299,11 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 		} else {
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
-		if err := h.streamFromProvider(c, req, p); err == nil {
+		if err := h.streamFromProvider(c, req, p, sink); err == nil {
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
-			return
+			streamOK = true
+			break
 		} else {
 			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
@@ -285,15 +311,35 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 			h.logger.Printf("chat.completions stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
 				_ = writeOpenAIStreamError(c.Writer, err)
-				return
+				streamOK = true
+				break
 			}
 			if !provider.ShouldFallback(err) {
 				setProviderErrorHeaders(c, err)
 				c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
-				return
+				break
 			}
 		}
 	}
+
+	if sink != nil {
+		reqBody, _ := json.Marshal(req)
+		if !streamOK && lastErr == nil {
+			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
+		}
+		if !c.Writer.Written() && lastErr != nil {
+			setProviderErrorHeaders(c, lastErr)
+			submitArchive(c, h.archiver, archive.ProtocolChatCompletions, reqBody, nil,
+				archive.StatusError, routingErrorStatus(lastErr), lastErr.Error())
+			c.JSON(routingErrorStatus(lastErr), gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
+			return
+		}
+		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
+		submitArchive(c, h.archiver, archive.ProtocolChatCompletions, reqBody, sink.Bytes(),
+			status, c.Writer.Status(), reason)
+		return
+	}
+
 	if lastErr == nil {
 		lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 	}
@@ -303,9 +349,13 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 	}
 }
 
-func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider) error {
+func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, sink *archiveSink) error {
 	pr, pw := io.Pipe()
-	streamWriter := newDeferredStreamWriter(c)
+	streamWriterBase := newDeferredStreamWriter(c)
+	var streamWriter io.Writer = streamWriterBase
+	if sink != nil {
+		streamWriter = newTeeStreamWriter(streamWriterBase, sink)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		if sp, ok := p.(provider.StreamProvider); ok {
@@ -323,7 +373,7 @@ func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *p
 	if err := <-errCh; err != nil {
 		return err
 	}
-	streamWriter.Commit()
+	streamWriterBase.Commit()
 	return nil
 }
 

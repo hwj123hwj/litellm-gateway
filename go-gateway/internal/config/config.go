@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+	"github.com/weijian/go-llm-gateway/internal/archive"
 )
 
 // Config 应用全局配置
@@ -24,6 +25,7 @@ type Config struct {
 	CircuitFailureThreshold int
 	CircuitRecoverySeconds  int
 	CircuitSuccessThreshold int
+	Archive                 archive.Config
 }
 
 // Load 从环境变量加载配置
@@ -44,6 +46,7 @@ func Load() (*Config, error) {
 		CircuitFailureThreshold: getEnvInt("CIRCUIT_FAILURE_THRESHOLD", 3),
 		CircuitRecoverySeconds:  getEnvInt("CIRCUIT_RECOVERY_SECONDS", 30),
 		CircuitSuccessThreshold: getEnvInt("CIRCUIT_SUCCESS_THRESHOLD", 1),
+		Archive:                 loadArchiveConfig(),
 	}
 
 	if cfg.MasterKey == "" {
@@ -95,4 +98,15 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return strings.ToLower(value) == "true" || value == "1"
+}
+
+// loadArchiveConfig reads the three ARCHIVE_* environment variables. Missing
+// or invalid values fall back to archive.DefaultConfig, so the gateway is
+// always safe to start even with an incomplete .env.
+func loadArchiveConfig() archive.Config {
+	cfg := archive.DefaultConfig()
+	cfg.Enabled = getEnvBool("ARCHIVE_ENABLED", false)
+	cfg.MaxBodyKB = getEnvInt("ARCHIVE_MAX_BODY_KB", cfg.MaxBodyKB)
+	cfg.RetentionDays = getEnvInt("ARCHIVE_RETENTION_DAYS", cfg.RetentionDays)
+	return cfg
 }

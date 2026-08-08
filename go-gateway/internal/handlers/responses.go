@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
@@ -132,12 +133,18 @@ type outputContent struct {
 // ─── ResponsesHandler ──────────────────────────────────────────────────────
 
 type responsesHandler struct {
-	router *provider.Router
-	logger *log.Logger
+	router   *provider.Router
+	logger   *log.Logger
+	archiver *archive.Archiver
 }
 
 func NewResponsesHandler(router *provider.Router, logger *log.Logger) *responsesHandler {
 	return &responsesHandler{router: router, logger: logger}
+}
+
+// SetArchiver injects the conversation archiver.
+func (h *responsesHandler) SetArchiver(a *archive.Archiver) {
+	h.archiver = a
 }
 
 // Handle 处理 /v1/responses 端点
@@ -169,14 +176,14 @@ func (h *responsesHandler) Handle(c *gin.Context) {
 	}
 
 	if req.Stream {
-		h.handleStream(c, &req)
+		h.handleStream(c, &req, rawBody)
 	} else {
-		h.handleNonStream(c, &req)
+		h.handleNonStream(c, &req, rawBody)
 	}
 }
 
 // handleNonStream 处理非流式请求
-func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest) {
+func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest, rawBody []byte) {
 	providerReq, err := responsesToProviderRequest(req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
@@ -191,6 +198,11 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 	if err != nil {
 		h.logger.Printf("Responses forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
+		if h.archiver != nil && h.archiver.Enabled() {
+			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody,
+				[]byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+				archive.StatusError, routingErrorStatus(err), err.Error())
+		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "server_error",
@@ -199,7 +211,14 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 	}
 	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
-	c.JSON(http.StatusOK, providerToResponsesResponse(resp, req.Model))
+	responseObj := providerToResponsesResponse(resp, req.Model)
+	if h.archiver != nil && h.archiver.Enabled() {
+		submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody,
+			[]byte(marshalCompact(responseObj)),
+			archive.StatusCompleted, http.StatusOK, "")
+	}
+
+	c.JSON(http.StatusOK, responseObj)
 }
 
 // ─── Responses → Anthropic 格式转换 ──────────────────────────────────────────
@@ -525,6 +544,11 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 		return false
 	}
 
+	var sink *archiveSink
+	if h.archiver != nil && h.archiver.Enabled() {
+		sink = &archiveSink{}
+	}
+
 	for _, p := range providerChain {
 		if chatgptPassthrough, ok := p.(provider.ChatGPTPassthroughMarker); ok {
 			if !h.router.AllowProviderRequestFor(req.Model, p) {
@@ -532,13 +556,22 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			}
 			started := time.Now()
 			h.logger.Printf("[RESPONSES] Using ChatGPT passthrough for model %s", req.Model)
-			streamWriter := newDeferredStreamWriter(c)
+			streamWriterBase := newDeferredStreamWriter(c)
+			var streamWriter io.Writer = streamWriterBase
+			if sink != nil {
+				streamWriter = newTeeStreamWriter(streamWriterBase, sink)
+			}
 
 			// 直接透传原始请求体到 ChatGPT
 			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), streamWriter); err != nil {
 				recordProviderAttempt(c, p.Name(), started, err)
 				h.router.RecordProviderFailureFor(req.Model, p, err)
 				h.logger.Printf("[RESPONSES] ChatGPT passthrough failed: %v", err)
+				if sink != nil {
+					status, reason := parseStreamEndState(sink.Bytes(), err)
+					submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sink.Bytes(),
+						status, c.Writer.Status(), reason)
+				}
 				if c.Writer.Written() {
 					_ = writeResponsesStreamError(c.Writer, err)
 				} else {
@@ -552,7 +585,12 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			}
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(req.Model, p)
-			streamWriter.Commit()
+			streamWriterBase.Commit()
+			if sink != nil {
+				status, reason := parseStreamEndState(sink.Bytes(), nil)
+				submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sink.Bytes(),
+					status, c.Writer.Status(), reason)
+			}
 			return true
 		}
 	}

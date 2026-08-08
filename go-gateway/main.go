@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/auth"
 	"github.com/weijian/go-llm-gateway/internal/config"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
@@ -47,6 +48,11 @@ func main() {
 	}
 	os.MkdirAll(dbPath, 0755)
 	sqlitePath := dbPath + "/metrics.db"
+
+	// 归档数据平面：当 ARCHIVE_ENABLED=true 时启用，否则使用 NoopStore。
+	var archiver *archive.Archiver
+	var archiveStore archive.Store = archive.NoopStore{}
+
 	if store, err := storage.NewSQLiteStore(sqlitePath, logger); err != nil {
 		logger.Printf("Warning: SQLite store init failed: %v, using memory only", err)
 	} else {
@@ -54,9 +60,17 @@ func main() {
 		defer store.Close()
 		logger.Printf("SQLite metrics store: %s", sqlitePath)
 
-		// 启动后台清理任务（每天清理 30 天前的数据）
-		go startCleanupTask(store, logger)
+		// 归档复用同一个 SQLite 文件（独立的 conversation_archives 表），
+		// 避免引入新的外部依赖。
+		archiveStore = store
+
+		// 启动后台清理任务（每天清理 30 天前的指标数据 + 归档保留期外的对话）
+		go startCleanupTask(store, cfg.Archive, logger)
 	}
+
+	// 构建归档器（即便 ARCHIVE_ENABLED=false 也是安全的 no-op）
+	archiver = archive.NewArchiver(archiveStore, cfg.Archive, logger)
+	defer archiver.Close()
 
 	// 初始化路由器
 	router := provider.NewRouterWithCircuitConfig(logger, provider.CircuitBreakerConfig{
@@ -119,11 +133,15 @@ func main() {
 
 	// 注册路由
 	msgHandler := handlers.NewMessageHandler(router, logger)
+	msgHandler.SetArchiver(archiver)
 	chatHandler := handlers.NewChatCompletionsHandler(router, logger)
+	chatHandler.SetArchiver(archiver)
 	responsesHandler := handlers.NewResponsesHandler(router, logger)
+	responsesHandler.SetArchiver(archiver)
 	modelHandler := handlers.NewModelHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
+	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.POST("/v1/chat/completions", chatHandler.Handle)
@@ -153,6 +171,10 @@ func main() {
 		admin.GET("/health", adminHandler.HandleHealth)
 		admin.GET("/config", adminHandler.HandleConfig)
 		admin.GET("/stats", adminHandler.HandleStats)
+		admin.GET("/archives", archiveHandler.HandleList)
+		admin.GET("/archives/export", archiveHandler.HandleExport)
+		admin.DELETE("/archives", archiveHandler.HandleDeleteBefore)
+		admin.DELETE("/archives/:id", archiveHandler.HandleDeleteOne)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -360,10 +382,15 @@ func setupChatGPTProvider(router *provider.Router, proxyURL string, logger *log.
 }
 
 // startCleanupTask 启动后台清理任务
-func startCleanupTask(store *storage.SQLiteStore, logger *log.Logger) {
+func startCleanupTask(store *storage.SQLiteStore, archiveCfg archive.Config, logger *log.Logger) {
 	// 首次启动时清理
 	if err := store.Cleanup(30); err != nil {
 		logger.Printf("Cleanup error: %v", err)
+	}
+	if archiveCfg.Enabled && archiveCfg.RetentionDays > 0 {
+		if err := store.CleanupArchives(archiveCfg.RetentionDays); err != nil {
+			logger.Printf("Archive cleanup error: %v", err)
+		}
 	}
 
 	// 每天凌晨 3 点清理
@@ -376,6 +403,11 @@ func startCleanupTask(store *storage.SQLiteStore, logger *log.Logger) {
 
 		if err := store.Cleanup(30); err != nil {
 			logger.Printf("Cleanup error: %v", err)
+		}
+		if archiveCfg.Enabled && archiveCfg.RetentionDays > 0 {
+			if err := store.CleanupArchives(archiveCfg.RetentionDays); err != nil {
+				logger.Printf("Archive cleanup error: %v", err)
+			}
 		}
 	}
 }

@@ -41,6 +41,12 @@ func NewSQLiteStore(dbPath string, logger *log.Logger) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 
+	// 归档表（conversation_archives）与 request_logs 物理隔离
+	if err := initArchiveSchema(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init archive schema: %w", err)
+	}
+
 	logger.Printf("SQLite store initialized: %s", dbPath)
 
 	return &SQLiteStore{db: db, logger: logger}, nil

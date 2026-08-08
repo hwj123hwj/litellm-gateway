@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
 // handleStream 处理流式 Responses API 请求
-func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
+func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, rawBody []byte) {
 	providerReq, err := responsesToProviderRequest(req)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
@@ -35,8 +36,14 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 		return
 	}
 
+	var sink *archiveSink
+	if h.archiver != nil && h.archiver.Enabled() {
+		sink = &archiveSink{}
+	}
+
 	originalModel := req.Model
 	var lastErr error
+	streamOK := false
 	for i, p := range providerChain {
 		if !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
@@ -50,17 +57,19 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 			providerReq.Model = h.router.MapModel(originalModel, p.Name())
 		}
 
-		if err := h.streamFromProvider(c, providerReq, p, originalModel); err == nil {
+		if err := h.streamFromProvider(c, providerReq, p, originalModel, sink); err == nil {
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
-			return
+			streamOK = true
+			break
 		} else {
 			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
 			h.logger.Printf("Responses stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
 				_ = writeResponsesStreamError(c.Writer, err)
-				return
+				streamOK = true
+				break
 			}
 			lastErr = err
 			if !provider.ShouldFallback(err) {
@@ -69,10 +78,31 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 					"message": err.Error(),
 					"type":    "server_error",
 				}})
-				return
+				break
 			}
 		}
 	}
+
+	if sink != nil {
+		if !streamOK && lastErr == nil {
+			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
+		}
+		if !c.Writer.Written() && lastErr != nil {
+			setProviderErrorHeaders(c, lastErr)
+			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, nil,
+				archive.StatusError, routingErrorStatus(lastErr), lastErr.Error())
+			c.JSON(routingErrorStatus(lastErr), gin.H{"error": gin.H{
+				"message": fmt.Sprintf("all providers failed: %v", lastErr),
+				"type":    "server_error",
+			}})
+			return
+		}
+		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
+		submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sink.Bytes(),
+			status, c.Writer.Status(), reason)
+		return
+	}
+
 	if lastErr == nil {
 		lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 	}
@@ -87,9 +117,13 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 }
 
 // streamFromProvider 从指定 provider 获取流式响应并转换为 Responses SSE
-func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, model string) error {
+func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, model string, sink *archiveSink) error {
 	pr, pw := io.Pipe()
-	streamWriter := newDeferredStreamWriter(c)
+	streamWriterBase := newDeferredStreamWriter(c)
+	var streamWriter io.Writer = streamWriterBase
+	if sink != nil {
+		streamWriter = newTeeStreamWriter(streamWriterBase, sink)
+	}
 	errCh := make(chan error, 1)
 
 	go func() {
@@ -110,7 +144,7 @@ func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Requ
 	if err != nil {
 		return err
 	}
-	streamWriter.Commit()
+	streamWriterBase.Commit()
 	return err
 }
 

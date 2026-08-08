@@ -106,6 +106,45 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/admin/routes` | GET | 查看模型的故障转移顺序 |
 | `/admin/routes/:model` | PUT | 用 `{"providers":[...]}` 调整同一链路的优先级 |
 | `/admin/models/:model` | PUT | 调整模型 `capabilities` 和 `input_modalities` |
+| `/admin/archives` | GET | 分页查询对话归档（`limit`/`offset`） |
+| `/admin/archives/export` | GET | 增量导出归档为 JSONL（`since`/`limit`，响应头返回下一游标） |
+| `/admin/archives` | DELETE | 按时间清理归档（`before_days` 或 `before`） |
+| `/admin/archives/:id` | DELETE | 删除单条归档 |
+
+### 对话归档与增量导出
+
+默认情况下网关只记录轻量指标（状态码、token、延迟），不存任何请求/响应正文。开启归档后会额外保存脱敏后的完整对话，用于知识库增量同步。
+
+**环境变量：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ARCHIVE_ENABLED` | `false` | 总开关，关闭时归档器为纯 no-op，零开销 |
+| `ARCHIVE_MAX_BODY_KB` | `256` | 单条 request/response body 的截断阈值（KB） |
+| `ARCHIVE_RETENTION_DAYS` | `90` | 归档保留天数，超期由后台任务自动清理 |
+
+**脱敏规则：** 归档写入前会递归清除 `Authorization`、`Cookie`、`x-api-key`、`api_key`、`token`、`password`、`secret` 等敏感字段的值（替换为 `[REDACTED]`）；图片/音频/文件等多媒体内容只保留 `{type, size, sha256}` 摘要，不存 Base64 原文。流式响应在透传 SSE 的同时 tee 到内部 buffer，流结束后聚合归档；中断时记录原因。
+
+**增量导出示例：**
+
+```bash
+# 首次导出
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://localhost:4001/admin/archives/export?limit=100" \
+  -o batch_1.jsonl
+
+# 响应头 X-Archive-Next-Cursor 给出下一页游标（timestamp,id 格式）
+# 带游标续跑，实现断点续传和去重
+NEXT=$(curl -sI -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://localhost:4001/admin/archives/export?limit=100" \
+  | grep -i X-Archive-Next-Cursor | awk '{print $2}' | tr -d '\r')
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://localhost:4001/admin/archives/export?limit=100&since=$NEXT" \
+  -o batch_2.jsonl
+```
+
+每行 JSON 包含 `schema_version`、`request_id`、`timestamp`、`protocol`、`model`、`provider`、`is_stream`、`status`、`status_code`、`input_tokens`、`output_tokens`、`request_body`、`response_body`、`error_reason` 等字段。`schema_version` 当前为 `1`，后续 schema 变更会递增。
 
 Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后允许一次半开探测；可通过 `CIRCUIT_FAILURE_THRESHOLD`、`CIRCUIT_RECOVERY_SECONDS` 和 `CIRCUIT_SUCCESS_THRESHOLD` 调整。管理接口只返回脱敏的运行状态，API key 始终来自环境变量。
 
@@ -141,7 +180,7 @@ models:
 grep 'request_id=client-trace-42' gateway.log
 ```
 
-完整请求/响应归档尚未启用，详见根目录 `PRD.md` 的 R6；不要把 stdout 当作对话历史。
+完整请求/响应归档默认关闭；开启 `ARCHIVE_ENABLED=true` 后会脱敏写入独立的 `conversation_archives` 表，可通过 `/admin/archives` 查询和 `/admin/archives/export` 增量导出，详见下方「对话归档与增量导出」一节。
 
 ### 健康检查
 
@@ -245,6 +284,9 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `CIRCUIT_FAILURE_THRESHOLD` | 否 | 3 | 连续可重试失败后打开熔断 |
 | `CIRCUIT_RECOVERY_SECONDS` | 否 | 30 | 打开后等待半开探测的秒数 |
 | `CIRCUIT_SUCCESS_THRESHOLD` | 否 | 1 | 半开状态连续成功后关闭熔断 |
+| `ARCHIVE_ENABLED` | 否 | `false` | 对话归档总开关，关闭时零开销 |
+| `ARCHIVE_MAX_BODY_KB` | 否 | 256 | 单条 body 截断阈值（KB） |
+| `ARCHIVE_RETENTION_DAYS` | 否 | 90 | 归档保留天数 |
 
 未配置 key 的 provider 会被自动跳过，不影响其他 provider 正常工作。
 
