@@ -350,4 +350,4 @@ These items from the RN best-practices skill are still open; apply only when a m
 ## Related
 
 - [[overview]] — Gateway architecture and admin UI overview
-- [[admin-dashboard]] — Web (React + Capacitor) variant of the admin dashboard
+- [[admin-dashboard]] — Web (React + Vite) browser dashboard; `mobile-app/` is the only Android client

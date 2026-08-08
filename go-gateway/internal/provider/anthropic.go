@@ -24,10 +24,10 @@ func NewAnthropicProvider(config *Config) *AnthropicProvider {
 	}
 }
 
-func (p *AnthropicProvider) Name() string      { return p.config.Name }
-func (p *AnthropicProvider) URL() string       { return p.config.URL }
-func (p *AnthropicProvider) APIKey() string    { return p.config.APIKey }
-func (p *AnthropicProvider) UseBearer() bool   { return p.config.UseBearer }
+func (p *AnthropicProvider) Name() string    { return p.config.Name }
+func (p *AnthropicProvider) URL() string     { return p.config.URL }
+func (p *AnthropicProvider) APIKey() string  { return p.config.APIKey }
+func (p *AnthropicProvider) UseBearer() bool { return p.config.UseBearer }
 
 // ForwardStream 转发流式请求到提供商（Anthropic SSE 直接透传）
 func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {
@@ -53,11 +53,7 @@ func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w i
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		var errResp ErrorResponse
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error.Message != "" {
-			return fmt.Errorf("provider error: %s", errResp.Error.Message)
-		}
-		return fmt.Errorf("provider error %d: %s", resp.StatusCode, string(respBody))
+		return NewHTTPError(p.Name(), resp, respBody)
 	}
 
 	_, err = io.Copy(w, resp.Body)
@@ -89,11 +85,7 @@ func (p *AnthropicProvider) ForwardRequest(ctx context.Context, req *Request) (*
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(respBody, &errResp); err != nil {
-			return nil, fmt.Errorf("provider error %d: %s", resp.StatusCode, string(respBody))
-		}
-		return nil, fmt.Errorf("provider error: %s", errResp.Error.Message)
+		return nil, NewHTTPError(p.Name(), resp, respBody)
 	}
 
 	var response Response

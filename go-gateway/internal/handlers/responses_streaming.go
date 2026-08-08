@@ -17,6 +17,7 @@ import (
 func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 	providerReq, err := responsesToProviderRequest(req)
 	if err != nil {
+		setProviderErrorHeaders(c, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "invalid_request_error",
@@ -26,6 +27,7 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 
 	providerChain, err := h.router.RouteForStreamRequest(providerReq.Model, providerReq)
 	if err != nil {
+		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "invalid_request_error",
@@ -41,19 +43,32 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			providerReq.Model = bmp.BoundModel()
 		} else {
-			providerReq.Model = h.router.MapModel(providerReq.Model, p.Name())
+			providerReq.Model = h.router.MapModel(originalModel, p.Name())
 		}
 
 		if err := h.streamFromProvider(c, providerReq, p, originalModel); err == nil {
 			return
 		} else {
 			h.logger.Printf("Responses stream provider %s failed: %v", p.Name(), err)
+			if c.Writer.Written() {
+				_ = writeResponsesStreamError(c.Writer, err)
+				return
+			}
 			lastErr = err
+			if !provider.ShouldFallback(err) {
+				setProviderErrorHeaders(c, err)
+				c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
+					"message": err.Error(),
+					"type":    "server_error",
+				}})
+				return
+			}
 		}
 	}
 
 	if !c.Writer.Written() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+		setProviderErrorHeaders(c, lastErr)
+		c.JSON(routingErrorStatus(lastErr), gin.H{"error": gin.H{
 			"message": fmt.Sprintf("all providers failed: %v", lastErr),
 			"type":    "server_error",
 		}})
@@ -62,15 +77,8 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 
 // streamFromProvider 从指定 provider 获取流式响应并转换为 Responses SSE
 func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, model string) error {
-	if !c.Writer.Written() {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no")
-		c.Writer.WriteHeader(http.StatusOK)
-	}
-
 	pr, pw := io.Pipe()
+	streamWriter := newDeferredStreamWriter(c)
 	errCh := make(chan error, 1)
 
 	go func() {
@@ -82,12 +90,16 @@ func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Requ
 		}
 	}()
 
-	err := anthropicSSEToResponsesSSE(pr, c.Writer, model)
+	err := anthropicSSEToResponsesSSE(pr, streamWriter, model)
 	_ = pr.Close()
 
 	if streamErr := <-errCh; streamErr != nil && err == nil {
 		return streamErr
 	}
+	if err != nil {
+		return err
+	}
+	streamWriter.Commit()
 	return err
 }
 
@@ -119,7 +131,7 @@ func (h *responsesHandler) forwardRawStream(c *gin.Context, req *provider.Reques
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("provider %d: %s", resp.StatusCode, string(b))
+		return provider.NewHTTPError(p.Name(), resp, b)
 	}
 
 	_, err = io.Copy(w, resp.Body)
@@ -156,16 +168,26 @@ func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
 	// 收集完整 tool arguments
 	var fullToolArgs strings.Builder
 
-	// 发送 response.created
-	writeResponsesSSE(w, "response.created", map[string]any{
-		"type":     "response.created",
-		"response": map[string]any{"id": respID, "object": "response", "created_at": created, "status": "in_progress", "model": model},
-	})
+	createdSent := false
+	ensureResponseCreated := func() {
+		if createdSent {
+			return
+		}
+		writeResponsesSSE(w, "response.created", map[string]any{
+			"type":     "response.created",
+			"response": map[string]any{"id": respID, "object": "response", "created_at": created, "status": "in_progress", "model": model},
+		})
+		createdSent = true
+	}
 
 	flushEvent := func() error {
 		if eventType == "" || len(dataLines) == 0 {
 			return nil
 		}
+		// Do not commit response.created until the upstream has produced its
+		// first event. If the provider fails before that point, the caller can
+		// still fall back or return the upstream HTTP status.
+		ensureResponseCreated()
 		payload := strings.Join(dataLines, "\n")
 
 		switch eventType {

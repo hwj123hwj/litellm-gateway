@@ -101,7 +101,7 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 
 	providerNames, ok := r.chains[modelName]
 	if !ok {
-		return nil, fmt.Errorf("unknown model: %s", modelName)
+		return nil, &UnknownModelError{Model: modelName}
 	}
 
 	var result []Provider
@@ -115,7 +115,7 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 		result = append(result, p)
 	}
 	if len(result) == 0 {
-		return nil, fmt.Errorf("no available providers for model %s (configured: %v)", modelName, providerNames)
+		return nil, &NoAvailableProvidersError{Model: modelName, Configured: append([]string(nil), providerNames...)}
 	}
 	if len(unavailable) > 0 {
 		r.logger.Printf("Skipping unavailable providers for model %s: %v", modelName, unavailable)
@@ -183,6 +183,9 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 		if err != nil {
 			r.logger.Printf("Provider %s failed: %v", p.Name(), err)
 			lastErr = err
+			if !ShouldFallback(err) {
+				return nil, err
+			}
 			continue
 		}
 		r.logger.Printf("Provider %s succeeded", p.Name())

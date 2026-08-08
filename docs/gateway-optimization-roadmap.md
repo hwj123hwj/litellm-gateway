@@ -6,7 +6,7 @@
 >
 > 更新时间：2026-08-08
 >
-> 状态：能力协商与图片路由已完成；其余条目用于后续迭代
+> 状态：能力协商、图片路由、流式生命周期、错误码和 Responses token 映射已完成；其余条目用于后续迭代
 
 ## 一、当前基线
 
@@ -64,6 +64,14 @@ HwjCode、飞书入口以及未来其他 AI 应用都可以走同一个网关，
 - HwjCode `packages/core/src/tools/image-reader.ts`
 - HwjCode `packages/core/src/core/sceneManager.ts`
 
+### 已完成：流式 fallback、错误码和 token 上限（2026-08-08）
+
+- Provider 在首个 SSE 字节写出前失败时，不会提前提交 200；网关可以继续 fallback 或返回上游状态码。
+- 首个 SSE 字节写出后不再切换 Provider，而是发送规范的流式错误事件并结束当前响应。
+- Provider HTTP 错误统一保留状态码、`Retry-After` 和 request id；401/403/400 等客户端错误不再被错误包装成 503，也不会继续 fallback。
+- `Responses API` 的 `max_output_tokens` 现在会映射到内部 `max_tokens`，不再被静默丢弃。
+- 已增加对应的 handler/provider 回归测试，并通过 `go test ./...`、`go vet ./...` 和 `go test -race ./...`。
+
 ### P0：结构化、可配置的完整日志
 
 **问题**
@@ -105,9 +113,9 @@ REQUEST_LOG_MAX_BODY_BYTES=10485760
 - `go-gateway/internal/metrics/collector.go`
 - `go-gateway/internal/storage/sqlite.go`
 
-### P1：错误码、重试和 fallback 语义
+### 已完成：错误码、重试和 fallback 语义
 
-当前大多数 Provider 错误都会被包装成 503，并继续尝试下一个 Provider。后续应区分：
+当前实现已按以下规则区分错误：
 
 | 错误类型 | 建议行为 |
 | --- | --- |
@@ -120,7 +128,7 @@ REQUEST_LOG_MAX_BODY_BYTES=10485760
 
 同时保留上游 request id 和 `Retry-After`，但不要把完整上游响应体原样写入普通日志。
 
-### P1：流式 fallback 的响应生命周期
+### 已完成：流式 fallback 的响应生命周期
 
 流式处理在第一次 Provider 调用成功前不应立即写出 200 响应头。需要区分：
 
@@ -156,7 +164,7 @@ REQUEST_LOG_MAX_BODY_BYTES=10485760
 
 1. 能力协商和 `glm-vision` 自动选择。
 2. 结构化完整日志和个人使用分析存储。
-3. 错误码、重试与流式 fallback。
+3. 错误码、重试与流式 fallback（已完成，后续继续补充跨 Provider 集成测试）。
 4. 认证文档和固定二进制运行方式。
 5. 扩充跨协议集成测试及推理字段兼容性。
 

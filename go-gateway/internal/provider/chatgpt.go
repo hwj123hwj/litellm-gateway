@@ -166,7 +166,7 @@ func (p *ChatGPTProvider) refreshAuth() error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("refresh failed (%d): %s", resp.StatusCode, string(respBody))
+		return NewHTTPError("chatgpt-auth", resp, respBody)
 	}
 
 	var result struct {
@@ -339,7 +339,7 @@ func (p *ChatGPTProvider) ForwardRawResponsesStream(ctx context.Context, reqBody
 
 				if retryResp.StatusCode != http.StatusOK {
 					retryBody, _ := io.ReadAll(retryResp.Body)
-					return fmt.Errorf("ChatGPT API error after refresh (%d): %s", retryResp.StatusCode, string(retryBody))
+					return NewHTTPError(p.Name(), retryResp, retryBody)
 				}
 
 				// 透传 SSE 流
@@ -347,7 +347,7 @@ func (p *ChatGPTProvider) ForwardRawResponsesStream(ctx context.Context, reqBody
 				return err
 			}
 		}
-		return fmt.Errorf("ChatGPT API error (%d): %s", resp.StatusCode, string(body))
+		return NewHTTPError(p.Name(), resp, body)
 	}
 
 	// 透传 SSE 流（ChatGPT 返回的就是标准 Responses API SSE）

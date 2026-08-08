@@ -57,6 +57,7 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) 
 	resp, err := h.router.Forward(c.Request.Context(), req.Model, req)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
+		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -66,6 +67,7 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) 
 func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
+		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -83,13 +85,23 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 			return
 		} else {
 			h.logger.Printf("Stream provider %s failed: %v", p.Name(), err)
+			if c.Writer.Written() {
+				_ = writeAnthropicStreamError(c.Writer, err)
+				return
+			}
 			lastErr = err
+			if !provider.ShouldFallback(err) {
+				setProviderErrorHeaders(c, err)
+				c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
+				return
+			}
 		}
 	}
 
 	h.logger.Printf("All stream providers failed: %v", lastErr)
 	if !c.Writer.Written() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "all providers failed"})
+		setProviderErrorHeaders(c, lastErr)
+		c.JSON(routingErrorStatus(lastErr), gin.H{"error": lastErr.Error()})
 	}
 }
 
@@ -97,18 +109,15 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 // 若提供商实现了 StreamProvider 接口（如 OpenAI 格式），走其自有流式逻辑（含格式转换）；
 // 否则直接透传上游 SSE 流（适用于 Anthropic 兼容接口）。
 func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider) error {
-	// 设置 SSE 响应头（只写一次）
-	if !c.Writer.Written() {
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no")
-		c.Writer.WriteHeader(http.StatusOK)
-	}
+	streamWriter := newDeferredStreamWriter(c)
 
 	// 若提供商实现了 StreamProvider（如 OpenAI 格式），使用其内置流式逻辑
 	if sp, ok := p.(provider.StreamProvider); ok {
-		return sp.ForwardStream(c.Request.Context(), req, c.Writer)
+		err := sp.ForwardStream(c.Request.Context(), req, streamWriter)
+		if err == nil {
+			streamWriter.Commit()
+		}
+		return err
 	}
 
 	// 默认：直接透传 Anthropic 兼容的 SSE 流
@@ -138,16 +147,20 @@ func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Reques
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("provider %d: %s", resp.StatusCode, string(b))
+		return provider.NewHTTPError(p.Name(), resp, b)
 	}
 
 	// 逐行透传 SSE 流
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
-		if _, err := fmt.Fprintf(c.Writer, "%s\n", scanner.Bytes()); err != nil {
+		if _, err := fmt.Fprintf(streamWriter, "%s\n", scanner.Bytes()); err != nil {
 			return nil // 客户端断开，正常退出
 		}
-		c.Writer.Flush()
+		streamWriter.Flush()
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	streamWriter.Commit()
+	return nil
 }

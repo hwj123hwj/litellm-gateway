@@ -17,19 +17,19 @@ import (
 
 // CopilotProvider 实现 OpenAI 兼容的 GitHub Copilot API
 type CopilotProvider struct {
-	config     *Config
-	client     *http.Client
-	apiURL     string // 从 token 解析的 API 地址
-	token      string // Copilot token（含 proxy-ep 等信息）
+	config      *Config
+	client      *http.Client
+	apiURL      string // 从 token 解析的 API 地址
+	token       string // Copilot token（含 proxy-ep 等信息）
 	githubToken string // GitHub OAuth token（用于刷新）
 }
 
 func NewCopilotProvider(config *Config, githubToken string) *CopilotProvider {
 	p := &CopilotProvider{
-		config:       config,
-		client:       &http.Client{Timeout: 120 * time.Second},
-		token:        config.APIKey,
-		githubToken:  githubToken,
+		config:      config,
+		client:      &http.Client{Timeout: 120 * time.Second},
+		token:       config.APIKey,
+		githubToken: githubToken,
 	}
 	// 从 token 解析 API 地址
 	p.apiURL = p.extractAPIURL(config.APIKey)
@@ -102,7 +102,7 @@ func (p *CopilotProvider) ForwardRequest(ctx context.Context, req *Request) (*Re
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("copilot provider error %d: %s", resp.StatusCode, string(respBody))
+		return nil, NewHTTPError(p.Name(), resp, respBody)
 	}
 
 	var oaiResp openAIResponse
@@ -138,7 +138,7 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("copilot stream error %d: %s", resp.StatusCode, string(b))
+		return NewHTTPError(p.Name(), resp, b)
 	}
 
 	msgID := "msg_copilot_" + time.Now().Format("20060102150405")
@@ -324,7 +324,7 @@ func RefreshCopilotToken(githubToken string) (string, int64, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("refresh copilot token failed %d: %s", resp.StatusCode, string(body))
+		return "", 0, NewHTTPError("copilot-auth", resp, body)
 	}
 
 	var result struct {
