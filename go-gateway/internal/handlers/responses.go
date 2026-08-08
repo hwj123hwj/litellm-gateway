@@ -193,6 +193,7 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 	resp, err := h.router.Forward(c.Request.Context(), providerReq.Model, providerReq)
 	if err != nil {
 		h.logger.Printf("Responses forward failed: %v", err)
+		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "server_error",
@@ -210,9 +211,6 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 		Model: req.Model,
 	}
 
-	// 注意：不将 max_output_tokens 传递给 Anthropic 的 max_tokens
-	// 因为智谱等国产模型对 max_tokens 的处理不同，小值会导致空响应
-	// Codex 的 max_output_tokens 通常较小，由模型自行决定输出长度
 	out.Stream = req.Stream
 
 	// 解析 input（可能是数组或字符串）
@@ -296,7 +294,14 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 	if req.Instructions != "" {
 		out.SetRawField("system", req.Instructions)
 	}
-	// 不设置 max_tokens，让模型自行决定输出长度
+	// Responses API 的 max_output_tokens 对应内部/Anthropic 兼容请求的
+	// max_tokens。之前为了规避部分 GLM 在极小预算下的空响应而直接丢弃，
+	// 导致调用方的输出上限失效；兼容性应由具体 provider 处理，而不是在
+	// 协议转换层静默删除。
+	if req.MaxOutputTokens > 0 {
+		out.MaxTokens = req.MaxOutputTokens
+		out.SetRawField("max_tokens", req.MaxOutputTokens)
+	}
 	if out.Stream {
 		out.SetRawField("stream", true)
 	}
@@ -514,6 +519,9 @@ func providerToResponsesResponse(resp *provider.Response, model string) *respons
 // tryChatGPTPassthrough 检查请求是否应该走 ChatGPT 透传路径
 // ChatGPT 的 Codex API 直接返回 Responses API SSE 格式，不需要 Anthropic 转换
 func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesRequest, rawBody []byte) bool {
+	if !req.Stream {
+		return false
+	}
 	providerChain, err := h.router.RouteForStream(req.Model)
 	if err != nil {
 		return false
@@ -522,24 +530,23 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 	for _, p := range providerChain {
 		if chatgptPassthrough, ok := p.(provider.ChatGPTPassthroughMarker); ok {
 			h.logger.Printf("[RESPONSES] Using ChatGPT passthrough for model %s", req.Model)
-
-			// 设置 SSE headers
-			c.Header("Content-Type", "text/event-stream")
-			c.Header("Cache-Control", "no-cache")
-			c.Header("Connection", "keep-alive")
-			c.Header("X-Accel-Buffering", "no")
-			c.Writer.WriteHeader(http.StatusOK)
+			streamWriter := newDeferredStreamWriter(c)
 
 			// 直接透传原始请求体到 ChatGPT
-			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), c.Writer); err != nil {
+			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), streamWriter); err != nil {
 				h.logger.Printf("[RESPONSES] ChatGPT passthrough failed: %v", err)
-				if !c.Writer.Written() {
-					c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+				if c.Writer.Written() {
+					_ = writeResponsesStreamError(c.Writer, err)
+				} else {
+					setProviderErrorHeaders(c, err)
+					c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 						"message": err.Error(),
 						"type":    "server_error",
 					}})
 				}
+				return true
 			}
+			streamWriter.Commit()
 			return true
 		}
 	}

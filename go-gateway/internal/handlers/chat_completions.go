@@ -244,6 +244,7 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	resp, err := h.router.Forward(c.Request.Context(), providerReq.Model, providerReq)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
+		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
@@ -257,13 +258,13 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provider.Request) {
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
+		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 
 	originalModel := req.Model
 	var lastErr error
-	anySuccess := false
 	for _, p := range providerChain {
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
@@ -271,20 +272,30 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
-			anySuccess = true
 			return
 		} else {
 			lastErr = err
 			h.logger.Printf("chat.completions stream provider %s failed: %v", p.Name(), err)
+			if c.Writer.Written() {
+				_ = writeOpenAIStreamError(c.Writer, err)
+				return
+			}
+			if !provider.ShouldFallback(err) {
+				setProviderErrorHeaders(c, err)
+				c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
+				return
+			}
 		}
 	}
-	if !anySuccess {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
+	if !c.Writer.Written() {
+		setProviderErrorHeaders(c, lastErr)
+		c.JSON(routingErrorStatus(lastErr), gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
 	}
 }
 
 func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider) error {
 	pr, pw := io.Pipe()
+	streamWriter := newDeferredStreamWriter(c)
 	errCh := make(chan error, 1)
 	go func() {
 		if sp, ok := p.(provider.StreamProvider); ok {
@@ -295,19 +306,14 @@ func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *p
 		_ = pw.Close()
 	}()
 
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
-
-	if err := anthropicSSEToOpenAISSE(pr, c.Writer); err != nil {
+	if err := anthropicSSEToOpenAISSE(pr, streamWriter); err != nil {
 		_ = pr.Close()
 		return err
 	}
 	if err := <-errCh; err != nil {
 		return err
 	}
+	streamWriter.Commit()
 	return nil
 }
 

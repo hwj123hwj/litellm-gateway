@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -16,10 +17,12 @@ import (
 )
 
 type stubChatProvider struct {
-	name       string
-	resp       *provider.Response
-	streamData string
-	lastReq    *provider.Request
+	name        string
+	resp        *provider.Response
+	streamData  string
+	streamErr   error
+	streamCalls int
+	lastReq     *provider.Request
 }
 
 func (p *stubChatProvider) Name() string                     { return p.name }
@@ -32,9 +35,14 @@ func (p *stubChatProvider) ForwardRequest(_ context.Context, req *provider.Reque
 	return p.resp, nil
 }
 func (p *stubChatProvider) ForwardStream(_ context.Context, req *provider.Request, w io.Writer) error {
+	p.streamCalls++
 	p.lastReq = req
-	_, err := io.WriteString(w, p.streamData)
-	return err
+	if p.streamData != "" {
+		if _, err := io.WriteString(w, p.streamData); err != nil {
+			return err
+		}
+	}
+	return p.streamErr
 }
 
 func TestChatCompletionsHandlerReturnsOpenAIResponse(t *testing.T) {
@@ -385,5 +393,106 @@ func TestChatCompletionsHandlerStreamsToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(bodyText, `"finish_reason":"tool_calls"`) {
 		t.Fatalf("expected finish_reason tool_calls, got %s", bodyText)
+	}
+}
+
+func TestChatCompletionsHandlerFallsBackBeforeStreamStarts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	first := &stubChatProvider{
+		name:      "rate-limited",
+		streamErr: &provider.ProviderError{Provider: "rate-limited", StatusCode: http.StatusTooManyRequests, Message: "quota exceeded"},
+	}
+	second := &stubChatProvider{
+		name: "fallback",
+		streamData: strings.Join([]string{
+			"event: message_start",
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fallback\",\"model\":\"fallback\"}}",
+			"",
+			"event: message_stop",
+			"data: {\"type\":\"message_stop\"}",
+			"",
+		}, "\n"),
+	}
+	router.RegisterProvider(first.name, first)
+	router.RegisterProvider(second.name, second)
+	router.RegisterChain("coding", []string{first.name, second.name})
+
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", NewChatCompletionsHandler(router, logger).Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected fallback 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if first.streamCalls != 1 || second.streamCalls != 1 {
+		t.Fatalf("expected both providers to be attempted once, got first=%d second=%d", first.streamCalls, second.streamCalls)
+	}
+	if !strings.Contains(w.Body.String(), "data: [DONE]") {
+		t.Fatalf("expected fallback stream to complete, got %s", w.Body.String())
+	}
+}
+
+func TestChatCompletionsHandlerPreservesProviderStatusWhenAllStreamsFail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	for _, name := range []string{"first", "second"} {
+		stub := &stubChatProvider{
+			name:      name,
+			streamErr: &provider.ProviderError{Provider: name, StatusCode: http.StatusUnauthorized, Message: "invalid api key"},
+		}
+		router.RegisterProvider(name, stub)
+	}
+	router.RegisterChain("coding", []string{"first", "second"})
+
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", NewChatCompletionsHandler(router, logger).Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected upstream 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestChatCompletionsHandlerDoesNotFallbackAfterStreamStarts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	first := &stubChatProvider{
+		name:       "partial",
+		streamData: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"model\":\"partial\"}}\n\n",
+		streamErr:  errors.New("upstream stream interrupted"),
+	}
+	second := &stubChatProvider{
+		name:       "must-not-run",
+		streamData: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_second\",\"model\":\"second\"}}\n\n",
+	}
+	router.RegisterProvider(first.name, first)
+	router.RegisterProvider(second.name, second)
+	router.RegisterChain("coding", []string{first.name, second.name})
+
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", NewChatCompletionsHandler(router, logger).Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if second.streamCalls != 0 {
+		t.Fatal("must not fallback after the first SSE bytes were sent")
+	}
+	if !strings.Contains(w.Body.String(), `"error"`) {
+		t.Fatalf("expected a stream error event, got %s", w.Body.String())
 	}
 }

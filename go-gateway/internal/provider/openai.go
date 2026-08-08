@@ -200,7 +200,7 @@ func (p *OpenAIProvider) ForwardRequest(ctx context.Context, req *Request) (*Res
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai provider error %d: %s", resp.StatusCode, string(respBody))
+		return nil, NewHTTPError(p.Name(), resp, respBody)
 	}
 
 	var oaiResp openAIResponse
@@ -235,7 +235,7 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("openai stream error %d: %s", resp.StatusCode, string(b))
+		return NewHTTPError(p.Name(), resp, b)
 	}
 
 	msgID := "msg_oai_" + time.Now().Format("20060102150405")
