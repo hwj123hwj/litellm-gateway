@@ -5,6 +5,7 @@ import type {
   ModelsResponse,
   LogsResponse,
   HealthResponse,
+  RoutesResponse,
 } from '../api'
 import {
   getDashboard,
@@ -12,6 +13,12 @@ import {
   getModels,
   getLogs,
   getHealth,
+  getRoutes,
+  updateProvider as apiUpdateProvider,
+  resetProvider as apiResetProvider,
+  checkProvider as apiCheckProvider,
+  updateRoute as apiUpdateRoute,
+  updateModel as apiUpdateModel,
   setBackendUrl,
   getBackendUrl,
 } from '../api'
@@ -42,6 +49,17 @@ interface AppState {
   providersLoading: boolean
   providersError: string | null
   fetchProviders: () => Promise<void>
+
+  // Failover routes and controls
+  routes: RoutesResponse | null
+  routesLoading: boolean
+  routesError: string | null
+  fetchRoutes: () => Promise<void>
+  updateProvider: (name: string, enabled: boolean) => Promise<void>
+  resetProvider: (name: string) => Promise<void>
+  checkProvider: (name: string) => Promise<void>
+  updateRoute: (model: string, providers: string[]) => Promise<void>
+  updateModel: (model: string, capabilities: string[], inputModalities?: string[]) => Promise<void>
 
   // Models
   models: ModelsResponse | null
@@ -111,6 +129,42 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e: any) {
       set({ providersError: e.message, providersLoading: false })
     }
+  },
+
+  routes: null,
+  routesLoading: false,
+  routesError: null,
+  fetchRoutes: async () => {
+    set({ routesLoading: true, routesError: null })
+    try {
+      const routes = await getRoutes()
+      set({ routes, routesLoading: false })
+    } catch (e: any) {
+      set({ routesError: e.message, routesLoading: false })
+    }
+  },
+  updateProvider: async (name, enabled) => {
+    await apiUpdateProvider(name, enabled)
+    await get().fetchProviders()
+    await get().fetchRoutes()
+  },
+  resetProvider: async (name) => {
+    await apiResetProvider(name)
+    await get().fetchProviders()
+    await get().fetchRoutes()
+  },
+  checkProvider: async (name) => {
+    await apiCheckProvider(name)
+    await get().fetchProviders()
+    await get().fetchRoutes()
+  },
+  updateRoute: async (model, providers) => {
+    await apiUpdateRoute(model, providers)
+    await get().fetchRoutes()
+  },
+  updateModel: async (model, capabilities, inputModalities) => {
+    await apiUpdateModel(model, capabilities, inputModalities)
+    await get().fetchModels()
   },
 
   // Models

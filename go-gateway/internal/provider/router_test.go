@@ -1,10 +1,14 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestRouterRegisterProvider(t *testing.T) {
@@ -115,5 +119,74 @@ func TestRouterListProviders(t *testing.T) {
 	sort.Strings(providers)
 	if len(providers) != 1 {
 		t.Errorf("Expected 1 provider, got %d: %v", len(providers), providers)
+	}
+}
+
+func TestRouterCircuitBreakerSkipsOpenProviderAndFallsBack(t *testing.T) {
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	first := &errorPolicyProvider{
+		name: "first",
+		err:  &ProviderError{Provider: "first", StatusCode: http.StatusServiceUnavailable, Message: "down"},
+	}
+	second := &errorPolicyProvider{name: "second", resp: &Response{Model: "fallback"}}
+	router := NewRouterWithCircuitConfig(logger, CircuitBreakerConfig{
+		FailureThreshold: 1,
+		RecoveryTimeout:  time.Hour,
+		SuccessThreshold: 1,
+	})
+	router.RegisterProvider(first.name, first)
+	router.RegisterProvider(second.name, second)
+	router.RegisterChain("coding", []string{first.name, second.name})
+
+	if _, err := router.Forward(context.Background(), "coding", &Request{Model: "coding"}); err != nil {
+		t.Fatalf("first request should fallback: %v", err)
+	}
+	if first.calls != 1 || second.calls != 1 {
+		t.Fatalf("first request calls = first:%d second:%d", first.calls, second.calls)
+	}
+
+	if _, err := router.Forward(context.Background(), "coding", &Request{Model: "coding"}); err != nil {
+		t.Fatalf("second request should use healthy fallback: %v", err)
+	}
+	if first.calls != 1 {
+		t.Fatalf("open provider should be skipped, calls = %d", first.calls)
+	}
+	status, ok := router.ProviderStatus("first")
+	if !ok || status.State != CircuitOpen || status.Status != "offline" {
+		t.Fatalf("unexpected first provider status: %#v", status)
+	}
+}
+
+func TestRouterProviderAndRouteControls(t *testing.T) {
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	router := NewRouter(logger)
+	for _, name := range []string{"first", "second"} {
+		router.RegisterProvider(name, &errorPolicyProvider{name: name, resp: &Response{Model: name}})
+	}
+	router.RegisterChain("coding", []string{"first", "second"})
+
+	if err := router.SetProviderEnabled("first", false); err != nil {
+		t.Fatalf("disable provider: %v", err)
+	}
+	providers, err := router.Route("coding")
+	if err != nil || len(providers) != 1 || providers[0].Name() != "second" {
+		t.Fatalf("route after disable = %#v, err=%v", providers, err)
+	}
+	if err := router.SetChainOrder("coding", []string{"second", "first"}); err != nil {
+		t.Fatalf("reorder chain: %v", err)
+	}
+	routes := router.ListRouteStatuses()
+	if len(routes) != 1 || len(routes[0].Providers) != 2 || routes[0].Providers[0].Name != "second" {
+		t.Fatalf("route statuses = %#v", routes)
+	}
+	if err := router.SetModelCapabilities("coding", []string{CapabilityText, CapabilityVision}, []string{"text", "image"}); err != nil {
+		t.Fatalf("set model capabilities: %v", err)
+	}
+	info := router.ListModelInfos()
+	if len(info) != 1 || len(info[0].Capabilities) != 2 || info[0].Capabilities[1] != CapabilityVision {
+		t.Fatalf("model info after update = %#v", info)
+	}
+	if err := router.SetProviderEnabled("missing", true); !errors.Is(err, ErrUnknownProvider) {
+		t.Fatalf("unknown provider error = %v", err)
 	}
 }

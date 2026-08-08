@@ -124,9 +124,13 @@ func (e *UnknownModelError) Error() string {
 type NoAvailableProvidersError struct {
 	Model      string
 	Configured []string
+	Reason     string
 }
 
 func (e *NoAvailableProvidersError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("no available providers for model %s (configured: %v; reason: %s)", e.Model, e.Configured, e.Reason)
+	}
 	return fmt.Sprintf("no available providers for model %s (configured: %v)", e.Model, e.Configured)
 }
 

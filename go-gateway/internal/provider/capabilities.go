@@ -33,13 +33,13 @@ type CapabilityProvider interface {
 // ModelInfo is the public model registry entry returned by /v1/models.
 // The extra fields are additive to the OpenAI model object.
 type ModelInfo struct {
-	ID              string
-	Provider        string
-	Protocol        string
-	Capabilities    []string
-	InputModalities []string
-	MaxInputTokens  int
-	MaxOutputTokens int
+	ID              string   `json:"id"`
+	Provider        string   `json:"provider,omitempty"`
+	Protocol        string   `json:"protocol,omitempty"`
+	Capabilities    []string `json:"capabilities"`
+	InputModalities []string `json:"input_modalities,omitempty"`
+	MaxInputTokens  int      `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 }
 
 // UnsupportedCapabilityError is a client error: the requested model exists,

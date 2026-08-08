@@ -75,6 +75,9 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 	originalModel := req.Model
 	var lastErr error
 	for i, p := range providerChain {
+		if !h.router.AllowProviderRequestFor(originalModel, p) {
+			continue
+		}
 		h.logger.Printf("Stream: trying provider %d/%d: %s", i+1, len(providerChain), p.Name())
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
@@ -82,8 +85,10 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
+			h.router.RecordProviderSuccessFor(originalModel, p)
 			return
 		} else {
+			h.router.RecordProviderFailureFor(originalModel, p, err)
 			h.logger.Printf("Stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
 				_ = writeAnthropicStreamError(c.Writer, err)
@@ -96,6 +101,9 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 				return
 			}
 		}
+	}
+	if lastErr == nil {
+		lastErr = &provider.NoAvailableProvidersError{Model: req.Model, Reason: "disabled, unavailable, or circuit open"}
 	}
 
 	h.logger.Printf("All stream providers failed: %v", lastErr)

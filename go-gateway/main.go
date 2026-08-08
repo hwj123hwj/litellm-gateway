@@ -59,7 +59,11 @@ func main() {
 	}
 
 	// 初始化路由器
-	router := provider.NewRouter(logger)
+	router := provider.NewRouterWithCircuitConfig(logger, provider.CircuitBreakerConfig{
+		FailureThreshold: cfg.CircuitFailureThreshold,
+		RecoveryTimeout:  time.Duration(cfg.CircuitRecoverySeconds) * time.Second,
+		SuccessThreshold: cfg.CircuitSuccessThreshold,
+	})
 
 	// 尝试从 providers.yaml 加载配置
 	configPath := "providers.yaml"
@@ -107,7 +111,7 @@ func main() {
 	}))
 
 	engine.Use(middleware.Logging(logger, collector))
-	engine.Use(auth.BearerAuth(cfg.MasterKey, logger))
+	engine.Use(auth.BearerAuthWithAdminToken(cfg.MasterKey, cfg.AdminToken, logger))
 
 	// 管理端点使用独立的 admin auth
 	adminAuth := auth.AdminAuth(cfg.MasterKey, cfg.AdminToken, logger)
@@ -137,7 +141,13 @@ func main() {
 	{
 		admin.GET("/dashboard", adminHandler.HandleDashboard)
 		admin.GET("/providers", adminHandler.HandleProviders)
+		admin.PATCH("/providers/:name", adminHandler.HandleUpdateProvider)
+		admin.POST("/providers/:name/reset", adminHandler.HandleResetProvider)
+		admin.POST("/providers/:name/health-check", adminHandler.HandleCheckProvider)
 		admin.GET("/models", adminHandler.HandleModels)
+		admin.PUT("/models/:model", adminHandler.HandleUpdateModel)
+		admin.GET("/routes", adminHandler.HandleRoutes)
+		admin.PUT("/routes/:model", adminHandler.HandleUpdateRoute)
 		admin.GET("/logs", adminHandler.HandleLogs)
 		admin.GET("/health", adminHandler.HandleHealth)
 		admin.GET("/config", adminHandler.HandleConfig)

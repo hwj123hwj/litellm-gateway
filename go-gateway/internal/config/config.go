@@ -11,16 +11,19 @@ import (
 
 // Config 应用全局配置
 type Config struct {
-	Port               int
-	LogLevel           string
-	MasterKey          string
-	AdminToken         string // 独立的管理端点 token（可选）
-	GLMAPIKey          string
-	AliAPIKey          string
-	CopilotToken       string // GitHub Copilot token（短期有效，需要定期刷新）
-	CopilotGithubToken string // GitHub OAuth token（用于刷新 Copilot token）
-	HTTPProxy          string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
-	Env                string
+	Port                    int
+	LogLevel                string
+	MasterKey               string
+	AdminToken              string // 独立的管理端点 token（可选）
+	GLMAPIKey               string
+	AliAPIKey               string
+	CopilotToken            string // GitHub Copilot token（短期有效，需要定期刷新）
+	CopilotGithubToken      string // GitHub OAuth token（用于刷新 Copilot token）
+	HTTPProxy               string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
+	Env                     string
+	CircuitFailureThreshold int
+	CircuitRecoverySeconds  int
+	CircuitSuccessThreshold int
 }
 
 // Load 从环境变量加载配置
@@ -28,16 +31,19 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:               getEnvInt("PORT", 4000),
-		LogLevel:           getEnv("LOG_LEVEL", "info"),
-		MasterKey:          getEnv("LITELLM_MASTER_KEY", ""),
-		AdminToken:         getEnv("ADMIN_TOKEN", ""),
-		GLMAPIKey:          getEnv("GLM_API_KEY", ""),
-		AliAPIKey:          getAliAPIKey(),
-		CopilotToken:       getEnv("COPILOT_TOKEN", ""),
-		CopilotGithubToken: getEnv("COPILOT_GITHUB_TOKEN", ""),
-		HTTPProxy:          getEnv("HTTP_PROXY", ""),
-		Env:                getEnv("ENV", "development"),
+		Port:                    getEnvInt("PORT", 4000),
+		LogLevel:                getEnv("LOG_LEVEL", "info"),
+		MasterKey:               getEnv("LITELLM_MASTER_KEY", ""),
+		AdminToken:              getEnv("ADMIN_TOKEN", ""),
+		GLMAPIKey:               getEnv("GLM_API_KEY", ""),
+		AliAPIKey:               getAliAPIKey(),
+		CopilotToken:            getEnv("COPILOT_TOKEN", ""),
+		CopilotGithubToken:      getEnv("COPILOT_GITHUB_TOKEN", ""),
+		HTTPProxy:               getEnv("HTTP_PROXY", ""),
+		Env:                     getEnv("ENV", "development"),
+		CircuitFailureThreshold: getEnvInt("CIRCUIT_FAILURE_THRESHOLD", 3),
+		CircuitRecoverySeconds:  getEnvInt("CIRCUIT_RECOVERY_SECONDS", 30),
+		CircuitSuccessThreshold: getEnvInt("CIRCUIT_SUCCESS_THRESHOLD", 1),
 	}
 
 	if cfg.MasterKey == "" {

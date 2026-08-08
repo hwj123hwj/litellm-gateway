@@ -529,11 +529,15 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 
 	for _, p := range providerChain {
 		if chatgptPassthrough, ok := p.(provider.ChatGPTPassthroughMarker); ok {
+			if !h.router.AllowProviderRequestFor(req.Model, p) {
+				continue
+			}
 			h.logger.Printf("[RESPONSES] Using ChatGPT passthrough for model %s", req.Model)
 			streamWriter := newDeferredStreamWriter(c)
 
 			// 直接透传原始请求体到 ChatGPT
 			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), streamWriter); err != nil {
+				h.router.RecordProviderFailureFor(req.Model, p, err)
 				h.logger.Printf("[RESPONSES] ChatGPT passthrough failed: %v", err)
 				if c.Writer.Written() {
 					_ = writeResponsesStreamError(c.Writer, err)
@@ -546,6 +550,7 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 				}
 				return true
 			}
+			h.router.RecordProviderSuccessFor(req.Model, p)
 			streamWriter.Commit()
 			return true
 		}

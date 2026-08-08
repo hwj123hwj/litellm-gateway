@@ -65,3 +65,18 @@ func TestBearerAuthHealthPublic(t *testing.T) {
 		t.Errorf("Expected 200 (public endpoint), got %d", w.Code)
 	}
 }
+
+func TestBearerAuthAllowsConfiguredAdminTokenOnAdminPaths(t *testing.T) {
+	logger := log.New(os.Stderr, "", 0)
+	e := gin.New()
+	e.Use(BearerAuthWithAdminToken("master-key", "admin-key", logger))
+	e.GET("/admin/providers", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/providers", nil)
+	req.Header.Set("Authorization", "Bearer admin-key")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected admin token to be accepted, got %d: %s", w.Code, w.Body.String())
+	}
+}

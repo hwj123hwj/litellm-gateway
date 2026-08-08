@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/metrics"
@@ -31,30 +33,20 @@ func NewAdminHandler(router *provider.Router, collector *metrics.Collector, logg
 func (h *AdminHandler) HandleDashboard(c *gin.Context) {
 	summary := h.collector.GetDashboard()
 
-	// 补充提供商状态信息
-	providerStats := h.collector.GetProviderStats()
-	providers := make([]gin.H, 0, len(providerStats))
-	for _, ps := range providerStats {
-		providers = append(providers, gin.H{
-			"name":        ps.Provider,
-			"status":      ps.Status,
-			"requests":    ps.Requests,
-			"avg_latency": ps.AvgLatency,
-		})
-	}
+	providers := h.providerPayloads()
 
 	// 补充模型排行
 	modelStats := h.collector.GetModelStats()
 	models := make([]gin.H, 0, len(modelStats))
 	for _, ms := range modelStats {
 		models = append(models, gin.H{
-			"model":       ms.Model,
-			"provider":    ms.Provider,
-			"requests":    ms.Requests,
+			"model":        ms.Model,
+			"provider":     ms.Provider,
+			"requests":     ms.Requests,
 			"total_tokens": ms.TotalTokens,
-			"avg_latency": ms.AvgLatency,
-			"successes":   ms.Successes,
-			"errors":      ms.Errors,
+			"avg_latency":  ms.AvgLatency,
+			"successes":    ms.Successes,
+			"errors":       ms.Errors,
 		})
 	}
 
@@ -74,38 +66,7 @@ func (h *AdminHandler) HandleDashboard(c *gin.Context) {
 // HandleProviders GET /admin/providers
 // 返回所有提供商状态
 func (h *AdminHandler) HandleProviders(c *gin.Context) {
-	providerStats := h.collector.GetProviderStats()
-	registeredProviders := h.router.ListProviders()
-
-	// 合并已注册但还没有请求记录的提供商
-	seen := make(map[string]bool)
-	for _, ps := range providerStats {
-		seen[ps.Provider] = true
-	}
-
-	result := make([]gin.H, 0, len(registeredProviders))
-	for _, name := range registeredProviders {
-		if seen[name] {
-			continue
-		}
-		result = append(result, gin.H{
-			"name":        name,
-			"status":      "unknown",
-			"requests":    0,
-			"avg_latency": 0,
-		})
-	}
-	for _, ps := range providerStats {
-		result = append(result, gin.H{
-			"name":        ps.Provider,
-			"status":      ps.Status,
-			"requests":    ps.Requests,
-			"successes":   ps.Successes,
-			"errors":      ps.Errors,
-			"avg_latency": ps.AvgLatency,
-			"last_check":  ps.LastCheck,
-		})
-	}
+	result := h.providerPayloads()
 
 	c.JSON(http.StatusOK, gin.H{
 		"providers": result,
@@ -117,41 +78,34 @@ func (h *AdminHandler) HandleProviders(c *gin.Context) {
 // 返回所有模型统计
 func (h *AdminHandler) HandleModels(c *gin.Context) {
 	modelStats := h.collector.GetModelStats()
-	chains := h.router.ListChains()
-
-	// 合并已注册但还没有请求记录的模型
-	seen := make(map[string]bool)
-	for _, ms := range modelStats {
-		seen[ms.Model] = true
+	statsByModel := make(map[string]metrics.ModelStats, len(modelStats))
+	for _, stat := range modelStats {
+		statsByModel[stat.Model] = stat
+	}
+	routes := h.router.ListRouteStatuses()
+	routeByModel := make(map[string]provider.RouteStatus, len(routes))
+	for _, route := range routes {
+		routeByModel[route.Model] = route
 	}
 
-	result := make([]gin.H, 0, len(chains))
-	for _, name := range chains {
-		if seen[name] {
+	result := make([]gin.H, 0)
+	seen := make(map[string]bool)
+	for _, info := range h.router.ListModelInfos() {
+		seen[info.ID] = true
+		stat := statsByModel[info.ID]
+		entry := modelPayload(info, stat, routeByModel[info.ID])
+		result = append(result, entry)
+	}
+	// Preserve historical stats if a model was removed from the current config
+	// during a live reload.
+	for _, stat := range modelStats {
+		if seen[stat.Model] {
 			continue
 		}
 		result = append(result, gin.H{
-			"model":       name,
-			"status":      "idle",
-			"requests":    0,
-			"total_tokens": 0,
-			"avg_latency": 0,
-		})
-	}
-	for _, ms := range modelStats {
-		status := "online"
-		if ms.Errors > 0 && float64(ms.Errors)/float64(ms.Requests) > 0.3 {
-			status = "degraded"
-		}
-		result = append(result, gin.H{
-			"model":        ms.Model,
-			"provider":     ms.Provider,
-			"status":       status,
-			"requests":     ms.Requests,
-			"total_tokens": ms.TotalTokens,
-			"avg_latency":  ms.AvgLatency,
-			"successes":    ms.Successes,
-			"errors":       ms.Errors,
+			"model": stat.Model, "provider": stat.Provider, "status": "online",
+			"requests": stat.Requests, "total_tokens": stat.TotalTokens,
+			"avg_latency": stat.AvgLatency, "successes": stat.Successes, "errors": stat.Errors,
 		})
 	}
 
@@ -175,16 +129,16 @@ func (h *AdminHandler) HandleLogs(c *gin.Context) {
 	result := make([]gin.H, 0, len(logs))
 	for _, r := range logs {
 		entry := gin.H{
-			"timestamp":    r.Timestamp,
-			"method":       r.Method,
-			"path":         r.Path,
-			"model":        r.Model,
-			"provider":     r.Provider,
-			"status_code":  r.StatusCode,
-			"latency_ms":   r.Latency,
-			"input_tokens": r.InputTokens,
+			"timestamp":     r.Timestamp,
+			"method":        r.Method,
+			"path":          r.Path,
+			"model":         r.Model,
+			"provider":      r.Provider,
+			"status_code":   r.StatusCode,
+			"latency_ms":    r.Latency,
+			"input_tokens":  r.InputTokens,
 			"output_tokens": r.OutputTokens,
-			"is_stream":    r.IsStream,
+			"is_stream":     r.IsStream,
 		}
 		if r.Error != "" {
 			entry["error"] = r.Error
@@ -202,22 +156,30 @@ func (h *AdminHandler) HandleLogs(c *gin.Context) {
 // 返回详细的系统健康状态
 func (h *AdminHandler) HandleHealth(c *gin.Context) {
 	dashboard := h.collector.GetDashboard()
-	providerStats := h.collector.GetProviderStats()
-
-	providerStatuses := make([]gin.H, 0, len(providerStats))
+	providerStatuses := make([]gin.H, 0)
 	onlineCount := 0
-	for _, ps := range providerStats {
-		if ps.Status == "online" {
+	degradedProvider := false
+	for _, status := range h.router.ListProviderStatuses() {
+		if status.Status == "online" {
 			onlineCount++
+		} else if status.Status == "degraded" || status.Status == "offline" {
+			degradedProvider = true
 		}
 		providerStatuses = append(providerStatuses, gin.H{
-			"provider": ps.Provider,
-			"status":   ps.Status,
+			"provider": status.Name,
+			"status":   status.Status,
+			"state":    status.State,
+			"enabled":  status.Enabled,
 		})
 	}
 
 	overallStatus := "ok"
 	if dashboard.SuccessRate < 95 && dashboard.TodayRequests > 10 {
+		overallStatus = "degraded"
+	}
+	if len(providerStatuses) > 0 && onlineCount == 0 {
+		overallStatus = "degraded"
+	} else if degradedProvider {
 		overallStatus = "degraded"
 	}
 
@@ -229,7 +191,7 @@ func (h *AdminHandler) HandleHealth(c *gin.Context) {
 		"active_models":    dashboard.ActiveModels,
 		"avg_latency_ms":   dashboard.AvgLatency,
 		"providers_online": onlineCount,
-		"providers_total":  len(providerStats),
+		"providers_total":  len(providerStatuses),
 		"providers":        providerStatuses,
 	})
 }
@@ -241,11 +203,129 @@ func (h *AdminHandler) HandleConfig(c *gin.Context) {
 	chains := h.router.ListChains()
 
 	c.JSON(http.StatusOK, gin.H{
-		"providers": providers,
-		"chains":    chains,
+		"providers":       providers,
+		"chains":          chains,
+		"routes":          h.router.ListRouteStatuses(),
+		"models":          h.router.ListModelInfos(),
 		"total_providers": len(providers),
 		"total_chains":    len(chains),
 	})
+}
+
+// HandleRoutes GET /admin/routes returns the ordered failover chains.
+func (h *AdminHandler) HandleRoutes(c *gin.Context) {
+	routes := h.router.ListRouteStatuses()
+	c.JSON(http.StatusOK, gin.H{"routes": routes, "total": len(routes)})
+}
+
+type providerUpdateRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// HandleUpdateProvider PATCH /admin/providers/:name updates runtime controls.
+// Only enablement is mutable here; credentials remain environment-backed.
+func (h *AdminHandler) HandleUpdateProvider(c *gin.Context) {
+	var request providerUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
+		return
+	}
+	if err := h.router.SetProviderEnabled(c.Param("name"), *request.Enabled); err != nil {
+		h.writeControlError(c, err)
+		return
+	}
+	status, _ := h.router.ProviderStatus(c.Param("name"))
+	c.JSON(http.StatusOK, providerStatusPayload(status))
+}
+
+// HandleResetProvider POST /admin/providers/:name/reset manually closes a
+// circuit after an operator has fixed credentials or an upstream incident.
+func (h *AdminHandler) HandleResetProvider(c *gin.Context) {
+	if err := h.router.ResetProvider(c.Param("name")); err != nil {
+		h.writeControlError(c, err)
+		return
+	}
+	status, _ := h.router.ProviderStatus(c.Param("name"))
+	c.JSON(http.StatusOK, providerStatusPayload(status))
+}
+
+// HandleCheckProvider POST /admin/providers/:name/health-check runs the
+// provider's built-in lightweight health probe on demand.
+func (h *AdminHandler) HandleCheckProvider(c *gin.Context) {
+	healthy, err := h.router.CheckProviderHealth(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		h.writeControlError(c, err)
+		return
+	}
+	status, _ := h.router.ProviderStatus(c.Param("name"))
+	c.JSON(http.StatusOK, gin.H{"healthy": healthy, "provider": providerStatusPayload(status)})
+}
+
+type routeUpdateRequest struct {
+	Providers []string `json:"providers"`
+}
+
+// HandleUpdateRoute PUT /admin/routes/:model changes failover priority while
+// requiring the same provider set as the current route.
+func (h *AdminHandler) HandleUpdateRoute(c *gin.Context) {
+	var request routeUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil || len(request.Providers) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "providers must be a non-empty array"})
+		return
+	}
+	if err := h.router.SetChainOrder(c.Param("model"), request.Providers); err != nil {
+		h.writeControlError(c, err)
+		return
+	}
+	for _, route := range h.router.ListRouteStatuses() {
+		if route.Model == c.Param("model") {
+			c.JSON(http.StatusOK, route)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
+}
+
+type modelUpdateRequest struct {
+	Capabilities    *[]string `json:"capabilities"`
+	InputModalities *[]string `json:"input_modalities"`
+}
+
+// HandleUpdateModel PUT /admin/models/:model updates public capability
+// metadata and the capability gate used for later requests.
+func (h *AdminHandler) HandleUpdateModel(c *gin.Context) {
+	var request modelUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil || (request.Capabilities == nil && request.InputModalities == nil) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "capabilities or input_modalities is required"})
+		return
+	}
+	var current provider.ModelInfo
+	found := false
+	for _, info := range h.router.ListModelInfos() {
+		if info.ID == c.Param("model") {
+			current, found = info, true
+			break
+		}
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
+		return
+	}
+	capabilities := current.Capabilities
+	var modalities []string
+	if request.Capabilities != nil {
+		capabilities = *request.Capabilities
+	}
+	if request.InputModalities != nil {
+		modalities = *request.InputModalities
+	} else if request.Capabilities == nil {
+		modalities = current.InputModalities
+	}
+	if err := h.router.SetModelCapabilities(c.Param("model"), capabilities, modalities); err != nil {
+		h.writeControlError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"model": c.Param("model")})
 }
 
 // HandleStats GET /admin/stats
@@ -273,4 +353,102 @@ func (h *AdminHandler) HandleStats(c *gin.Context) {
 		"models":    modelStats,
 		"providers": providerStats,
 	})
+}
+
+func (h *AdminHandler) providerPayloads() []gin.H {
+	stats := make(map[string]metrics.ProviderStats)
+	for _, stat := range h.collector.GetProviderStats() {
+		stats[stat.Provider] = stat
+	}
+	result := make([]gin.H, 0)
+	for _, status := range h.router.ListProviderStatuses() {
+		entry := providerStatusPayload(status)
+		if stat, ok := stats[status.Name]; ok {
+			entry["requests"] = stat.Requests
+			entry["successes"] = stat.Successes
+			entry["errors"] = stat.Errors
+			entry["avg_latency"] = stat.AvgLatency
+			entry["last_check"] = stat.LastCheck
+		} else {
+			entry["requests"] = 0
+			entry["successes"] = 0
+			entry["errors"] = 0
+			entry["avg_latency"] = 0
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func providerStatusPayload(status provider.RuntimeProviderStatus) gin.H {
+	entry := gin.H{
+		"name":                 status.Name,
+		"enabled":              status.Enabled,
+		"status":               status.Status,
+		"state":                status.State,
+		"consecutive_failures": status.ConsecutiveFailures,
+		"total_failures":       status.TotalFailures,
+		"total_successes":      status.TotalSuccesses,
+	}
+	if !status.LastFailureAt.IsZero() {
+		entry["last_failure_at"] = status.LastFailureAt.Format(time.RFC3339Nano)
+	}
+	if !status.LastSuccessAt.IsZero() {
+		entry["last_success_at"] = status.LastSuccessAt.Format(time.RFC3339Nano)
+	}
+	if !status.OpenedAt.IsZero() {
+		entry["opened_at"] = status.OpenedAt.Format(time.RFC3339Nano)
+	}
+	if !status.NextRetryAt.IsZero() {
+		entry["next_retry_at"] = status.NextRetryAt.Format(time.RFC3339Nano)
+	}
+	return entry
+}
+
+func modelPayload(info provider.ModelInfo, stat metrics.ModelStats, route provider.RouteStatus) gin.H {
+	status := "idle"
+	if stat.Requests > 0 {
+		status = "online"
+		if stat.Errors > 0 && float64(stat.Errors)/float64(stat.Requests) > 0.3 {
+			status = "degraded"
+		}
+	}
+	providerNames := make([]string, 0, len(route.Providers))
+	for _, item := range route.Providers {
+		providerNames = append(providerNames, item.Name)
+		if item.Status == "offline" && status == "idle" {
+			status = "offline"
+		}
+	}
+	entry := gin.H{
+		"model":            info.ID,
+		"provider":         info.Provider,
+		"status":           status,
+		"requests":         stat.Requests,
+		"total_tokens":     stat.TotalTokens,
+		"avg_latency":      stat.AvgLatency,
+		"successes":        stat.Successes,
+		"errors":           stat.Errors,
+		"capabilities":     info.Capabilities,
+		"input_modalities": info.InputModalities,
+		"providers":        providerNames,
+	}
+	if info.Protocol != "" {
+		entry["protocol"] = info.Protocol
+	}
+	if info.MaxInputTokens > 0 {
+		entry["max_input_tokens"] = info.MaxInputTokens
+	}
+	if info.MaxOutputTokens > 0 {
+		entry["max_output_tokens"] = info.MaxOutputTokens
+	}
+	return entry
+}
+
+func (h *AdminHandler) writeControlError(c *gin.Context, err error) {
+	status := http.StatusBadRequest
+	if errors.Is(err, provider.ErrUnknownProvider) || errors.Is(err, provider.ErrUnknownChain) {
+		status = http.StatusNotFound
+	}
+	c.JSON(status, gin.H{"error": err.Error()})
 }
