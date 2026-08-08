@@ -195,7 +195,7 @@ litellm-gateway/
 ├── scripts/                 # 配套工具脚本
 │   └── codex-model          # Codex CLI 模型切换
 ├── .github/workflows/       # GitHub Actions CI/CD
-├── docs/                    # 文档
+├── docs/                    # 项目展示页及补充文档
 └── README.md                # 本文件
 ```
 
@@ -203,10 +203,10 @@ litellm-gateway/
 
 | 文档 | 说明 |
 |------|------|
+| [PRD.md](PRD.md) | 产品需求、范围和核心验收 |
+| [AGENTS.md](AGENTS.md) | 项目开发准则 |
 | [go-gateway/README.md](go-gateway/README.md) | Go 网关完整文档（架构、模型列表、部署） |
-| [docs/deepv-integration-plan.md](docs/deepv-integration-plan.md) | DeepV Server 接入文档 |
-| [docs/openai-compatible-providers.md](docs/openai-compatible-providers.md) | 上游提供商 OpenAI 兼容接口整理 |
-| [.claude/CLAUDE.md](.claude/CLAUDE.md) | 面向 agent 的技术指南 |
+| [docs/index.html](docs/index.html) | 项目展示页 |
 
 ## 环境变量
 
