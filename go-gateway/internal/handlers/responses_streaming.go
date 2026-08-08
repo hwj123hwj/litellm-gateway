@@ -41,6 +41,7 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 		if !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
 		}
+		started := time.Now()
 		h.logger.Printf("Responses stream: trying provider %d/%d: %s", i+1, len(providerChain), p.Name())
 
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
@@ -50,9 +51,11 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest) {
 		}
 
 		if err := h.streamFromProvider(c, providerReq, p, originalModel); err == nil {
+			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
 			return
 		} else {
+			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
 			h.logger.Printf("Responses stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {

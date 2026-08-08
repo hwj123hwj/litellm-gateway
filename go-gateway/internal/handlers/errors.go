@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/provider"
+	"github.com/weijian/go-llm-gateway/internal/requestmeta"
 )
 
 func routingErrorStatus(err error) int {
@@ -30,6 +31,9 @@ func routingErrorStatus(err error) int {
 // setProviderErrorHeaders preserves retry and correlation metadata without
 // exposing the complete upstream response body to the client or logs.
 func setProviderErrorHeaders(c *gin.Context, err error) {
+	if err != nil {
+		c.Set(requestmeta.RequestErrorKey, summarizeRequestError(err))
+	}
 	var providerErr *provider.ProviderError
 	if !errors.As(err, &providerErr) {
 		return

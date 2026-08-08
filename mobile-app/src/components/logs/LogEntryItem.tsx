@@ -25,6 +25,7 @@ function LogEntryItemComponent({ item }: { item: LogEntry }) {
   if (item.input_tokens > 0)
     detailParts.push(`${item.input_tokens + item.output_tokens} tokens`)
   if (item.is_stream) detailParts.push('流式')
+  if (item.request_id) detailParts.push(item.request_id)
   if (item.error) detailParts.push(item.error)
 
   return (

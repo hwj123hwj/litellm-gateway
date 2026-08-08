@@ -104,12 +104,13 @@ func main() {
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With"},
-		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Request-ID"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Type", "X-Request-ID", "X-Upstream-Request-ID"},
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
 
+	engine.Use(middleware.RequestID())
 	engine.Use(middleware.Logging(logger, collector))
 	engine.Use(auth.BearerAuthWithAdminToken(cfg.MasterKey, cfg.AdminToken, logger))
 
@@ -301,6 +302,9 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 		router.RegisterChain("glm-sonnet", []string{"glm"})
 		router.RegisterChain("glm-haiku", []string{"glm"})
 		router.RegisterChain("glm-opus", []string{"glm"})
+		router.RegisterChain("glm-4.7-flash", []string{"glm-free"})
+		// Keep the historical alias for existing local clients when providers.yaml
+		// is absent; new configuration should use the explicit model ID above.
 		router.RegisterChain("glm-flash", []string{"glm-free"})
 	}
 	// Ali 核心别名

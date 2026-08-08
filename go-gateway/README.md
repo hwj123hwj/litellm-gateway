@@ -1,6 +1,8 @@
 # go-gateway
 
-轻量级 LLM API 网关，用 Go 编写。支持智谱、小米、美团等多家提供商，内存占用约 18 MB。
+轻量级个人 AI 基础设施网关，用 Go 编写。它统一 OpenAI Chat/Responses 与 Anthropic Messages 入口，按模型能力选择 Provider，并提供 fallback、熔断、指标和管理 API。
+
+Provider、模型别名和路由以本目录的 [`providers.yaml`](providers.yaml) 为准；客户端和文档不维护另一份静态模型清单。运行中的实际目录请以 `GET /v1/models` 为准。
 
 ## 快速启动
 
@@ -129,23 +131,17 @@ models:
 
 ### 日志查看
 
+网关默认将结构化摘要写到 stdout。每个请求都会带 `X-Request-ID`，指标日志中还会记录最终 Provider 和 fallback 尝试；请求正文不会默认写入日志。
+
 ```bash
-# 查看最新 50 行日志
-tail -50 /tmp/gw.log
+# 运行时保存日志（按需替换为 systemd/Docker 日志收集）
+./gateway 2>&1 | tee -a gateway.log
 
-# 实时跟踪日志
-# 新开一个终端窗口，运行：
-tail -f /tmp/gw.log
-
-# 搜索特定模型的错误
-tail -100 /tmp/gw.log | grep -E "glm|copilot|chatgpt"
-
-# 只看错误
-tail -100 /tmp/gw.log | grep -E "error|Error|failed"
+# 按 request ID 检索
+grep 'request_id=client-trace-42' gateway.log
 ```
 
-> 日志文件位置：`/tmp/gw.log`
-> 日志会被 `pkill` + 重启覆盖，如需保留历史日志请重定向到其他文件。
+完整请求/响应归档尚未启用，详见根目录 `PRD.md` 的 R6；不要把 stdout 当作对话历史。
 
 ### 健康检查
 
@@ -216,61 +212,20 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 ## 可用模型
 
-### OpenAI 主链（推荐）
+当前仓库 `providers.yaml` 默认提供以下路由（未配置对应 API key 的 Provider 会自动跳过）：
 
-以下模型链优先走 OpenAI 风格上游：
-
-| 模型名 | 上游顺序 | 说明 |
+| 模型名 | 默认上游 | 能力 |
 |--------|---------|------|
-| `coding` | GLM coding plan → MiMo → LongCat | 日常推荐，自动 fallback |
-| `glm-haiku` | GLM coding plan | 轻量快速 |
-| `glm-sonnet` | GLM coding plan | 主力模型 |
-| `glm-opus` | GLM coding plan | 旗舰模型 |
-| `mimo-sonnet` | MiMo OpenAI | 思考模型 |
-| `mimo-opus` | MiMo OpenAI | 思考旗舰 |
-| `longcat-sonnet` | LongCat OpenAI | 长上下文 |
-| `longcat-opus` | LongCat OpenAI | 长上下文旗舰 |
+| `coding` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
+| `coding-anthropic` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | `/v1/messages` 兼容链 |
+| `glm-opus` | GLM `glm-5.2` | 文本、工具调用、推理、流式 |
+| `glm-sonnet` | GLM `glm-5-turbo` | 文本、工具调用、推理、流式 |
+| `glm-haiku` | GLM `glm-4.7` | 文本、工具调用、推理、流式 |
+| `glm-4.7-flash` | GLM `glm-4.7-flash` | 文本、工具调用、流式 |
+| `glm-vision` | GLM Vision `glm-5v-turbo` | 文本、图片、视频、文件、工具调用、推理、流式 |
+| `ali-opus` | 阿里 `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
 
-### Anthropic 兼容链
-
-以下模型链用于 `/v1/messages`，走 Anthropic 风格上游：
-
-| 模型名 | 上游顺序 | 说明 |
-|--------|---------|------|
-| `coding-anthropic` | GLM Anthropic → MiMo Anthropic → LongCat Anthropic | Anthropic 兼容推荐链 |
-| `glm-haiku-anthropic` | GLM Anthropic | 轻量快速 |
-| `glm-sonnet-anthropic` | GLM Anthropic | 主力模型 |
-| `glm-opus-anthropic` | GLM Anthropic | 旗舰模型 |
-| `mimo-sonnet-anthropic` | MiMo Anthropic | 思考模型 |
-| `mimo-opus-anthropic` | MiMo Anthropic | 思考旗舰 |
-| `longcat-sonnet-anthropic` | LongCat Anthropic | 长上下文 |
-| `longcat-opus-anthropic` | LongCat Anthropic | 长上下文旗舰 |
-
-### EasyClaw（真实 Claude）
-
-| 模型名 | 实际模型 | 说明 |
-|--------|---------|------|
-| `easyclaw-sonnet` | claude-sonnet-4-6 | 真实 Claude |
-| `easyclaw-opus` | claude-opus-4-6 | 真实 Claude 旗舰 |
-| `claude-sonnet-4-6` | claude-sonnet-4-6 | 兼容别名 |
-
-> EasyClaw 使用 OpenAI `/v1/chat/completions` 格式，网关会自动做格式转换。
-
-### ChatGPT Codex（GPT-5.5，OAuth）
-
-使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用 OpenAI Codex API，不需要额外 API key。
-
-| 模型名 | 实际模型 | 说明 |
-|--------|---------|------|
-| `gpt-5.5` | gpt-5.5 | ChatGPT Plus/Pro |
-| `gpt-5.5-pro` | gpt-5.5-pro | ChatGPT Pro |
-| `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
-| `o4-mini` | o4-mini | 推理模型 |
-
-> **前提条件**：
-> 1. 在 `.env` 中设置 `HTTP_PROXY=http://127.0.0.1:7890`（国内网络需要代理）
-> 2. 已通过 Codex Desktop 登录 ChatGPT，网关会自动读取 `~/.codex/auth.json` 中的 OAuth token
-> 3. 请求走 Responses API 透传（`/v1/responses`），不需要格式转换
+配置了可选的 ChatGPT Codex 代理或 GitHub Copilot 后，额外模型会动态加入目录；不要在客户端硬编码版本，直接读取 `/v1/models`。
 
 ---
 
@@ -280,11 +235,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 |------|------|--------|------|
 | `LITELLM_MASTER_KEY` | 是 | — | 网关认证 token |
 | `GLM_API_KEY` | 否 | — | 智谱 API key |
-| `MIMO_API_KEY` | 否 | — | 小米 API key |
-| `LONGCAT_API_KEY` | 否 | — | 美团 API key |
-| `EASYCLAW_API_KEY` | 否 | — | EasyClaw API key |
-| `DEEPV_ENABLED` | 否 | false | 启用 DeepV Server（true/false） |
-| `DEEPV_WORK_DIR` | 否 | — | DeepV 工作目录（用于获取 Git 信息） |
+| `ALI_API_KEY` | 否 | — | 阿里 MaaS API key（也兼容 `ALIYUN_MAAS_API_KEY`、`DASHSCOPE_API_KEY`） |
 | `COPILOT_TOKEN` | 否 | — | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | — | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | — | HTTP 代理地址（如 `http://127.0.0.1:7890`），启用 ChatGPT Codex |
@@ -323,10 +274,9 @@ OpenAI / Anthropic / Codex CLI 客户端
 │  └──────────────────────┘   │
 │                             │
 │  Providers                  │
-│  ├── OpenAIProvider         │──▶ GLM coding / MiMo / LongCat / EasyClaw
-│  ├── AnthropicProvider      │──▶ GLM / MiMo / LongCat Anthropic
-│  ├── CopilotProvider        │──▶ GitHub Copilot (Gemini/GPT)
-│  ├── DeepVProvider          │──▶ DeepV (DeepSeek/GLM/Claude/Kimi)
+│  ├── OpenAIProvider         │──▶ providers.yaml 中的 OpenAI 兼容 Provider
+│  ├── AnthropicProvider      │──▶ Anthropic 兼容 Provider
+│  ├── CopilotProvider        │──▶ GitHub Copilot（可选）
 │  └── ChatGPTProvider        │──▶ ChatGPT Codex (OAuth token + proxy)
 └─────────────────────────────┘
 ```
@@ -362,12 +312,11 @@ make docker-run    # Docker Compose 启动
 
 ### 新增 Provider
 
-1. 在 `internal/provider/` 新建文件（如 `baidu.go`）
-2. 实现 `Provider` 接口（参考 `anthropic.go` 或 `openai.go`）
-3. 如果需要流式，确保支持 `StreamProvider`
-4. 在 `internal/config/config.go` 加新字段
-5. 在 `main.go` 注册 provider 和 chain
-6. 在 `router.go` 的 `mapModelName` 加模型映射
+1. 在 `internal/provider/` 新建实现（参考 `anthropic.go` 或 `openai.go`）
+2. 实现 `Provider` 接口；需要流式时同时实现 `StreamProvider`
+3. 在 `providers.yaml` 声明 Provider、模型能力、输入模态和 chain
+4. 若需要新的密钥环境变量，同步更新 `.env.example` 和配置加载逻辑
+5. 为路由、能力筛选和 fallback 增加测试，并运行 `go vet ./...`、`go test ./...`
 
 ---
 
@@ -397,9 +346,7 @@ make docker-run    # Docker Compose 启动
 | `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（完整内容，含换行） |
 | `LITELLM_MASTER_KEY` | 网关认证 token |
 | `GLM_API_KEY` | 智谱 API key |
-| `MIMO_API_KEY` | 小米 API key |
-| `LONGCAT_API_KEY` | 美团 API key |
-| `EASYCLAW_API_KEY` | EasyClaw API key |
+| `ALI_API_KEY` | 阿里 MaaS API key |
 
 **优势**：
 - API keys 通过 Secrets 传入，部署时自动写入 `.env` 并传到服务器
@@ -434,9 +381,7 @@ mkdir -p /opt/go-gateway
 cat > /opt/go-gateway/.env << 'EOF'
 LITELLM_MASTER_KEY=sk-local-gateway-xxx
 GLM_API_KEY=
-MIMO_API_KEY=
-LONGCAT_API_KEY=
-EASYCLAW_API_KEY=
+ALI_API_KEY=
 PORT=8080
 LOG_LEVEL=info
 EOF

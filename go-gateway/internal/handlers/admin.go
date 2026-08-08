@@ -129,16 +129,18 @@ func (h *AdminHandler) HandleLogs(c *gin.Context) {
 	result := make([]gin.H, 0, len(logs))
 	for _, r := range logs {
 		entry := gin.H{
-			"timestamp":     r.Timestamp,
-			"method":        r.Method,
-			"path":          r.Path,
-			"model":         r.Model,
-			"provider":      r.Provider,
-			"status_code":   r.StatusCode,
-			"latency_ms":    r.Latency,
-			"input_tokens":  r.InputTokens,
-			"output_tokens": r.OutputTokens,
-			"is_stream":     r.IsStream,
+			"timestamp":         r.Timestamp,
+			"request_id":        r.RequestID,
+			"method":            r.Method,
+			"path":              r.Path,
+			"model":             r.Model,
+			"provider":          r.Provider,
+			"provider_attempts": r.ProviderAttempts,
+			"status_code":       r.StatusCode,
+			"latency_ms":        r.Latency,
+			"input_tokens":      r.InputTokens,
+			"output_tokens":     r.OutputTokens,
+			"is_stream":         r.IsStream,
 		}
 		if r.Error != "" {
 			entry["error"] = r.Error

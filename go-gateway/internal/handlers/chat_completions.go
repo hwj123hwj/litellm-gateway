@@ -207,7 +207,7 @@ func NewChatCompletionsHandler(router *provider.Router, logger *log.Logger) *ope
 
 func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	rawBody, _ := io.ReadAll(c.Request.Body)
-	h.logger.Printf("Raw chat.completions request body: %s", string(rawBody))
+	logRequestSummary(h.logger, c, "chat.completions", len(rawBody))
 	c.Request.Body = io.NopCloser(bytes.NewReader(rawBody))
 
 	var req openAIChatCompletionsRequest
@@ -233,15 +233,15 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	c.Set("request_model", req.Model)
-	c.Set("request_is_stream", req.Stream)
+	setRequestMetadata(c, req.Model, req.Stream)
 
 	if req.Stream {
 		h.handleStream(c, providerReq)
 		return
 	}
 
-	resp, err := h.router.Forward(c.Request.Context(), providerReq.Model, providerReq)
+	resp, finalProvider, attempts, err := h.router.ForwardWithDetails(c.Request.Context(), providerReq.Model, providerReq)
+	setForwardMetadata(c, finalProvider, attempts, err)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
@@ -249,8 +249,7 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	c.Set("request_input_tokens", resp.Usage.InputTokens)
-	c.Set("request_output_tokens", resp.Usage.OutputTokens)
+	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
 	c.JSON(http.StatusOK, toOpenAIChatCompletionResponse(resp))
 }
@@ -269,15 +268,18 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 		if !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
 		}
+		started := time.Now()
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
 		} else {
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
+			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
 			return
 		} else {
+			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
 			lastErr = err
 			h.logger.Printf("chat.completions stream provider %s failed: %v", p.Name(), err)

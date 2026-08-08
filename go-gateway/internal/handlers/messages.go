@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/provider"
@@ -25,15 +26,16 @@ func NewMessageHandler(router *provider.Router, logger *log.Logger) *MessageHand
 
 // Handle 处理消息请求，支持流式和非流式
 func (h *MessageHandler) Handle(c *gin.Context) {
-	// 先读原始 body，用于调试
+	// Read once so BindJSON can validate the same payload without retaining or
+	// logging the full request body (which may contain credentials or Base64).
 	rawBody, _ := io.ReadAll(c.Request.Body)
-	h.logger.Printf("Raw request body: %s", string(rawBody))
+	logRequestSummary(h.logger, c, "messages", len(rawBody))
 	// 把 body 放回去供 BindJSON 使用
 	c.Request.Body = io.NopCloser(bytes.NewReader(rawBody))
 
 	var req provider.Request
 	if err := c.BindJSON(&req); err != nil {
-		h.logger.Printf("BindJSON error: %v, body was: %s", err, string(rawBody))
+		h.logger.Printf("BindJSON error: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
@@ -45,6 +47,7 @@ func (h *MessageHandler) Handle(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Messages are required"})
 		return
 	}
+	setRequestMetadata(c, req.Model, req.Stream)
 
 	if req.Stream {
 		h.handleStream(c, &req)
@@ -54,13 +57,15 @@ func (h *MessageHandler) Handle(c *gin.Context) {
 }
 
 func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) {
-	resp, err := h.router.Forward(c.Request.Context(), req.Model, req)
+	resp, finalProvider, attempts, err := h.router.ForwardWithDetails(c.Request.Context(), req.Model, req)
+	setForwardMetadata(c, finalProvider, attempts, err)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
+	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -78,6 +83,7 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 		if !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
 		}
+		started := time.Now()
 		h.logger.Printf("Stream: trying provider %d/%d: %s", i+1, len(providerChain), p.Name())
 		if bmp, ok := p.(provider.BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
@@ -85,9 +91,11 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
 		if err := h.streamFromProvider(c, req, p); err == nil {
+			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
 			return
 		} else {
+			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
 			h.logger.Printf("Stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {

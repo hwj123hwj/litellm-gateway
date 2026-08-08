@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/weijian/go-llm-gateway/internal/metrics"
+	"github.com/weijian/go-llm-gateway/internal/middleware"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
@@ -100,6 +102,35 @@ func TestChatCompletionsHandlerReturnsOpenAIResponse(t *testing.T) {
 	}
 	if choice["finish_reason"] != "stop" {
 		t.Fatalf("expected finish_reason stop, got %#v", choice["finish_reason"])
+	}
+}
+
+func TestChatCompletionsRecordsRequestCorrelationAndProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	collector := metrics.NewCollector()
+	router := provider.NewRouter(logger)
+	router.RegisterProvider("stub", &stubChatProvider{
+		name: "stub",
+		resp: &provider.Response{ID: "msg_meta", Type: "message", Role: "assistant", Content: []provider.ContentBlock{{Type: "text", Text: "ok"}}},
+	})
+	router.RegisterChain("coding", []string{"stub"})
+
+	engine := gin.New()
+	engine.Use(middleware.RequestID())
+	engine.Use(middleware.Logging(logger, collector))
+	engine.POST("/v1/chat/completions", NewChatCompletionsHandler(router, logger).Handle)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coding","messages":[{"role":"user","content":"hi"}]}`))
+	request.Header.Set("X-Request-ID", "meta-123")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	records := collector.GetRecentLogs(1)
+	if len(records) != 1 || records[0].RequestID != "meta-123" || records[0].Provider != "stub" || len(records[0].ProviderAttempts) != 1 {
+		t.Fatalf("request record = %#v", records)
 	}
 }
 

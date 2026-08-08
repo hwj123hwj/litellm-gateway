@@ -40,8 +40,8 @@ func TestLoadDefaultPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
-	if cfg.Port != 4000 {
-		t.Errorf("Expected default port 4000, got %d", cfg.Port)
+	if cfg.Port != 4001 {
+		t.Errorf("Expected default port 4001, got %d", cfg.Port)
 	}
 }
 
