@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -154,6 +155,30 @@ func TestRouterCircuitBreakerSkipsOpenProviderAndFallsBack(t *testing.T) {
 	status, ok := router.ProviderStatus("first")
 	if !ok || status.State != CircuitOpen || status.Status != "offline" {
 		t.Fatalf("unexpected first provider status: %#v", status)
+	}
+}
+
+func TestRouterForwardWithDetailsTracksFallbackAndFinalProvider(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	router := NewRouter(logger)
+	first := &errorPolicyProvider{
+		name: "first",
+		err:  &ProviderError{Provider: "first", StatusCode: http.StatusTooManyRequests, Message: "quota exceeded"},
+	}
+	second := &errorPolicyProvider{name: "second", resp: &Response{Model: "fallback"}}
+	router.RegisterProvider(first.name, first)
+	router.RegisterProvider(second.name, second)
+	router.RegisterChain("coding", []string{first.name, second.name})
+
+	resp, finalProvider, attempts, err := router.ForwardWithDetails(context.Background(), "coding", &Request{Model: "coding"})
+	if err != nil {
+		t.Fatalf("ForwardWithDetails() error = %v", err)
+	}
+	if resp == nil || finalProvider != "second" {
+		t.Fatalf("response/provider = %#v/%q", resp, finalProvider)
+	}
+	if len(attempts) != 2 || attempts[0].Provider != "first" || attempts[0].Status != "error" || attempts[0].StatusCode != http.StatusTooManyRequests || attempts[1].Provider != "second" || attempts[1].Status != "success" {
+		t.Fatalf("attempts = %#v", attempts)
 	}
 }
 

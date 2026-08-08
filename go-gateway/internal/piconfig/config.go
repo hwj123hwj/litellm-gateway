@@ -99,11 +99,12 @@ func gatewayProvider(endpoint, tokenCommand string) map[string]any {
 		},
 		"models": []map[string]any{
 			{"id": "coding", "name": "LLM Gateway Coding"},
+			{"id": "coding-anthropic", "name": "LLM Gateway Coding (Anthropic)"},
 			{"id": "glm-sonnet", "name": "LLM Gateway GLM Sonnet"},
 			{"id": "glm-opus", "name": "LLM Gateway GLM Opus"},
-			{"id": "mimo-sonnet", "name": "LLM Gateway MiMo Sonnet"},
-			{"id": "longcat-sonnet", "name": "LLM Gateway LongCat Sonnet"},
-			{"id": "easyclaw-sonnet", "name": "LLM Gateway Claude Sonnet"},
+			{"id": "glm-haiku", "name": "LLM Gateway GLM Haiku"},
+			{"id": "glm-vision", "name": "LLM Gateway GLM Vision"},
+			{"id": "ali-opus", "name": "LLM Gateway Ali Opus"},
 		},
 	}
 }

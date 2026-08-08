@@ -11,8 +11,8 @@
 #   cp scripts/codex-model ~/.local/bin/codex-model
 #   chmod +x ~/.local/bin/codex-model
 #
-# 网关可用模型：glm-opus, glm-sonnet, glm-haiku, gpt-5.5, gpt-5.4,
-#               gpt-5.4-mini, longcat-sonnet, longcat-opus, coding
+# 网关默认模型：coding, glm-opus, glm-sonnet, glm-haiku, glm-vision, ali-opus
+# 可选 Provider 的模型以网关 GET /v1/models 返回结果为准。
 
 set -e
 
@@ -157,8 +157,7 @@ case "$MODE" in
     echo "  restore         → 恢复上一次备份"
     echo ""
     echo "网关可用模型:"
-    echo "  glm-opus, glm-sonnet, glm-haiku, glm-flash"
-    echo "  gpt-5.5, gpt-5.4, gpt-5.4-mini"
-    echo "  longcat-sonnet, longcat-opus, coding"
+    echo "  coding, glm-opus, glm-sonnet, glm-haiku, glm-vision, ali-opus"
+    echo "  其他模型请读取网关 GET /v1/models"
     ;;
 esac

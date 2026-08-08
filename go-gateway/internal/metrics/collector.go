@@ -4,43 +4,47 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/weijian/go-llm-gateway/internal/requestmeta"
 )
 
 // RequestRecord 单条请求记录
 type RequestRecord struct {
-	Timestamp    time.Time `json:"timestamp"`
-	Method       string    `json:"method"`
-	Path         string    `json:"path"`
-	Model        string    `json:"model"`
-	Provider     string    `json:"provider"`
-	StatusCode   int       `json:"status_code"`
-	Latency      float64   `json:"latency_ms"` // 毫秒
-	InputTokens  int       `json:"input_tokens"`
-	OutputTokens int       `json:"output_tokens"`
-	IsStream     bool      `json:"is_stream"`
-	Error        string    `json:"error,omitempty"`
+	RequestID        string                        `json:"request_id,omitempty"`
+	ProviderAttempts []requestmeta.ProviderAttempt `json:"provider_attempts,omitempty"`
+	Timestamp        time.Time                     `json:"timestamp"`
+	Method           string                        `json:"method"`
+	Path             string                        `json:"path"`
+	Model            string                        `json:"model"`
+	Provider         string                        `json:"provider"`
+	StatusCode       int                           `json:"status_code"`
+	Latency          float64                       `json:"latency_ms"` // 毫秒
+	InputTokens      int                           `json:"input_tokens"`
+	OutputTokens     int                           `json:"output_tokens"`
+	IsStream         bool                          `json:"is_stream"`
+	Error            string                        `json:"error,omitempty"`
 }
 
 // ModelStats 模型维度统计
 type ModelStats struct {
-	Model        string  `json:"model"`
-	Requests     int     `json:"requests"`
-	Successes    int     `json:"successes"`
-	Errors       int     `json:"errors"`
-	TotalTokens  int     `json:"total_tokens"`
-	AvgLatency   float64 `json:"avg_latency_ms"`
-	Provider     string  `json:"provider"`
+	Model       string  `json:"model"`
+	Requests    int     `json:"requests"`
+	Successes   int     `json:"successes"`
+	Errors      int     `json:"errors"`
+	TotalTokens int     `json:"total_tokens"`
+	AvgLatency  float64 `json:"avg_latency_ms"`
+	Provider    string  `json:"provider"`
 }
 
 // ProviderStats 提供商维度统计
 type ProviderStats struct {
-	Provider    string  `json:"provider"`
-	Requests    int     `json:"requests"`
-	Successes   int     `json:"successes"`
-	Errors      int     `json:"errors"`
-	AvgLatency  float64 `json:"avg_latency_ms"`
-	Status      string  `json:"status"` // "online", "degraded", "offline"
-	LastCheck   time.Time `json:"last_check"`
+	Provider   string    `json:"provider"`
+	Requests   int       `json:"requests"`
+	Successes  int       `json:"successes"`
+	Errors     int       `json:"errors"`
+	AvgLatency float64   `json:"avg_latency_ms"`
+	Status     string    `json:"status"` // "online", "degraded", "offline"
+	LastCheck  time.Time `json:"last_check"`
 }
 
 // DashboardSummary 仪表盘概览
@@ -60,17 +64,17 @@ type Store interface {
 
 // Collector 内存指标收集器
 type Collector struct {
-	mu          sync.RWMutex
-	records     []RequestRecord // 环形缓冲
-	maxRecords  int
-	startTime   time.Time
-	todayStart  time.Time
-	store       Store // 可选的持久化存储
+	mu         sync.RWMutex
+	records    []RequestRecord // 环形缓冲
+	maxRecords int
+	startTime  time.Time
+	todayStart time.Time
+	store      Store // 可选的持久化存储
 
 	// 按天重置的计数器
-	todayTotal   int
-	todaySuccess int
-	todayErrors  int
+	todayTotal      int
+	todaySuccess    int
+	todayErrors     int
 	todayLatencySum float64
 
 	// 按模型聚合
@@ -103,6 +107,19 @@ func (c *Collector) SetStore(store Store) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.store = store
+	if store == nil || len(c.records) > 0 {
+		return
+	}
+	// Restore the recent lightweight log window after a restart. Aggregates are
+	// intentionally kept in memory; the persisted request log is enough for the
+	// Dashboard activity view and avoids replaying records into today's stats.
+	persisted, err := store.GetRecentLogs(c.maxRecords)
+	if err != nil {
+		return
+	}
+	for i := len(persisted) - 1; i >= 0; i-- {
+		c.records = append(c.records, persisted[i])
+	}
 }
 
 // Record 记录一条请求

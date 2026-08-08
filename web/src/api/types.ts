@@ -50,6 +50,7 @@ export interface RouteInfo {
 
 export interface LogEntry {
   timestamp: string
+  request_id?: string
   method: string
   path: string
   model: string
@@ -59,6 +60,15 @@ export interface LogEntry {
   input_tokens: number
   output_tokens: number
   is_stream: boolean
+  error?: string
+  provider_attempts?: ProviderAttempt[]
+}
+
+export interface ProviderAttempt {
+  provider: string
+  status: 'success' | 'error' | 'skipped' | string
+  status_code?: number
+  latency_ms: number
   error?: string
 }
 

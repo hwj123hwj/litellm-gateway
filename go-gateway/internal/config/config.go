@@ -31,7 +31,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:                    getEnvInt("PORT", 4000),
+		Port:                    getEnvInt("PORT", 4001),
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		MasterKey:               getEnv("LITELLM_MASTER_KEY", ""),
 		AdminToken:              getEnv("ADMIN_TOKEN", ""),

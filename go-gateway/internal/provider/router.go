@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/weijian/go-llm-gateway/internal/requestmeta"
 )
 
 // Router 管理提供商路由和 fallback
@@ -260,19 +262,30 @@ func (r *Router) RouteForStreamRequest(modelName string, req *Request) ([]Provid
 
 // Forward 转发请求，带 fallback 逻辑（非流式）
 func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*Response, error) {
+	resp, _, _, err := r.ForwardWithDetails(ctx, modelName, req)
+	return resp, err
+}
+
+// ForwardWithDetails forwards a non-streaming request and returns the final
+// provider together with one bounded result for every provider attempt. The
+// existing Forward method remains as a compatibility wrapper for embedders.
+func (r *Router) ForwardWithDetails(ctx context.Context, modelName string, req *Request) (*Response, string, []requestmeta.ProviderAttempt, error) {
 	providers, err := r.RouteForRequest(modelName, req)
 	if err != nil {
-		return nil, err
+		return nil, "", nil, err
 	}
 
 	originalModel := req.Model
 	var lastErr error
+	var finalProvider string
+	attempts := make([]requestmeta.ProviderAttempt, 0, len(providers))
 	attempted := false
 	for i, p := range providers {
 		if !r.AllowProviderRequestFor(modelName, p) {
 			continue
 		}
 		attempted = true
+		started := time.Now()
 		r.logger.Printf("Attempting provider %d/%d: %s", i+1, len(providers), p.Name())
 		if bmp, ok := p.(BoundModelProvider); ok {
 			req.Model = bmp.BoundModel()
@@ -287,19 +300,48 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 			r.RecordProviderFailureFor(modelName, p, err)
 			r.logger.Printf("Provider %s failed: %v", p.Name(), err)
 			lastErr = err
+			attempt := requestmeta.ProviderAttempt{
+				Provider:  p.Name(),
+				Status:    "error",
+				LatencyMs: float64(time.Since(started).Microseconds()) / 1000,
+				Error:     boundedErrorSummary(err),
+			}
+			var providerErr *ProviderError
+			if errors.As(err, &providerErr) {
+				attempt.StatusCode = providerErr.StatusCode
+			}
+			attempts = append(attempts, attempt)
+			finalProvider = p.Name()
 			if !ShouldFallback(err) {
-				return nil, err
+				return nil, finalProvider, attempts, err
 			}
 			continue
 		}
 		r.RecordProviderSuccessFor(modelName, p)
 		r.logger.Printf("Provider %s succeeded", p.Name())
-		return resp, nil
+		attempts = append(attempts, requestmeta.ProviderAttempt{
+			Provider:  p.Name(),
+			Status:    "success",
+			LatencyMs: float64(time.Since(started).Microseconds()) / 1000,
+		})
+		return resp, p.Name(), attempts, nil
 	}
 	if !attempted && lastErr == nil {
-		return nil, &NoAvailableProvidersError{Model: modelName, Configured: r.chainProviders(modelName), Reason: "disabled, unavailable, or circuit open"}
+		return nil, finalProvider, attempts, &NoAvailableProvidersError{Model: modelName, Configured: r.chainProviders(modelName), Reason: "disabled, unavailable, or circuit open"}
 	}
-	return nil, fmt.Errorf("all providers failed, last error: %w", lastErr)
+	return nil, finalProvider, attempts, fmt.Errorf("all providers failed, last error: %w", lastErr)
+}
+
+func boundedErrorSummary(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxBytes = 512
+	value := err.Error()
+	if len(value) > maxBytes {
+		return value[:maxBytes] + "..."
+	}
+	return value
 }
 
 // mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 providers.yaml）
@@ -310,20 +352,6 @@ func (r *Router) mapModelName(modelName, providerName string) string {
 		"glm-opus":   {"glm": "glm-5.2"},
 		"glm-sonnet": {"glm": "glm-5-turbo"},
 		"glm-haiku":  {"glm": "glm-4.7"},
-		// MiMo 核心：保留 haiku/sonnet/opus 别名
-		"mimo-sonnet": {"mimo": "mimo-v2.5"},
-		"mimo-opus":   {"mimo": "mimo-v2.5-pro"},
-		// LongCat 核心：保留 opus 别名
-		"longcat-opus": {"longcat": "LongCat-2.0-Preview"},
-		// EasyClaw：供应商+模型名
-		"easyclaw-sonnet": {"easyclaw": "claude-sonnet-4-6"},
-		"easyclaw-opus":   {"easyclaw": "claude-opus-4-6"},
-		// DeepV Server：供应商+模型名（加 deepv- 前缀）
-		"deepv-deepseek-flash": {"deepv-deepseek": "deepseek-v4-flash"},
-		"deepv-deepseek-pro":   {"deepv-deepseek-pro": "deepseek-v4-pro"},
-		"deepv-glm5":           {"deepv-glm5": "glm-5"},
-		"deepv-claude-sonnet":  {"deepv-claude": "claude-sonnet-4-6"},
-		"deepv-kimi":           {"deepv-kimi": "kimi-k2.6"},
 		// GitHub Copilot（免费教育套餐，仅支持 GPT 系列模型）
 		"copilot-opus":   {"copilot": "gpt-4.1"},
 		"copilot-sonnet": {"copilot": "gpt-4o-2024-11-20"},

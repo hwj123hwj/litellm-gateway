@@ -104,16 +104,11 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 ## 支持的模型
 
-### ChatGPT Codex（GPT-5.5，OAuth）
+### ChatGPT Codex（OAuth，可选）
 
 使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用，不需要额外 API key。
 
-| 模型别名 | 实际模型 | 说明 |
-|----------|----------|------|
-| `gpt-5.5` | gpt-5.5 | ChatGPT Plus/Pro（需 HTTP_PROXY） |
-| `gpt-5.5-pro` | gpt-5.5-pro | ChatGPT Pro |
-| `gpt-5.4-mini` | gpt-5.4-mini | 轻量快速 |
-| `o4-mini` | o4-mini | 推理模型 |
+配置 `HTTP_PROXY` 且本机存在 Codex OAuth token 后，ChatGPT 模型会动态加入 `/v1/models`；模型版本以运行时目录为准，不在客户端固定清单。
 
 ### GitHub Copilot
 
@@ -137,7 +132,8 @@ MY_PROVIDER_API_KEY=sk-xxx
 |--------|--------|------|
 | `coding` | 智谱 GLM / 阿里 MaaS | **推荐**，OpenAI 风格，自动 fallback |
 | `coding-anthropic` | 智谱 GLM / 阿里 MaaS | Anthropic 风格，自动 fallback |
-| `glm-flash` | 智谱 GLM | 免费模型 |
+| `glm-haiku` | 智谱 GLM | 轻量模型 |
+| `glm-4.7-flash` | 智谱 GLM | 快速模型 |
 | `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
 | `glm-vision` | 智谱 GLM-5V-Turbo | 文本+图片/视频/文件识别 |
 | `glm-opus` | 智谱 GLM coding plan | 旗舰模型 |
@@ -187,7 +183,8 @@ litellm-gateway/
 │   │   ├── provider/        # 提供商实现
 │   │   ├── handlers/        # HTTP 路由处理
 │   │   ├── auth/            # Bearer token 认证
-│   │   └── middleware/      # 日志中间件
+│   │   ├── middleware/      # request ID、日志与指标中间件
+│   │   └── requestmeta/     # 请求关联元数据契约
 │   ├── .env.example         # 环境变量模板
 │   ├── Dockerfile
 │   └── README.md            # 完整文档
@@ -218,7 +215,11 @@ litellm-gateway/
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
+| `ADMIN_TOKEN` | 否 | Dashboard/Admin API 独立 token；未设置时回退到主 token |
 | `PORT` | 否 | 监听端口（默认 4001） |
+| `CIRCUIT_FAILURE_THRESHOLD` | 否 | 连续可重试失败后打开熔断（默认 3） |
+| `CIRCUIT_RECOVERY_SECONDS` | 否 | 熔断恢复探测间隔（默认 30） |
+| `CIRCUIT_SUCCESS_THRESHOLD` | 否 | 半开状态连续成功次数（默认 1） |
 
 ## 资源占用
 

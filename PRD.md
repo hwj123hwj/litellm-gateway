@@ -200,6 +200,7 @@ Admin API 和管理端至少支持：
 | 能力感知模型目录 | ✅ 已实现 | /v1/models 返回能力和输入模态 |
 | 多模态路由 | ✅ 已实现 | 文本模型与 glm-vision 区分 |
 | SQLite 指标 | ✅ 已实现 | request_logs、daily_stats |
+| 请求关联与 Provider 尝试记录 | ✅ 已实现 | `X-Request-ID`、最终 Provider、每次 fallback 尝试均进入轻量指标日志 |
 | Admin API | ✅ 已实现 | Provider、模型、路由、日志和统计 |
 | Web Dashboard | ✅ 已实现 | web/ |
 | Android App | ✅ 已实现 | mobile-app/ |
@@ -239,9 +240,10 @@ Admin API 和管理端至少支持：
 
 ### P0：基础设施稳定
 
-- 补齐 request ID、最终 Provider 和 Provider attempt 记录；
-- 统一错误、认证和 Dashboard 行为；
-- 让 README、PRD、providers.yaml 和 /v1/models 保持一致。
+- [x] 补齐 request ID、最终 Provider 和 Provider attempt 记录；
+- [x] 让轻量指标与请求正文分离，默认不把正文写入 stdout；
+- [x] 让 README、PRD、providers.yaml 和 /v1/models 保持一致；
+- [ ] 继续统一错误、认证和 Dashboard 行为。
 
 ### P1：对话归档
 

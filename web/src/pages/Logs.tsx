@@ -57,6 +57,7 @@ export default function Logs() {
                 {log.latency_ms > 0 && ` · ${fmtLatency(log.latency_ms)}`}
                 {log.input_tokens > 0 && ` · ${log.input_tokens + log.output_tokens} tokens`}
                 {log.is_stream && ' · 流式'}
+                {log.request_id && ` · ${log.request_id}`}
                 {log.error && ` · ${log.error}`}
               </div>
               <div className="log-time">{fmtTime(log.timestamp)}</div>

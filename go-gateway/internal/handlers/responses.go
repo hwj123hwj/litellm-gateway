@@ -143,12 +143,7 @@ func NewResponsesHandler(router *provider.Router, logger *log.Logger) *responses
 // Handle 处理 /v1/responses 端点
 func (h *responsesHandler) Handle(c *gin.Context) {
 	rawBody, _ := io.ReadAll(c.Request.Body)
-	// 打印请求体的前 500 字符，方便调试
-	preview := string(rawBody)
-	if len(preview) > 500 {
-		preview = preview[:500] + "..."
-	}
-	h.logger.Printf("[RESPONSES] Request body preview: %s", preview)
+	logRequestSummary(h.logger, c, "responses", len(rawBody))
 	c.Request.Body = io.NopCloser(strings.NewReader(string(rawBody)))
 
 	var req responsesRequest
@@ -166,6 +161,7 @@ func (h *responsesHandler) Handle(c *gin.Context) {
 		}})
 		return
 	}
+	setRequestMetadata(c, req.Model, req.Stream)
 
 	// 检查是否走 ChatGPT 透传路径（Responses API 原生格式，不需要 Anthropic 转换）
 	if h.tryChatGPTPassthrough(c, &req, rawBody) {
@@ -190,7 +186,8 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 		return
 	}
 
-	resp, err := h.router.Forward(c.Request.Context(), providerReq.Model, providerReq)
+	resp, finalProvider, attempts, err := h.router.ForwardWithDetails(c.Request.Context(), providerReq.Model, providerReq)
+	setForwardMetadata(c, finalProvider, attempts, err)
 	if err != nil {
 		h.logger.Printf("Responses forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
@@ -200,6 +197,7 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 		}})
 		return
 	}
+	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
 	c.JSON(http.StatusOK, providerToResponsesResponse(resp, req.Model))
 }
@@ -532,11 +530,13 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			if !h.router.AllowProviderRequestFor(req.Model, p) {
 				continue
 			}
+			started := time.Now()
 			h.logger.Printf("[RESPONSES] Using ChatGPT passthrough for model %s", req.Model)
 			streamWriter := newDeferredStreamWriter(c)
 
 			// 直接透传原始请求体到 ChatGPT
 			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), streamWriter); err != nil {
+				recordProviderAttempt(c, p.Name(), started, err)
 				h.router.RecordProviderFailureFor(req.Model, p, err)
 				h.logger.Printf("[RESPONSES] ChatGPT passthrough failed: %v", err)
 				if c.Writer.Written() {
@@ -550,6 +550,7 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 				}
 				return true
 			}
+			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(req.Model, p)
 			streamWriter.Commit()
 			return true

@@ -2,7 +2,9 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -19,6 +21,9 @@ type SQLiteStore struct {
 
 // NewSQLiteStore 创建 SQLite 存储
 func NewSQLiteStore(dbPath string, logger *log.Logger) (*SQLiteStore, error) {
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -47,10 +52,12 @@ func initSchema(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS request_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		timestamp DATETIME NOT NULL,
+		request_id TEXT DEFAULT '',
 		method TEXT NOT NULL,
 		path TEXT NOT NULL,
 		model TEXT DEFAULT '',
 		provider TEXT DEFAULT '',
+		provider_attempts TEXT DEFAULT '[]',
 		status_code INTEGER DEFAULT 0,
 		latency_ms REAL DEFAULT 0,
 		input_tokens INTEGER DEFAULT 0,
@@ -75,16 +82,56 @@ func initSchema(db *sql.DB) error {
 		PRIMARY KEY (date, model)
 	);
 	`
-	_, err := db.Exec(schema)
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	// Existing installations predate request correlation metadata. CREATE TABLE
+	// IF NOT EXISTS does not alter them, so add the new columns idempotently.
+	if err := ensureColumn(db, "request_logs", "request_id", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "request_logs", "provider_attempts", "TEXT DEFAULT '[]'"); err != nil {
+		return err
+	}
+	_, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_logs_request_id ON request_logs(request_id)")
+	return err
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
 	return err
 }
 
 // SaveRecord 保存一条请求记录
 func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
-	_, err := s.db.Exec(`
-		INSERT INTO request_logs (timestamp, method, path, model, provider, status_code, latency_ms, input_tokens, output_tokens, is_stream, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, r.Timestamp, r.Method, r.Path, r.Model, r.Provider, r.StatusCode, r.Latency, r.InputTokens, r.OutputTokens, r.IsStream, r.Error)
+	attempts, err := json.Marshal(r.ProviderAttempts)
+	if err != nil {
+		return fmt.Errorf("encode provider attempts: %w", err)
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO request_logs (timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, is_stream, error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.Timestamp, r.RequestID, r.Method, r.Path, r.Model, r.Provider, string(attempts), r.StatusCode, r.Latency, r.InputTokens, r.OutputTokens, r.IsStream, r.Error)
 
 	if err != nil {
 		s.logger.Printf("Save record error: %v", err)
@@ -117,7 +164,7 @@ func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
 // GetRecentLogs 获取最近的请求日志
 func (s *SQLiteStore) GetRecentLogs(limit int) ([]metrics.RequestRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT timestamp, method, path, model, provider, status_code, latency_ms, input_tokens, output_tokens, is_stream, error
+		SELECT timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, is_stream, error
 		FROM request_logs
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -131,10 +178,14 @@ func (s *SQLiteStore) GetRecentLogs(limit int) ([]metrics.RequestRecord, error) 
 	for rows.Next() {
 		var r metrics.RequestRecord
 		var ts string
-		if err := rows.Scan(&ts, &r.Method, &r.Path, &r.Model, &r.Provider, &r.StatusCode, &r.Latency, &r.InputTokens, &r.OutputTokens, &r.IsStream, &r.Error); err != nil {
+		var attemptsJSON string
+		if err := rows.Scan(&ts, &r.RequestID, &r.Method, &r.Path, &r.Model, &r.Provider, &attemptsJSON, &r.StatusCode, &r.Latency, &r.InputTokens, &r.OutputTokens, &r.IsStream, &r.Error); err != nil {
 			continue
 		}
 		r.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
+		if attemptsJSON != "" {
+			_ = json.Unmarshal([]byte(attemptsJSON), &r.ProviderAttempts)
+		}
 		records = append(records, r)
 	}
 	return records, nil
