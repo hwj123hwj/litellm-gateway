@@ -24,7 +24,10 @@ func NewSQLiteStore(dbPath string, logger *log.Logger) (*SQLiteStore, error) {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	// Metrics and conversation archives share one SQLite file but are written
+	// by independent goroutines. Configure a per-connection busy timeout so a
+	// short write collision waits instead of dropping a lightweight metric.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout%3d5000")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
