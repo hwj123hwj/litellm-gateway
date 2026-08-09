@@ -11,17 +11,25 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
 // MessageHandler 处理 /v1/messages 端点
 type MessageHandler struct {
-	router *provider.Router
-	logger *log.Logger
+	router   *provider.Router
+	logger   *log.Logger
+	archiver *archive.Archiver
 }
 
 func NewMessageHandler(router *provider.Router, logger *log.Logger) *MessageHandler {
 	return &MessageHandler{router: router, logger: logger}
+}
+
+// SetArchiver injects the conversation archiver. Uses the setter pattern so
+// existing callers (and tests) that use NewMessageHandler don't break.
+func (h *MessageHandler) SetArchiver(a *archive.Archiver) {
+	h.archiver = a
 }
 
 // Handle 处理消息请求，支持流式和非流式
@@ -50,26 +58,44 @@ func (h *MessageHandler) Handle(c *gin.Context) {
 	setRequestMetadata(c, req.Model, req.Stream)
 
 	if req.Stream {
-		h.handleStream(c, &req)
+		h.handleStream(c, &req, rawBody)
 	} else {
-		h.handleNonStream(c, &req)
+		h.handleNonStream(c, &req, rawBody)
 	}
 }
 
-func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) {
+func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request, rawBody []byte) {
 	resp, finalProvider, attempts, err := h.router.ForwardWithDetails(c.Request.Context(), req.Model, req)
 	setForwardMetadata(c, finalProvider, attempts, err)
 	if err != nil {
 		h.logger.Printf("Forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
+		// Archive the failed attempt: request body is known, response is the error.
+		if h.archiver != nil && h.archiver.Enabled() {
+			// Sanitize the error message for BOTH response_body and error_reason
+			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
+				sanitized := archiveErrorReason(err)
+				submitArchive(c, h.archiver, archive.ProtocolMessages, rawBody,
+					[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
+					archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
+		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+
+	// Archive the full request+response before sending to the client. We marshal
+	// the response ourselves so the archived body matches what the client gets.
+	respBody, _ := json.Marshal(resp)
+	if h.archiver != nil && h.archiver.Enabled() {
+		submitArchive(c, h.archiver, archive.ProtocolMessages, rawBody, respBody,
+			archive.StatusCompleted, http.StatusOK, "")
+	}
+
 	c.JSON(http.StatusOK, resp)
 }
 
-func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
+func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, rawBody []byte) {
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
@@ -77,8 +103,17 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 		return
 	}
 
+	// Capture the SSE transcript for archival. We tee all bytes written to the
+	// client into sink, then archive it once after the stream ends. Only
+	// allocated when archiving is enabled to avoid overhead in the common case.
+	var sink *archiveSink
+	if h.archiver != nil && h.archiver.Enabled() {
+		sink = newArchiveSink()
+	}
+
 	originalModel := req.Model
 	var lastErr error
+	streamOK := false
 	for i, p := range providerChain {
 		if !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
@@ -90,26 +125,67 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 		} else {
 			req.Model = h.router.MapModel(originalModel, p.Name())
 		}
-		if err := h.streamFromProvider(c, req, p); err == nil {
+		if err := h.streamFromProvider(c, req, p, sink); err == nil {
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
-			return
+			streamOK = true
+			break
 		} else {
 			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
 			h.logger.Printf("Stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
 				_ = writeAnthropicStreamError(c.Writer, err)
-				return
+				streamOK = true // headers already sent → this is the terminal state
+				break
 			}
 			lastErr = err
 			if !provider.ShouldFallback(err) {
 				setProviderErrorHeaders(c, err)
 				c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
-				return
+				break
 			}
 		}
 	}
+
+	if sink != nil {
+		// Archive the exact client request; providers may mutate the internal
+		// request while mapping models or adding stream fields.
+		reqBody := rawBody
+		if !streamOK && lastErr == nil {
+			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
+		}
+		// Use sink content (not c.Writer.Written()) to distinguish pre-body
+		// errors from actual stream interruptions. When a non-retryable error
+		// triggers c.JSON before any SSE bytes, the sink is empty but the HTTP
+		// writer reports written=true — that should be StatusError, not
+		// StatusInterrupted.
+		if !streamOK && sink.Len() == 0 && lastErr != nil {
+			// No stream bytes were emitted → archive as a failed attempt.
+			h.logger.Printf("All stream providers failed: %v", lastErr)
+			if !c.Writer.Written() {
+				setProviderErrorHeaders(c, lastErr)
+				c.JSON(routingErrorStatus(lastErr), gin.H{"error": lastErr.Error()})
+			}
+				submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, nil,
+					archive.StatusError, routingErrorStatus(lastErr), archiveErrorReason(lastErr))
+			return
+		}
+		// Bytes were streamed → archive the captured transcript.
+		// When a fallback provider succeeded, lastErr is stale (from the failed
+		// first provider) — pass nil so parseStreamEndState doesn't misclassify
+		// a completed stream as interrupted.
+		var archiveErr error
+		if !streamOK {
+			archiveErr = lastErr
+		}
+		status, reason := parseStreamEndState(sink.Bytes(), archiveErr)
+		submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, sink.Bytes(),
+			status, c.Writer.Status(), reason)
+		return
+	}
+
+	// Non-archive path (original behavior)
 	if lastErr == nil {
 		lastErr = &provider.NoAvailableProvidersError{Model: req.Model, Reason: "disabled, unavailable, or circuit open"}
 	}
@@ -124,14 +200,23 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 // streamFromProvider 向指定提供商发流式请求并透传 SSE 到客户端。
 // 若提供商实现了 StreamProvider 接口（如 OpenAI 格式），走其自有流式逻辑（含格式转换）；
 // 否则直接透传上游 SSE 流（适用于 Anthropic 兼容接口）。
-func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider) error {
-	streamWriter := newDeferredStreamWriter(c)
+// 当 sink 非 nil 时，所有写入客户端的字节会被同步 tee 到 sink 以供归档。
+func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, sink *archiveSink) error {
+	var streamWriter io.Writer
+	streamWriterBase := newDeferredStreamWriter(c)
+	if sink != nil {
+		streamWriter = newTeeStreamWriter(streamWriterBase, sink)
+	} else {
+		streamWriter = streamWriterBase
+	}
+	usageWriter := newUsageTrackingWriter(streamWriter, c)
+	defer usageWriter.Finish()
 
 	// 若提供商实现了 StreamProvider（如 OpenAI 格式），使用其内置流式逻辑
 	if sp, ok := p.(provider.StreamProvider); ok {
-		err := sp.ForwardStream(c.Request.Context(), req, streamWriter)
+		err := sp.ForwardStream(c.Request.Context(), req, usageWriter)
 		if err == nil {
-			streamWriter.Commit()
+			streamWriterBase.Commit()
 		}
 		return err
 	}
@@ -169,14 +254,14 @@ func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Reques
 	// 逐行透传 SSE 流
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
-		if _, err := fmt.Fprintf(streamWriter, "%s\n", scanner.Bytes()); err != nil {
+		if _, err := fmt.Fprintf(usageWriter, "%s\n", scanner.Bytes()); err != nil {
 			return nil // 客户端断开，正常退出
 		}
-		streamWriter.Flush()
+		usageWriter.Flush()
 	}
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	streamWriter.Commit()
+	streamWriterBase.Commit()
 	return nil
 }
