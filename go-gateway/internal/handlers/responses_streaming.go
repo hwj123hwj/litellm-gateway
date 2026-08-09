@@ -29,6 +29,7 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 	providerChain, err := h.router.RouteForStreamRequest(providerReq.Model, providerReq)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
+		submitRoutingErrorArchive(c, h.archiver, archive.ProtocolResponses, rawBody, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
 			"type":    "invalid_request_error",

@@ -397,6 +397,74 @@ func TestResponsesHandlerArchivesStreamWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestStreamingHandlersArchiveUnknownModelErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		body     string
+		protocol archive.Protocol
+		register func(*gin.Engine, *provider.Router, *archive.Archiver)
+	}{
+		{
+			name: "messages", path: "/v1/messages",
+			body:     `{"model":"missing","stream":true,"messages":[{"role":"user","content":"hi"}],"max_tokens":10}`,
+			protocol: archive.ProtocolMessages,
+			register: func(engine *gin.Engine, router *provider.Router, archiver *archive.Archiver) {
+				handler := NewMessageHandler(router, log.New(io.Discard, "", 0))
+				handler.SetArchiver(archiver)
+				engine.POST("/v1/messages", handler.Handle)
+			},
+		},
+		{
+			name: "chat_completions", path: "/v1/chat/completions",
+			body:     `{"model":"missing","stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+			protocol: archive.ProtocolChatCompletions,
+			register: func(engine *gin.Engine, router *provider.Router, archiver *archive.Archiver) {
+				handler := NewChatCompletionsHandler(router, log.New(io.Discard, "", 0))
+				handler.SetArchiver(archiver)
+				engine.POST("/v1/chat/completions", handler.Handle)
+			},
+		},
+		{
+			name: "responses", path: "/v1/responses",
+			body:     `{"model":"missing","stream":true,"input":"hi"}`,
+			protocol: archive.ProtocolResponses,
+			register: func(engine *gin.Engine, router *provider.Router, archiver *archive.Archiver) {
+				handler := NewResponsesHandler(router, log.New(io.Discard, "", 0))
+				handler.SetArchiver(archiver)
+				engine.POST("/v1/responses", handler.Handle)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &capturingArchiveStore{}
+			archiver := archive.NewArchiver(store, archive.Config{Enabled: true, MaxBodyKB: 256}, nil)
+			router := provider.NewRouter(log.New(io.Discard, "", 0))
+			engine := gin.New()
+			tt.register(engine, router, archiver)
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+			archiver.Close()
+
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+			}
+			if got := store.count(); got != 1 {
+				t.Fatalf("expected 1 archived routing error, got %d", got)
+			}
+			ar := store.first()
+			if ar.Protocol != tt.protocol || ar.Status != archive.StatusError || !ar.IsStream {
+				t.Fatalf("archive = protocol %s status %s stream %v", ar.Protocol, ar.Status, ar.IsStream)
+			}
+		})
+	}
+}
+
 // ─── Redaction in handler path ────────────────────────────────────────────
 
 func TestMessagesHandlerArchivedRequestBodyIsRedacted(t *testing.T) {
