@@ -28,6 +28,12 @@ func initArchiveSchema(db *sql.DB) error {
 		request_body TEXT DEFAULT '',
 		response_body TEXT DEFAULT '',
 		error_reason TEXT DEFAULT '',
+		source TEXT DEFAULT '',
+		conversation_id TEXT DEFAULT '',
+		session_id TEXT DEFAULT '',
+		request_bytes INTEGER DEFAULT 0,
+		response_bytes INTEGER DEFAULT 0,
+		truncated BOOLEAN DEFAULT 0,
 		schema_version INTEGER DEFAULT 1
 	);
 
@@ -35,7 +41,28 @@ func initArchiveSchema(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_archives_request_id ON conversation_archives(request_id);
 	`
 	_, err := db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	// Existing installations created by schema version 1 need additive
+	// migrations. PRAGMA keeps this idempotent without relying on SQLite error
+	// string matching.
+	for _, column := range []struct {
+		name string
+		def  string
+	}{
+		{name: "source", def: "TEXT DEFAULT ''"},
+		{name: "conversation_id", def: "TEXT DEFAULT ''"},
+		{name: "session_id", def: "TEXT DEFAULT ''"},
+		{name: "request_bytes", def: "INTEGER DEFAULT 0"},
+		{name: "response_bytes", def: "INTEGER DEFAULT 0"},
+		{name: "truncated", def: "BOOLEAN DEFAULT 0"},
+	} {
+		if err := ensureArchiveColumn(db, column.name, column.def); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SaveArchive persists a single conversation archive.
@@ -44,12 +71,14 @@ func (s *SQLiteStore) SaveArchive(a archive.Archive) error {
 		INSERT INTO conversation_archives
 			(timestamp, request_id, protocol, model, provider, is_stream,
 			 status, status_code, input_tokens, output_tokens,
-			 request_body, response_body, error_reason, schema_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 request_body, response_body, error_reason, source, conversation_id,
+			 session_id, request_bytes, response_bytes, truncated, schema_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		a.Timestamp.UTC(), a.RequestID, string(a.Protocol), a.Model, a.Provider, a.IsStream,
 		string(a.Status), a.StatusCode, a.InputTokens, a.OutputTokens,
-		a.RequestBody, a.ResponseBody, a.ErrorReason, a.SchemaVersion,
+		a.RequestBody, a.ResponseBody, a.ErrorReason, a.Source, a.ConversationID,
+		a.SessionID, a.RequestBytes, a.ResponseBytes, a.Truncated, a.SchemaVersion,
 	)
 	if err != nil {
 		s.logger.Printf("SaveArchive error: %v", err)
@@ -75,7 +104,8 @@ func (s *SQLiteStore) QueryArchives(limit, offset int) ([]archive.Archive, int, 
 	rows, err := s.db.Query(`
 		SELECT id, timestamp, request_id, protocol, model, provider, is_stream,
 		       status, status_code, input_tokens, output_tokens,
-		       request_body, response_body, error_reason, schema_version
+		       request_body, response_body, error_reason, source, conversation_id,
+		       session_id, request_bytes, response_bytes, truncated, schema_version
 		FROM conversation_archives
 		ORDER BY timestamp DESC, id DESC
 		LIMIT ? OFFSET ?
@@ -106,7 +136,8 @@ func (s *SQLiteStore) ExportArchives(sinceID int64, sinceTime time.Time, limit i
 	rows, err := s.db.Query(`
 		SELECT id, timestamp, request_id, protocol, model, provider, is_stream,
 		       status, status_code, input_tokens, output_tokens,
-		       request_body, response_body, error_reason, schema_version
+		       request_body, response_body, error_reason, source, conversation_id,
+		       session_id, request_bytes, response_bytes, truncated, schema_version
 		FROM conversation_archives
 		WHERE timestamp > ? OR (timestamp = ? AND id > ?)
 		ORDER BY timestamp ASC, id ASC
@@ -159,7 +190,9 @@ func scanArchives(rows *sql.Rows) ([]archive.Archive, error) {
 		if err := rows.Scan(
 			&a.ID, &ts, &a.RequestID, &protocol, &a.Model, &a.Provider, &a.IsStream,
 			&status, &a.StatusCode, &a.InputTokens, &a.OutputTokens,
-			&a.RequestBody, &a.ResponseBody, &a.ErrorReason, &a.SchemaVersion,
+			&a.RequestBody, &a.ResponseBody, &a.ErrorReason, &a.Source,
+			&a.ConversationID, &a.SessionID, &a.RequestBytes, &a.ResponseBytes,
+			&a.Truncated, &a.SchemaVersion,
 		); err != nil {
 			continue
 		}
@@ -172,6 +205,35 @@ func scanArchives(rows *sql.Rows) ([]archive.Archive, error) {
 		records = append(records, a)
 	}
 	return records, rows.Err()
+}
+
+func ensureArchiveColumn(db *sql.DB, name, definition string) error {
+	rows, err := db.Query("PRAGMA table_info(conversation_archives)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var (
+		cid       int
+		column    string
+		columnTyp string
+		notNull   int
+		defaultV  sql.NullString
+		primary   int
+	)
+	for rows.Next() {
+		if err := rows.Scan(&cid, &column, &columnTyp, &notNull, &defaultV, &primary); err != nil {
+			return err
+		}
+		if column == name {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec("ALTER TABLE conversation_archives ADD COLUMN " + name + " " + definition)
+	return err
 }
 
 // ensureArchiveSchema is called from NewSQLiteStore to create the table

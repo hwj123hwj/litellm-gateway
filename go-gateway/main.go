@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -37,6 +42,8 @@ func main() {
 
 	logger := log.New(os.Stdout, "[gateway] ", log.LstdFlags)
 	logger.Printf("Starting go-llm-gateway on port %d", cfg.Port)
+	shutdownSignals, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 
 	// 初始化指标收集器
 	collector := metrics.NewCollector()
@@ -46,7 +53,11 @@ func main() {
 	if dbPath == "" {
 		dbPath = "./data"
 	}
-	os.MkdirAll(dbPath, 0755)
+	if err := os.MkdirAll(dbPath, 0700); err != nil {
+		logger.Printf("Warning: failed to create data directory %s: %v, using memory only", dbPath, err)
+	} else if err := os.Chmod(dbPath, 0700); err != nil {
+		logger.Printf("Warning: failed to restrict data directory %s: %v", dbPath, err)
+	}
 	sqlitePath := dbPath + "/metrics.db"
 
 	// 归档数据平面：当 ARCHIVE_ENABLED=true 时启用，否则使用 NoopStore。
@@ -67,7 +78,7 @@ func main() {
 		}
 
 		// 启动后台清理任务（每天清理 30 天前的指标数据 + 归档保留期外的对话）
-		go startCleanupTask(store, cfg.Archive, logger)
+		go startCleanupTask(shutdownSignals, store, cfg.Archive, logger)
 	}
 
 	// 构建归档器（即便 ARCHIVE_ENABLED=false 也是安全的 no-op）
@@ -120,7 +131,7 @@ func main() {
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Request-ID"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With", "X-Request-ID", "X-AI-Source", "X-Conversation-ID", "X-Session-ID"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Type", "X-Request-ID", "X-Upstream-Request-ID"},
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
@@ -150,6 +161,7 @@ func main() {
 	engine.POST("/v1/responses", responsesHandler.Handle)
 	engine.GET("/v1/models", modelHandler.Handle)
 	engine.GET("/health", healthHandler.Handle)
+	engine.GET("/readyz", healthHandler.HandleReady)
 	// 兼容不带 /v1 前缀的客户端
 	engine.POST("/messages", msgHandler.Handle)
 	engine.POST("/chat/completions", chatHandler.Handle)
@@ -181,8 +193,23 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	logger.Printf("Server listening on %s", addr)
-	if err := engine.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           engine,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       90 * time.Second,
+	}
+	go func() {
+		<-shutdownSignals.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			logger.Printf("Graceful shutdown timed out: %v", err)
+		}
+	}()
+
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Printf("Failed to start server: %v", err)
 	}
 }
 
@@ -384,7 +411,7 @@ func setupChatGPTProvider(router *provider.Router, proxyURL string, logger *log.
 }
 
 // startCleanupTask 启动后台清理任务
-func startCleanupTask(store *storage.SQLiteStore, archiveCfg archive.Config, logger *log.Logger) {
+func startCleanupTask(ctx context.Context, store *storage.SQLiteStore, archiveCfg archive.Config, logger *log.Logger) {
 	// 首次启动时清理
 	if err := store.Cleanup(30); err != nil {
 		logger.Printf("Cleanup error: %v", err)
@@ -401,7 +428,13 @@ func startCleanupTask(store *storage.SQLiteStore, archiveCfg archive.Config, log
 		tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 3, 0, 0, 0, now.Location())
 		duration := tomorrow.Sub(now)
 		logger.Printf("Next cleanup in %v", duration)
-		time.Sleep(duration)
+		timer := time.NewTimer(duration)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
 
 		if err := store.Cleanup(30); err != nil {
 			logger.Printf("Cleanup error: %v", err)
