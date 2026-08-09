@@ -107,7 +107,7 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 	// allocated when archiving is enabled to avoid overhead in the common case.
 	var sink *archiveSink
 	if h.archiver != nil && h.archiver.Enabled() {
-		sink = &archiveSink{}
+		sink = newArchiveSink()
 	}
 
 	originalModel := req.Model
@@ -148,17 +148,27 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 	}
 
 	if sink != nil {
+		// Restore original model for the archive — the provider loop above
+		// overwrites req.Model with the mapped/bound provider model.
+		req.Model = originalModel
 		reqBody, _ := json.Marshal(req)
 		if !streamOK && lastErr == nil {
-			lastErr = &provider.NoAvailableProvidersError{Model: req.Model, Reason: "disabled, unavailable, or circuit open"}
+			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 		}
-		if !c.Writer.Written() && lastErr != nil {
-			// No bytes reached the client → archive as a failed attempt.
+		// Use sink content (not c.Writer.Written()) to distinguish pre-body
+		// errors from actual stream interruptions. When a non-retryable error
+		// triggers c.JSON before any SSE bytes, the sink is empty but the HTTP
+		// writer reports written=true — that should be StatusError, not
+		// StatusInterrupted.
+		if sink.Len() == 0 && lastErr != nil {
+			// No stream bytes were emitted → archive as a failed attempt.
 			h.logger.Printf("All stream providers failed: %v", lastErr)
-			setProviderErrorHeaders(c, lastErr)
+			if !c.Writer.Written() {
+				setProviderErrorHeaders(c, lastErr)
+				c.JSON(routingErrorStatus(lastErr), gin.H{"error": lastErr.Error()})
+			}
 			submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, nil,
 				archive.StatusError, routingErrorStatus(lastErr), lastErr.Error())
-			c.JSON(routingErrorStatus(lastErr), gin.H{"error": lastErr.Error()})
 			return
 		}
 		// Bytes were streamed → archive the captured transcript.

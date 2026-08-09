@@ -546,7 +546,7 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 
 	var sink *archiveSink
 	if h.archiver != nil && h.archiver.Enabled() {
-		sink = &archiveSink{}
+		sink = newArchiveSink()
 	}
 
 	for _, p := range providerChain {

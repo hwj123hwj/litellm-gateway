@@ -38,7 +38,7 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 
 	var sink *archiveSink
 	if h.archiver != nil && h.archiver.Enabled() {
-		sink = &archiveSink{}
+		sink = newArchiveSink()
 	}
 
 	originalModel := req.Model

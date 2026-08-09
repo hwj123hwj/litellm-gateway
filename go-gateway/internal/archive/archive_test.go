@@ -53,7 +53,7 @@ func TestArchiverTruncatesOversizedBody(t *testing.T) {
 	if len(body) > 2048 {
 		t.Errorf("body not truncated: len=%d", len(body))
 	}
-	if !contains(body, "[truncated]") {
+	if !contains(body, "\"truncated\"") {
 		t.Errorf("truncated body missing marker")
 	}
 }

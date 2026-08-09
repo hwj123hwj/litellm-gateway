@@ -283,7 +283,7 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 
 	var sink *archiveSink
 	if h.archiver != nil && h.archiver.Enabled() {
-		sink = &archiveSink{}
+		sink = newArchiveSink()
 	}
 
 	originalModel := req.Model

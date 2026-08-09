@@ -6,8 +6,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/weijian/go-llm-gateway/internal/requestmeta"
 )
 
 // Archiver is the entry point handlers call to persist conversations. It owns
@@ -115,9 +113,12 @@ func (a *Archiver) worker() {
 	}
 }
 
-// truncateBody caps a JSON body string to maxKB kilobytes. If truncation is
-// needed, a marker is appended so consumers can detect that the payload was
-// shortened.
+// truncateBody caps a JSON body string to maxKB kilobytes. When truncation is
+// needed, the body is wrapped in a valid JSON envelope so downstream JSONL
+// consumers can always parse the result without encountering broken JSON.
+//
+// The envelope preserves a preview of the original content and carries a
+// "truncated" flag so consumers can distinguish truncated from complete bodies.
 func truncateBody(body string, maxKB int) string {
 	if maxKB <= 0 {
 		return body
@@ -126,27 +127,27 @@ func truncateBody(body string, maxKB int) string {
 	if len(body) <= maxBytes {
 		return body
 	}
-	return body[:maxBytes] + `...[truncated]`
+	// Instead of cutting mid-JSON, wrap the preview in a valid JSON object so
+	// downstream JSONL consumers always parse valid JSON. The preview must be
+	// trimmed to account for JSON-escaping overhead (each byte can expand up
+	// to 6x for control chars like \u0000), so we iteratively shrink until the
+	// marshaled envelope fits within maxBytes.
+	preview := body[:maxBytes]
+	for {
+		b, _ := json.Marshal(map[string]any{
+			"truncated": true,
+			"preview":   preview,
+		})
+		if len(b) <= maxBytes || len(preview) == 0 {
+			return string(b)
+		}
+		// Trim by 10% and retry — converges quickly even for pathological input.
+		preview = preview[:len(preview)*9/10]
+	}
 }
 
-// SnapshotFromContext builds the lightweight, protocol-neutral metadata fields
-// for an Archive from the requestmeta values populated by middleware/handlers.
-// It does NOT copy request/response bodies — those are supplied by the caller.
-func SnapshotFromContext(requestID, protocol, model, provider string, isStream bool, attempts []requestmeta.ProviderAttempt) Archive {
-	ar := NewArchive()
-	ar.RequestID = requestID
-	ar.Timestamp = time.Now().UTC()
-	ar.Protocol = Protocol(protocol)
-	ar.Model = model
-	ar.Provider = provider
-	ar.IsStream = isStream
-	// Status / StatusCode / bodies are filled in by the handler after the
-	// upstream call resolves.
-	if blob, err := json.Marshal(attempts); err == nil {
-		// Stash provider attempts in the error_reason slot as structured metadata
-		// only when the request actually errored; otherwise leave it empty. The
-		// caller overwrites this with a real reason before Submit when needed.
-		_ = blob
-	}
-	return ar
+// MaxBodyKB returns the configured per-body size limit in KB. Exposed so
+// handlers can size their archive sinks to match.
+func (a *Archiver) MaxBodyKB() int {
+	return a.cfg.MaxBodyKB
 }

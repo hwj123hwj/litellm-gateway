@@ -4,24 +4,69 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
 // sensitiveKeys lists JSON keys (case-insensitive) whose values must never be
 // persisted. The redaction is applied recursively to every object encountered.
+// The list includes exact-match names as well as common variant spellings
+// (kebab-case, camelCase, abbreviated forms).
 var sensitiveKeys = map[string]bool{
 	"authorization": true,
 	"cookie":        true,
+	"set-cookie":    true,
 	"x-api-key":     true,
+	"api-key":       true, // kebab-case variant
 	"api_key":       true,
 	"apikey":        true,
 	"token":         true,
 	"access_token":  true,
+	"accesstoken":   true,
 	"refresh_token": true,
+	"refreshtoken":  true,
+	"id_token":      true,
+	"idtoken":       true,
+	"oauth_token":   true,
+	"oauthtoken":    true,
+	"bearer":        true,
 	"password":      true,
+	"passwd":        true,
 	"secret":        true,
 	"client_secret": true,
+	"clientsecret":  true,
+	"private_key":   true,
+	"privatekey":    true,
+	"session":       true,
+	"session_id":    true,
+	"sessionid":     true,
+	"private-token": true, // some APIs use this
+	"x-auth-token":  true,
+	"x-csrf-token":  true,
+}
+
+// isSensitiveKey returns true if the lowercased key matches any entry in
+// sensitiveKeys OR ends with a known sensitive suffix (e.g. "github_token",
+// "anthropic_api_key", "openai_api_key"). This catches compound names that
+// the static map would miss.
+func isSensitiveKey(lowerKey string) bool {
+	if sensitiveKeys[lowerKey] {
+		return true
+	}
+	// Suffix-based matching for compound key names like "openai_api_key",
+	// "github_token", "anthropic_key", etc.
+	sensitiveSuffixes := []string{
+		"_api_key", "-api-key", "_apikey",
+		"_token", "-token",
+		"_secret", "-secret",
+		"_password", "-password",
+		"_private_key", "-private-key",
+	}
+	for _, suffix := range sensitiveSuffixes {
+		if strings.HasSuffix(lowerKey, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // multimediaFields holds JSON keys that may carry inline base64 payloads
@@ -81,7 +126,7 @@ func redactValue(v any) any {
 func redactObject(m map[string]any) map[string]any {
 	for key, value := range m {
 		lowerKey := strings.ToLower(key)
-		if sensitiveKeys[lowerKey] {
+		if isSensitiveKey(lowerKey) {
 			m[key] = "[REDACTED]"
 			continue
 		}
@@ -102,15 +147,21 @@ func redactArray(a []any) []any {
 }
 
 // redactMultimedia replaces inline base64/binary content with a digest while
-// preserving type metadata. Supported shapes:
-//   - string  → assume base64; replace with {type:"base64", size, sha256}
+// preserving type metadata and ordinary URLs. Supported shapes:
+//   - string  → if it looks like base64/data: URI, replace with digest;
+//     otherwise keep the original value (e.g. https:// URLs are preserved)
 //   - object  → recurse into it; digest any "data"/"base64"/"url" subfield that
 //     carries inline binary data (data: URIs or raw base64)
 //   - array   → redact each element
 func redactMultimedia(v any) any {
 	switch val := v.(type) {
 	case string:
-		return digestString(val)
+		// Only digest if it actually looks like inline binary data.
+		// Regular URLs (https://...) and short strings are preserved.
+		if looksLikeBase64(val) {
+			return digestString(val)
+		}
+		return val
 	case map[string]any:
 		// Walk the object: keep metadata fields, digest any "data" subfield.
 		for key, inner := range val {
@@ -121,7 +172,7 @@ func redactMultimedia(v any) any {
 					continue
 				}
 			}
-			if multimediaFields[lowerKey] || sensitiveKeys[lowerKey] {
+			if multimediaFields[lowerKey] || isSensitiveKey(lowerKey) {
 				val[key] = redactMultimedia(inner)
 			} else {
 				val[key] = redactValue(inner)
@@ -136,14 +187,19 @@ func redactMultimedia(v any) any {
 }
 
 // looksLikeBase64 returns true for strings that look like inline binary data:
-// data: URIs or long base64 blobs. Short strings (e.g. regular https:// URLs)
-// are left untouched.
+// data: URIs or long base64 blobs. Short strings and regular URLs
+// (e.g. https://...) are left untouched.
 func looksLikeBase64(s string) bool {
 	if strings.HasPrefix(s, "data:") {
 		return true
 	}
+	// Don't touch regular URLs
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		return false
+	}
 	// Heuristic: a long string of base64 characters (>=64 chars) is almost
 	// certainly an inline binary, not a normal URL or text value.
+	// Also validate that the length is a multiple of 4 (valid base64 padding).
 	if len(s) >= 64 {
 		isBase64 := true
 		for _, c := range s {
@@ -173,20 +229,5 @@ func digestString(s string) map[string]any {
 		"type":   "redacted_base64",
 		"size":   len(s),
 		"sha256": hex.EncodeToString(sum[:]),
-	}
-}
-
-func toString(v any) string {
-	if v == nil {
-		return ""
-	}
-	switch val := v.(type) {
-	case string:
-		return val
-	case fmt.Stringer:
-		return val.String()
-	default:
-		b, _ := json.Marshal(v)
-		return string(b)
 	}
 }
