@@ -160,12 +160,20 @@ func (h *AdminHandler) HandleHealth(c *gin.Context) {
 	dashboard := h.collector.GetDashboard()
 	providerStatuses := make([]gin.H, 0)
 	onlineCount := 0
+	knownProviderCount := 0
 	degradedProvider := false
 	for _, status := range h.router.ListProviderStatuses() {
-		if status.Status == "online" {
+		switch status.Status {
+		case "online":
 			onlineCount++
-		} else if status.Status == "degraded" || status.Status == "offline" {
+			knownProviderCount++
+		case "degraded", "offline":
+			knownProviderCount++
 			degradedProvider = true
+		default:
+			// A provider with no request or probe result is configured but
+			// unverified. It must not make the whole gateway look degraded.
+			// The Dashboard displays this state as "unknown" separately.
 		}
 		providerStatuses = append(providerStatuses, gin.H{
 			"provider": status.Name,
@@ -179,7 +187,7 @@ func (h *AdminHandler) HandleHealth(c *gin.Context) {
 	if dashboard.SuccessRate < 95 && dashboard.TodayRequests > 10 {
 		overallStatus = "degraded"
 	}
-	if len(providerStatuses) > 0 && onlineCount == 0 {
+	if knownProviderCount > 0 && onlineCount == 0 {
 		overallStatus = "degraded"
 	} else if degradedProvider {
 		overallStatus = "degraded"
