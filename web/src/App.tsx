@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { RocketLaunch, ShieldCheck } from '@phosphor-icons/react'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import MobileTabBar from './components/MobileTabBar'
@@ -29,7 +30,7 @@ function AuthGate({ onSubmit }: { onSubmit: (key: string) => void }) {
         event.preventDefault()
         if (key.trim()) onSubmit(key.trim())
       }}>
-        <div className="setup-icon">🔐</div>
+        <div className="setup-icon"><ShieldCheck size={52} weight="duotone" aria-hidden="true" /></div>
         <h1>LiteLLM Admin</h1>
         <p>请输入 Gateway 的 LITELLM_MASTER_KEY 或 ADMIN_TOKEN</p>
         <input
@@ -57,6 +58,7 @@ export default function App() {
   } = useStore()
 
   const [showSetup, setShowSetup] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     // Android 环境下，如果没有配置后端地址，显示配置引导
@@ -79,7 +81,7 @@ export default function App() {
     return (
       <div className="setup-page">
         <div className="setup-card">
-          <div className="setup-icon">🚀</div>
+          <div className="setup-icon"><RocketLaunch size={52} weight="duotone" aria-hidden="true" /></div>
           <h1>LiteLLM Admin</h1>
           <p>首次使用，请配置 Gateway 地址</p>
           <Settings />
@@ -106,10 +108,10 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar onClose={() => {}} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="shell">
-        <Header status={status} onMenuClick={() => {}} />
+        <Header status={status} onMenuClick={() => setSidebarOpen(true)} />
 
         <main className="content">
           <Routes>

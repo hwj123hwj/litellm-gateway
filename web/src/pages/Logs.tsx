@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Broadcast, CheckCircle, Clock, FileText, Warning, XCircle } from '@phosphor-icons/react'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
@@ -25,43 +26,44 @@ export default function Logs() {
     return () => clearInterval(timer)
   }, [fetchLogs])
 
-  if (logsLoading && !logs) return <div className="loading">加载中...</div>
-  if (logsError) return <div className="error-banner">⚠ {logsError}</div>
+  if (logsLoading && !logs) return <div className="loading" role="status">正在读取请求记录</div>
+  if (logsError) return <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{logsError}</div>
   if (!logs) return null
 
   return (
     <>
-      <PageHeader title="活动日志" subtitle={`最近 ${logs.total} 条请求记录`} />
+      <PageHeader title="活动日志" subtitle={`最近 ${logs.total} 条业务请求记录`} />
       <div className="logs-list">
         {logs.logs.length === 0 && (
           <div className="empty-state">
-            <div className="empty-icon">📄</div>
-            <div className="empty-text">暂无日志，等待第一个请求...</div>
+            <div className="empty-icon"><FileText size={36} weight="duotone" aria-hidden="true" /></div>
+            <div className="empty-text">暂无业务请求，等待第一个调用</div>
           </div>
         )}
         {logs.logs.map((log, i) => {
           const isSuccess = log.status_code >= 200 && log.status_code < 400
           const statusClass = log.error ? 'error' : isSuccess ? 'success' : 'error'
           const statusText = log.error ? '错误' : isSuccess ? '成功' : `${log.status_code}`
+          const StatusIcon = log.error ? XCircle : isSuccess ? CheckCircle : Warning
 
           return (
-            <div key={i} className="log-entry">
+            <article key={i} className="log-entry">
               <div className="log-top">
                 <span className="log-model">
-                  {log.provider ? `${log.provider} · ` : ''}{log.model || log.path}
+                  {log.provider ? `${log.provider} / ` : ''}{log.model || log.path}
                 </span>
-                <span className={`log-status ${statusClass}`}>{statusText}</span>
+                <span className={`log-status ${statusClass}`}><StatusIcon size={13} weight="fill" aria-hidden="true" />{statusText}</span>
               </div>
               <div className="log-detail">
-                {log.method} {log.path}
-                {log.latency_ms > 0 && ` · ${fmtLatency(log.latency_ms)}`}
-                {log.input_tokens > 0 && ` · ${log.input_tokens + log.output_tokens} tokens`}
-                {log.is_stream && ' · 流式'}
-                {log.request_id && ` · ${log.request_id}`}
-                {log.error && ` · ${log.error}`}
+                <span>{log.method} {log.path}</span>
+                {log.latency_ms > 0 && <span><Clock size={13} aria-hidden="true" />{fmtLatency(log.latency_ms)}</span>}
+                {log.input_tokens > 0 && <span>{log.input_tokens + log.output_tokens} tokens</span>}
+                {log.is_stream && <span><Broadcast size={13} aria-hidden="true" />流式</span>}
+                {log.request_id && <span className="log-request-id">{log.request_id}</span>}
               </div>
+              {log.error && <div className="log-error"><Warning size={13} weight="fill" aria-hidden="true" />{log.error}</div>}
               <div className="log-time">{fmtTime(log.timestamp)}</div>
-            </div>
+            </article>
           )
         })}
       </div>

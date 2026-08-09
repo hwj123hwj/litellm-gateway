@@ -1,11 +1,21 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import {
+  ChartLineUp,
+  Cube,
+  FileText,
+  Gear,
+  House,
+  PlugsConnected,
+  ShieldCheck,
+  X,
+} from '@phosphor-icons/react'
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Dashboard', icon: '🏠' },
-  { path: '/models', label: 'Models', icon: '📦' },
-  { path: '/providers', label: 'Providers', icon: '🔌' },
-  { path: '/logs', label: 'Logs', icon: '📄' },
-  { path: '/settings', label: 'Settings', icon: '⚙️' },
+  { path: '/', label: 'Dashboard', icon: House },
+  { path: '/models', label: 'Models', icon: Cube },
+  { path: '/providers', label: 'Providers', icon: PlugsConnected },
+  { path: '/logs', label: 'Logs', icon: FileText },
+  { path: '/settings', label: 'Settings', icon: Gear },
 ]
 
 interface Props {
@@ -17,12 +27,24 @@ export default function Sidebar({ open = false, onClose }: Props) {
   const location = useLocation()
 
   return (
-    <aside className={`sidebar${open ? ' open' : ''}`}>
+    <>
+      <button
+        className={`sidebar-overlay${open ? ' show' : ''}`}
+        type="button"
+        aria-label="关闭导航"
+        onClick={onClose}
+      />
+      <aside className={`sidebar${open ? ' open' : ''}`}>
+        {onClose && (
+          <button className="sidebar-close" type="button" aria-label="关闭导航" onClick={onClose}>
+            <X size={18} weight="bold" />
+          </button>
+        )}
       <div className="sidebar-logo">
         <div className="logo-icon">G</div>
         <div>
           <h1>LiteLLM</h1>
-          <span>API Gateway</span>
+          <span>Gateway control plane</span>
         </div>
       </div>
 
@@ -35,7 +57,7 @@ export default function Sidebar({ open = false, onClose }: Props) {
             onClick={onClose}
             end={item.path === '/'}
           >
-            <span>{item.icon}</span>
+            <item.icon size={18} weight={location.pathname === item.path ? 'fill' : 'regular'} aria-hidden="true" />
             {item.label}
           </NavLink>
         ))}
@@ -43,13 +65,15 @@ export default function Sidebar({ open = false, onClose }: Props) {
 
       <div className="sidebar-footer">
         <div className="user-card">
-          <div className="avatar">A</div>
+          <div className="avatar"><ShieldCheck size={18} weight="duotone" aria-hidden="true" /></div>
           <div className="user-info">
             <div className="user-name">Admin</div>
-            <div className="user-role">litellm-gateway</div>
+            <div className="user-role">local workspace</div>
           </div>
+          <ChartLineUp size={16} className="user-health" aria-hidden="true" />
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

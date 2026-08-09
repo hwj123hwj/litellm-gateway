@@ -1,4 +1,15 @@
 import { useEffect, useState } from 'react'
+import {
+  ArrowDown,
+  ArrowUp,
+  CheckCircle,
+  GearSix,
+  PlugsConnected,
+  Pulse,
+  Question,
+  Warning,
+  XCircle,
+} from '@phosphor-icons/react'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
@@ -13,10 +24,6 @@ function color(name: string) {
     if (k.includes(key)) return val
   }
   return '#78716c'
-}
-
-function abbr(name: string) {
-  return name.split(/[-_]/).map((w) => w[0]).join('').toUpperCase().slice(0, 3)
 }
 
 export default function Providers() {
@@ -46,8 +53,8 @@ export default function Providers() {
     return () => clearInterval(timer)
   }, [fetchProviders, fetchRoutes])
 
-  if (providersLoading && !providers) return <div className="loading">加载中...</div>
-  if (providersError) return <div className="error-banner">⚠ {providersError}</div>
+  if (providersLoading && !providers) return <div className="loading" role="status">正在读取提供商状态</div>
+  if (providersError) return <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{providersError}</div>
   if (!providers) return null
 
   const runAction = async (key: string, action: () => Promise<void>) => {
@@ -71,79 +78,92 @@ export default function Providers() {
   }
 
   const statusLabel = (status: string, state?: string) => {
-    if (status === 'online') return '● 在线'
-    if (status === 'degraded') return '● 降级'
-    if (status === 'offline') return '● 离线'
-    if (state === 'half_open') return '◐ 探测中'
-    return '● 未知'
+    if (status === 'online') return '在线'
+    if (status === 'degraded') return '降级'
+    if (status === 'offline') return '离线'
+    if (state === 'half_open') return '探测中'
+    return '未知'
+  }
+
+  const StatusIcon = ({ status, state }: { status: string; state?: string }) => {
+    if (status === 'online') return <CheckCircle size={13} weight="fill" aria-hidden="true" />
+    if (status === 'degraded' || state === 'half_open') return <Warning size={13} weight="fill" aria-hidden="true" />
+    if (status === 'offline') return <XCircle size={13} weight="fill" aria-hidden="true" />
+    return <Question size={13} weight="bold" aria-hidden="true" />
   }
 
   return (
     <>
       <PageHeader title="提供商" subtitle={`共 ${providers.total} 个提供商`} />
-      {actionError && <div className="error-banner">⚠ {actionError}</div>}
+      {actionError && <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{actionError}</div>}
       <div className="provider-grid">
         {providers.providers.map((p) => (
-          <div key={p.name} className="provider-card">
-            <div className="provider-icon" style={{ background: `linear-gradient(135deg, ${color(p.name)}, ${color(p.name)}cc)` }}>
-              {abbr(p.name)}
+          <article key={p.name} className="provider-card">
+            <div className="provider-card-top">
+              <div className="provider-icon" style={{ background: color(p.name) }}>
+                <PlugsConnected size={20} weight="duotone" aria-hidden="true" />
+              </div>
+              <span className={`provider-indicator ${p.status}`}>
+                <StatusIcon status={p.status} state={p.state} />
+                {statusLabel(p.status, p.state)}
+              </span>
             </div>
             <div className="provider-name">{p.name}</div>
-            <span className={`provider-indicator ${p.status}`}>
-              {statusLabel(p.status, p.state)}
-            </span>
-            <div style={{ fontSize: 11, color: '#78716c', marginTop: 6 }}>
-              熔断：{p.state === 'open' ? '开启' : p.state === 'half_open' ? '半开探测' : '关闭'}
-              {p.consecutive_failures ? ` · 连续失败 ${p.consecutive_failures}` : ''}
+            <div className="provider-meta">
+              <span>熔断 {p.state === 'open' ? '开启' : p.state === 'half_open' ? '半开探测' : '关闭'}</span>
+              {p.consecutive_failures ? <span>连续失败 {p.consecutive_failures}</span> : null}
             </div>
             {p.requests > 0 && (
-              <div style={{ fontSize: 11, color: '#a8a29e', marginTop: 6 }}>
-                {p.requests} 请求 · {p.avg_latency < 1000 ? p.avg_latency.toFixed(0) + 'ms' : (p.avg_latency / 1000).toFixed(1) + 's'}
+              <div className="provider-traffic">
+                <Pulse size={13} weight="duotone" aria-hidden="true" />
+                {p.requests} 请求 / {p.avg_latency < 1000 ? p.avg_latency.toFixed(0) + 'ms' : (p.avg_latency / 1000).toFixed(1) + 's'}
               </div>
             )}
-            <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <div className="provider-actions">
               <button
+                className="button button-secondary"
                 type="button"
                 disabled={pending === `provider:${p.name}`}
                 onClick={() => void runAction(`provider:${p.name}`, () => updateProvider(p.name, p.enabled === false))}
               >
-                {p.enabled === false ? '启用' : '停用'}
+                <GearSix size={14} weight="bold" aria-hidden="true" />{p.enabled === false ? '启用' : '停用'}
               </button>
-              <button type="button" disabled={pending === `check:${p.name}`} onClick={() => void runAction(`check:${p.name}`, () => checkProvider(p.name))}>
+              <button className="button button-ghost" type="button" disabled={pending === `check:${p.name}`} onClick={() => void runAction(`check:${p.name}`, () => checkProvider(p.name))}>
                 探测
               </button>
-              <button type="button" disabled={pending === `reset:${p.name}`} onClick={() => void runAction(`reset:${p.name}`, () => resetProvider(p.name))}>
-                重置熔断
+              <button className="button button-ghost" type="button" disabled={pending === `reset:${p.name}`} onClick={() => void runAction(`reset:${p.name}`, () => resetProvider(p.name))}>
+                重置
               </button>
             </div>
-          </div>
+          </article>
         ))}
         {providers.providers.length === 0 && (
-          <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
-            <div className="empty-icon">🔌</div>
+          <div className="empty-state provider-empty">
+            <div className="empty-icon"><PlugsConnected size={36} weight="duotone" aria-hidden="true" /></div>
             <div className="empty-text">暂无提供商数据</div>
           </div>
         )}
       </div>
 
-      <div style={{ marginTop: 28 }}>
+      <div className="route-section">
         <PageHeader title="故障转移顺序" subtitle="上下移动即可调整同一模型的 Provider 优先级" />
-        {routesError && <div className="error-banner">⚠ {routesError}</div>}
+        {routesError && <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{routesError}</div>}
         <div className="card-panel">
           {!routes || routes.routes.length === 0 ? (
             <div className="empty-state">暂无路由链</div>
           ) : routes.routes.map((route) => {
             const names = route.providers.map((item) => item.name)
             return (
-              <div key={route.model} style={{ padding: '12px 0', borderBottom: '1px solid #e7e5e4' }}>
-                <div style={{ fontWeight: 600, marginBottom: 8 }}>{route.model}</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <div key={route.model} className="route-row">
+                <div className="route-model">{route.model}</div>
+                <div className="route-providers">
                   {route.providers.map((item, index) => (
-                    <div key={`${route.model}:${item.name}`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 8px', border: '1px solid #e7e5e4', borderRadius: 8 }}>
-                      <span>{index + 1}. {item.name}</span>
-                      <span style={{ color: item.status === 'online' ? '#059669' : item.status === 'degraded' ? '#d97706' : '#a8a29e', fontSize: 11 }}>{statusLabel(item.status, item.state)}</span>
-                      <button type="button" disabled={index === 0 || pending === `route:${route.model}`} onClick={() => moveProvider(route.model, names, index, -1)}>↑</button>
-                      <button type="button" disabled={index === names.length - 1 || pending === `route:${route.model}`} onClick={() => moveProvider(route.model, names, index, 1)}>↓</button>
+                    <div key={`${route.model}:${item.name}`} className="route-provider">
+                      <span className="route-provider-index">{index + 1}</span>
+                      <span className="route-provider-name">{item.name}</span>
+                      <span className={`route-provider-status ${item.status}`}><StatusIcon status={item.status} state={item.state} />{statusLabel(item.status, item.state)}</span>
+                      <button className="icon-btn compact" type="button" aria-label={`将 ${item.name} 上移`} disabled={index === 0 || pending === `route:${route.model}`} onClick={() => moveProvider(route.model, names, index, -1)}><ArrowUp size={14} weight="bold" aria-hidden="true" /></button>
+                      <button className="icon-btn compact" type="button" aria-label={`将 ${item.name} 下移`} disabled={index === names.length - 1 || pending === `route:${route.model}`} onClick={() => moveProvider(route.model, names, index, 1)}><ArrowDown size={14} weight="bold" aria-hidden="true" /></button>
                     </div>
                   ))}
                 </div>
