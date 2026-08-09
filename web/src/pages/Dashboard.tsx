@@ -1,5 +1,16 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  ArrowRight,
+  ArrowUp,
+  ChartBar,
+  ChartLineUp,
+  CheckCircle,
+  Cube,
+  Mailbox,
+  Timer,
+  Warning,
+} from '@phosphor-icons/react'
 import { useStore } from '../store'
 
 const PROVIDER_COLORS: Record<string, string> = {
@@ -47,8 +58,8 @@ export default function Dashboard() {
     return () => clearInterval(timer)
   }, [fetchDashboard])
 
-  if (dashboardLoading && !dashboard) return <div className="loading">加载中...</div>
-  if (dashboardError) return <div className="error-banner">⚠ {dashboardError}</div>
+  if (dashboardLoading && !dashboard) return <div className="loading" role="status">正在读取网关指标</div>
+  if (dashboardError) return <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{dashboardError}</div>
   if (!dashboard) return null
 
   const { summary, providers, models } = dashboard
@@ -67,7 +78,7 @@ export default function Dashboard() {
     <>
       {/* Status row */}
       <div className={`status-row ${status}`}>
-        <span className="pulse" />
+        <ChartLineUp className="status-row-icon" size={18} weight="duotone" aria-hidden="true" />
         <span className="status-text">
           {statusText}
         </span>
@@ -77,28 +88,28 @@ export default function Dashboard() {
       {/* KPI */}
       <div className="kpi-grid">
         <div className="kpi-card">
-          <div className="kpi-label">📊 今日请求</div>
+          <div className="kpi-label"><ChartBar size={16} weight="duotone" aria-hidden="true" />今日请求</div>
           <div className="kpi-value">{formatNumber(summary.today_requests)}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">✅ 成功率</div>
-          <div className="kpi-value">{hasRequests ? summary.success_rate.toFixed(1) + '%' : '—'}</div>
+          <div className="kpi-label"><CheckCircle size={16} weight="duotone" aria-hidden="true" />成功率</div>
+          <div className="kpi-value">{hasRequests ? summary.success_rate.toFixed(1) + '%' : 'N/A'}</div>
           {hasRequests && (
             <div className={`kpi-trend ${summary.success_rate >= 99 ? 'up' : summary.success_rate >= 95 ? 'neutral' : 'down'}`}>
-              {summary.success_rate >= 99 ? '↑ 优秀' : summary.success_rate >= 95 ? '→ 正常' : '↓ 偏低'}
+              {summary.success_rate >= 99 ? <><ArrowUp size={14} weight="bold" />优秀</> : summary.success_rate >= 95 ? '正常' : '偏低'}
             </div>
           )}
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">📦 活跃模型</div>
+          <div className="kpi-label"><Cube size={16} weight="duotone" aria-hidden="true" />活跃模型</div>
           <div className="kpi-value">{summary.active_models}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">⏱ 平均延迟</div>
-          <div className="kpi-value">{hasRequests ? formatLatency(summary.avg_latency_ms) : '—'}</div>
+          <div className="kpi-label"><Timer size={16} weight="duotone" aria-hidden="true" />平均延迟</div>
+          <div className="kpi-value">{hasRequests ? formatLatency(summary.avg_latency_ms) : 'N/A'}</div>
           {hasRequests && (
             <div className={`kpi-trend ${summary.avg_latency_ms < 2000 ? 'up' : summary.avg_latency_ms < 5000 ? 'neutral' : 'down'}`}>
-              {summary.avg_latency_ms < 2000 ? '→ 正常' : '↓ 偏高'}
+              {summary.avg_latency_ms < 2000 ? '正常' : '偏高'}
             </div>
           )}
         </div>
@@ -108,8 +119,9 @@ export default function Dashboard() {
       {providers.length > 0 && (
         <div className="provider-strip">
           {providers.map((p) => (
-            <div
+            <button
               key={p.name}
+              type="button"
               className="provider-chip"
               onClick={() => navigate('/providers')}
             >
@@ -118,7 +130,7 @@ export default function Dashboard() {
               <span className={`p-badge ${p.status}`}>
                 {p.requests > 0 ? formatLatency(p.avg_latency) : '未使用'}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -128,29 +140,29 @@ export default function Dashboard() {
         <div className="card-panel">
           <div className="panel-header">
             <div className="panel-title">活跃模型（今日）</div>
-            <div className="panel-action" onClick={() => navigate('/models')}>查看全部 →</div>
+            <button className="panel-action" type="button" onClick={() => navigate('/models')}>查看全部 <ArrowRight size={15} weight="bold" aria-hidden="true" /></button>
           </div>
           <div className="model-list">
             {models.length === 0 && (
               <div className="empty-state">
-                <div className="empty-icon">📭</div>
+                <div className="empty-icon"><Mailbox size={36} weight="duotone" aria-hidden="true" /></div>
                 <div className="empty-text">暂无业务请求，模型使用数据将在首个请求后显示</div>
               </div>
             )}
             {sortedModels.slice(0, 5).map((m) => (
-              <div key={m.model} className="model-item" onClick={() => navigate('/models')}>
+              <button key={m.model} type="button" className="model-item" onClick={() => navigate('/models')}>
                 <div className="model-icon" style={{ background: providerColor(m.provider || m.model) }}>
                   {m.model.slice(0, 2).toUpperCase()}
                 </div>
                 <div className="model-info">
                   <div className="model-name">{m.model}</div>
-                  <div className="model-provider">{m.provider || '—'} · {formatNumber(m.requests)} 请求</div>
+                  <div className="model-provider">{m.provider || 'N/A'} / {formatNumber(m.requests)} 请求</div>
                 </div>
                 <span className={`model-status ${m.status}`} />
                 <div className="model-latency">
-                  {m.requests > 0 ? formatLatency(m.avg_latency) : '—'}
+                  {m.requests > 0 ? formatLatency(m.avg_latency) : 'N/A'}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -161,7 +173,7 @@ export default function Dashboard() {
           </div>
           {models.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">📊</div>
+              <div className="empty-icon"><ChartBar size={36} weight="duotone" aria-hidden="true" /></div>
               <div className="empty-text">暂无用量数据</div>
             </div>
           ) : (

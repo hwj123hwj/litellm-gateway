@@ -85,6 +85,8 @@ npm ci
 npm run build
 ~~~
 
+Web Dashboard 的视觉和前端交互改动必须先阅读并遵循仓库内的 `.agents/skills/taste-skill/SKILL.md` 与 `.agents/skills/impeccable/SKILL.md`。优先复用现有产品信息架构，使用统一的图标、状态、键盘焦点和响应式规则；改动完成后运行 Impeccable 提供的检测脚本（若当前技能包包含检测器）。
+
 ### Android
 
 遵循 [mobile-app/AGENTS.md](mobile-app/AGENTS.md) 和 Expo v56 文档。修改 Android 客户端后至少执行依赖安装、TypeScript 检查和对应的 Expo/Android 构建验证。

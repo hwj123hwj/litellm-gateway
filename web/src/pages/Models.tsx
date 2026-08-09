@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Check, Cube, FloppyDisk, Plus, Warning, X } from '@phosphor-icons/react'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 
@@ -35,8 +36,8 @@ export default function Models() {
     return () => clearInterval(timer)
   }, [fetchModels])
 
-  if (modelsLoading && !models) return <div className="loading">加载中...</div>
-  if (modelsError) return <div className="error-banner">⚠ {modelsError}</div>
+  if (modelsLoading && !models) return <div className="loading" role="status">正在读取模型配置</div>
+  if (modelsError) return <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{modelsError}</div>
   if (!models) return null
 
   const toggleCapability = (model: string, capability: string, current: string[]) => {
@@ -68,30 +69,22 @@ export default function Models() {
   return (
     <>
       <PageHeader title="模型管理" subtitle={`共 ${models.total} 个模型，${activeCount} 个活跃`} />
-      {saveError && <div className="error-banner">⚠ {saveError}</div>}
+      {saveError && <div className="error-banner" role="alert"><Warning size={18} weight="fill" aria-hidden="true" />{saveError}</div>}
       <div className="model-detail-list">
         {models.models
           .slice()
           .sort((a, b) => b.requests - a.requests)
           .map((m) => (
-            <div key={m.model} className="model-detail-card">
+            <article key={m.model} className="model-detail-card">
               <div className="md-header">
                 <div className="md-icon" style={{ background: color(m.provider || m.model) }}>
-                  {m.model.slice(0, 2).toUpperCase()}
+                  <Cube size={20} weight="duotone" aria-hidden="true" />
                 </div>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{m.model}</div>
-                  <div style={{ fontSize: 12, color: '#a8a29e' }}>{m.provider || '—'}</div>
+                  <div className="md-name">{m.model}</div>
+                  <div className="md-provider">{m.provider || 'N/A'}</div>
                 </div>
-                <span style={{
-                  marginLeft: 'auto',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  padding: '3px 10px',
-                  borderRadius: 999,
-                  background: m.status === 'online' ? '#d1fae5' : m.status === 'degraded' ? '#fef3c7' : '#f3f4f6',
-                  color: m.status === 'online' ? '#059669' : m.status === 'degraded' ? '#d97706' : '#a8a29e',
-                }}>
+                <span className={`model-status-badge ${m.status}`}>
                   {m.status === 'online' ? '在线' : m.status === 'degraded' ? '降级' : m.status === 'offline' ? '离线' : '空闲'}
                 </span>
               </div>
@@ -111,46 +104,47 @@ export default function Models() {
                   <div className="md-stat-label">延迟</div>
                 </div>
               </div>
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 11, color: '#78716c', marginBottom: 6 }}>能力（可调整路由校验）</div>
-                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              <div className="capability-section">
+                <div className="capability-label">能力校验</div>
+                <div className="capability-list">
                   {(drafts[m.model] || m.capabilities || []).map((capability) => (
                     <button
                       key={`${m.model}:${capability}`}
                       type="button"
+                      className="capability-chip selected"
                       onClick={() => toggleCapability(m.model, capability, drafts[m.model] || m.capabilities || [])}
-                      style={{ border: '1px solid #a8a29e', borderRadius: 999, padding: '3px 8px', fontSize: 11, background: '#292524', color: '#fff' }}
+                      aria-label={`移除 ${capability} 能力`}
                     >
-                      {capability} ×
+                      <Check size={13} weight="bold" aria-hidden="true" />{capability}<X size={12} weight="bold" aria-hidden="true" />
                     </button>
                   ))}
                   {CAPABILITIES.filter((capability) => !(drafts[m.model] || m.capabilities || []).includes(capability)).map((capability) => (
                     <button
                       key={`${m.model}:add:${capability}`}
                       type="button"
+                      className="capability-chip available"
                       onClick={() => toggleCapability(m.model, capability, drafts[m.model] || m.capabilities || [])}
-                      style={{ border: '1px dashed #d6d3d1', borderRadius: 999, padding: '3px 8px', fontSize: 11, background: '#fff', color: '#78716c' }}
                     >
-                      + {capability}
+                      <Plus size={13} weight="bold" aria-hidden="true" />{capability}
                     </button>
                   ))}
                 </div>
                 {drafts[m.model] && (
                   <button
                     type="button"
+                    className="button button-primary save-capabilities"
                     disabled={saving === m.model}
                     onClick={() => saveCapabilities(m.model, drafts[m.model])}
-                    style={{ marginTop: 8 }}
                   >
-                    {saving === m.model ? '保存中...' : '保存能力'}
+                    <FloppyDisk size={15} weight="bold" aria-hidden="true" />{saving === m.model ? '保存中...' : '保存能力'}
                   </button>
                 )}
               </div>
-            </div>
+            </article>
           ))}
         {models.models.length === 0 && (
           <div className="empty-state">
-            <div className="empty-icon">📭</div>
+            <div className="empty-icon"><Cube size={36} weight="duotone" aria-hidden="true" /></div>
             <div className="empty-text">暂无模型数据</div>
           </div>
         )}
