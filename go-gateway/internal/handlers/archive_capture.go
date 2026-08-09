@@ -51,9 +51,15 @@ func newArchiveSink(maxBytes ...int) *archiveSink {
 	if len(maxBytes) > 0 && maxBytes[0] > 0 {
 		limit = maxBytes[0]
 	}
+	// Always reserve tail capacity when the configured limit permits it. Using
+	// the whole limit for the head at limits <= sinkHeadBytes drops terminal SSE
+	// events from long streams and falsely classifies them as interrupted.
 	headLimit := limit
-	if headLimit > sinkHeadBytes {
-		headLimit = sinkHeadBytes
+	if limit > 1 {
+		headLimit = limit / 2
+		if headLimit > sinkHeadBytes {
+			headLimit = sinkHeadBytes
+		}
 	}
 	tailLimit := limit - headLimit
 	return &archiveSink{

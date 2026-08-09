@@ -30,6 +30,23 @@ func TestArchiveSinkWriteReportsFullInputLengthAndStaysBounded(t *testing.T) {
 	}
 }
 
+func TestArchiveSinkPreservesTerminalEventAtSmallCapacity(t *testing.T) {
+	sink := newArchiveSink(64)
+	_, _ = sink.Write(bytes.Repeat([]byte("x"), 128))
+	_, _ = sink.Write([]byte("\ndata: [DONE]\n\n"))
+
+	if sink.Len() > 64 {
+		t.Fatalf("sink length = %d, exceeds configured limit", sink.Len())
+	}
+	if !bytes.HasSuffix(sink.Bytes(), []byte("data: [DONE]\n\n")) {
+		t.Fatalf("bounded stream archive lost terminal event: %q", sink.Bytes())
+	}
+	status, reason := parseStreamEndState(sink.Bytes(), nil)
+	if status != archive.StatusCompleted {
+		t.Fatalf("stream status = %s, want completed (reason %q)", status, reason)
+	}
+}
+
 func TestRedactSSETranscriptJoinsMultilineDataBeforeRedacting(t *testing.T) {
 	raw := []byte("event: response.completed\n" +
 		"data: {\"response\":\n" +
