@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -62,6 +63,25 @@ type Store interface {
 	GetRecentLogs(limit int) ([]RequestRecord, error)
 }
 
+// IsBusinessRequest reports whether a request is one of the model API entry
+// points that should be included in Dashboard metrics and request logs.
+// Browser UI traffic, health checks, model discovery, admin endpoints, and
+// static assets are intentionally excluded from business metrics.
+func IsBusinessRequest(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+
+	switch path {
+	case "/v1/messages", "/messages",
+		"/v1/chat/completions", "/chat/completions",
+		"/v1/responses", "/responses":
+		return true
+	default:
+		return false
+	}
+}
+
 // Collector 内存指标收集器
 type Collector struct {
 	mu         sync.RWMutex
@@ -118,12 +138,19 @@ func (c *Collector) SetStore(store Store) {
 		return
 	}
 	for i := len(persisted) - 1; i >= 0; i-- {
+		if !IsBusinessRequest(persisted[i].Method, persisted[i].Path) {
+			continue
+		}
 		c.records = append(c.records, persisted[i])
 	}
 }
 
 // Record 记录一条请求
 func (c *Collector) Record(r RequestRecord) {
+	if !IsBusinessRequest(r.Method, r.Path) {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

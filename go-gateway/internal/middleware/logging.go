@@ -3,7 +3,6 @@ package middleware
 import (
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,9 +27,11 @@ func Logging(logger *log.Logger, collector *metrics.Collector) gin.HandlerFunc {
 			latency,
 		)
 
-		// 记录指标（排除 admin 和 health 端点）
-		path := c.Request.URL.Path
-		if collector != nil && !isMetricsExcludedPath(path) {
+		// The collector owns the business-request boundary. Keeping this
+		// middleware path-agnostic prevents the exclusion list from drifting
+		// away from the gateway's actual model API routes.
+		if collector != nil {
+			path := c.Request.URL.Path
 			model := c.GetString(requestmeta.ModelKey)
 			provider := c.GetString(requestmeta.ProviderKey)
 			requestError := c.GetString(requestmeta.RequestErrorKey)
@@ -58,19 +59,4 @@ func Logging(logger *log.Logger, collector *metrics.Collector) gin.HandlerFunc {
 			})
 		}
 	}
-}
-
-// isMetricsExcludedPath keeps operational probes, model discovery, the
-// embedded Dashboard, and control-plane traffic out of user request metrics.
-func isMetricsExcludedPath(path string) bool {
-	return (len(path) >= 6 && path[:6] == "/admin") ||
-		path == "/" ||
-		path == "/favicon.ico" ||
-		path == "/health" ||
-		path == "/readyz" ||
-		path == "/models" ||
-		path == "/v1/models" ||
-		path == "/dashboard" ||
-		strings.HasPrefix(path, "/dashboard/") ||
-		strings.HasPrefix(path, "/assets/")
 }
