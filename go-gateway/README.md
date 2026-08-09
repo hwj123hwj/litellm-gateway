@@ -38,6 +38,8 @@ go build -o gateway . && ./gateway
 make run
 ```
 
+网关内置 Dashboard，启动后直接访问 <http://localhost:4001/>。发布二进制会携带 Web 静态资源，不需要单独运行 `npm run dev`；后者只用于 Dashboard 开发调试。
+
 ## 配置 Pi
 
 安装版网关可一键写入 Pi 的自定义模型配置：

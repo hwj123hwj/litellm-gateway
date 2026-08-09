@@ -21,6 +21,8 @@ func newTestRouter(masterKey string) *gin.Engine {
 	e.POST("/test", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	e.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	e.GET("/readyz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
+	e.GET("/dashboard", func(c *gin.Context) { c.Status(http.StatusOK) })
+	e.GET("/assets/index.js", func(c *gin.Context) { c.Status(http.StatusOK) })
 	return e
 }
 
@@ -74,6 +76,20 @@ func TestBearerAuthReadinessPublic(t *testing.T) {
 	e.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected 200 (public endpoint), got %d", w.Code)
+	}
+}
+
+func TestBearerAuthDashboardPublic(t *testing.T) {
+	e := newTestRouter("test-key")
+	e.GET("/", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	for _, path := range []string{"/", "/assets/index.js", "/dashboard"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected dashboard path %s to be public, got %d", path, w.Code)
+		}
 	}
 }
 

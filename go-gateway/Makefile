@@ -1,4 +1,7 @@
-.PHONY: build run test clean docker-build docker-run fmt
+.PHONY: build dashboard-build run test clean docker-build docker-run fmt lint
+
+dashboard-build:
+	../scripts/build-dashboard.sh
 
 build:
 	go build -o gateway .

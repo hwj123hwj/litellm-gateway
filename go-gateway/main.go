@@ -18,6 +18,7 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/auth"
 	"github.com/weijian/go-llm-gateway/internal/config"
+	"github.com/weijian/go-llm-gateway/internal/dashboard"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
 	"github.com/weijian/go-llm-gateway/internal/metrics"
 	"github.com/weijian/go-llm-gateway/internal/middleware"
@@ -155,6 +156,7 @@ func main() {
 	healthHandler := handlers.NewHealthHandler(router, logger)
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
+	dashboardHandler := dashboard.NewHandler()
 
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.POST("/v1/chat/completions", chatHandler.Handle)
@@ -162,6 +164,13 @@ func main() {
 	engine.GET("/v1/models", modelHandler.Handle)
 	engine.GET("/health", healthHandler.Handle)
 	engine.GET("/readyz", healthHandler.HandleReady)
+	// The Dashboard is embedded into release binaries. It is intentionally
+	// public so the page can render its Token login form; all /admin APIs remain
+	// protected by AdminAuth.
+	engine.GET("/", gin.WrapH(dashboardHandler))
+	engine.GET("/dashboard", gin.WrapH(dashboardHandler))
+	engine.GET("/dashboard/*path", gin.WrapH(dashboardHandler))
+	engine.GET("/assets/*filepath", gin.WrapH(dashboardHandler))
 	// 兼容不带 /v1 前缀的客户端
 	engine.POST("/messages", msgHandler.Handle)
 	engine.POST("/chat/completions", chatHandler.Handle)

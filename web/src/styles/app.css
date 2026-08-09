@@ -671,6 +671,22 @@ body {
   margin-bottom: 24px;
 }
 
+.setup-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--warm-white);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.setup-input:focus {
+  border-color: var(--terracotta-600);
+  box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.12);
+}
+
 .setup-button {
   width: 100%;
   padding: 14px;
@@ -684,6 +700,13 @@ body {
   font-family: var(--font-body);
   margin-top: 24px;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.setup-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
 }
 
 .setup-button:hover {

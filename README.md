@@ -42,6 +42,8 @@ go build -o gateway . && ./gateway
 
 网关默认监听 `:4001`。
 
+启动后直接访问 <http://localhost:4001/> 即可打开内置 Dashboard。生产版本已将 Dashboard 静态资源嵌入网关二进制，不需要额外启动 Node/Vite 进程；`web/` 下的 `npm run dev` 仅用于前端开发。
+
 ## 配置 Pi
 
 安装并启动本地网关后，执行：

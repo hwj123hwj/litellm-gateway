@@ -20,10 +20,37 @@ function hasBackendUrl(): boolean {
   return !!localStorage.getItem('backend_url')
 }
 
+function AuthGate({ onSubmit }: { onSubmit: (key: string) => void }) {
+  const [key, setKey] = useState('')
+
+  return (
+    <div className="setup-page">
+      <form className="setup-card" onSubmit={(event) => {
+        event.preventDefault()
+        if (key.trim()) onSubmit(key.trim())
+      }}>
+        <div className="setup-icon">🔐</div>
+        <h1>LiteLLM Admin</h1>
+        <p>请输入 Gateway 的 LITELLM_MASTER_KEY 或 ADMIN_TOKEN</p>
+        <input
+          className="setup-input"
+          type="password"
+          value={key}
+          onChange={(event) => setKey(event.target.value)}
+          placeholder="输入管理 Token"
+          autoFocus
+        />
+        <button className="setup-button" type="submit" disabled={!key.trim()}>
+          进入 Dashboard
+        </button>
+      </form>
+    </div>
+  )
+}
+
 export default function App() {
   const {
     apiKey,
-    setApiKey,
     backendUrl,
     health,
     fetchHealth,
@@ -39,18 +66,13 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!apiKey || !backendUrl) return
+    if (!apiKey) return
     fetchHealth()
     const timer = setInterval(fetchHealth, 15000)
     return () => clearInterval(timer)
   }, [apiKey, backendUrl, fetchHealth])
 
   const status = health?.status || 'unknown'
-
-  const handleSaveKey = (key: string) => {
-    setApiKey(key)
-    window.location.reload()
-  }
 
   // 显示配置引导页面
   if (showSetup) {
@@ -73,6 +95,13 @@ export default function App() {
         </div>
       </div>
     )
+  }
+
+  if (!apiKey) {
+    return <AuthGate onSubmit={(key) => {
+      useStore.getState().setApiKey(key)
+      window.location.reload()
+    }} />
   }
 
   return (

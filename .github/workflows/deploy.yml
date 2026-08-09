@@ -17,6 +17,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify embedded Dashboard
+        run: |
+          ./scripts/build-dashboard.sh
+          git diff --exit-code -- go-gateway/internal/dashboard/static
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:

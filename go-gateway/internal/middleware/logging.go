@@ -3,6 +3,7 @@ package middleware
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -59,8 +60,14 @@ func Logging(logger *log.Logger, collector *metrics.Collector) gin.HandlerFunc {
 	}
 }
 
-// isMetricsExcludedPath keeps operational probes and control-plane traffic
-// out of user request metrics.
+// isMetricsExcludedPath keeps operational probes, the embedded Dashboard, and
+// control-plane traffic out of user request metrics.
 func isMetricsExcludedPath(path string) bool {
-	return (len(path) >= 6 && path[:6] == "/admin") || path == "/health"
+	return (len(path) >= 6 && path[:6] == "/admin") ||
+		path == "/" ||
+		path == "/health" ||
+		path == "/readyz" ||
+		path == "/dashboard" ||
+		strings.HasPrefix(path, "/dashboard/") ||
+		strings.HasPrefix(path, "/assets/")
 }
