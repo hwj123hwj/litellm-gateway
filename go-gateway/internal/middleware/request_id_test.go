@@ -18,14 +18,14 @@ func TestRequestIDPreservesSafeIncomingValueAndRecordsMetadata(t *testing.T) {
 	engine := gin.New()
 	engine.Use(RequestID())
 	engine.Use(Logging(log.New(io.Discard, "", 0), collector))
-	engine.GET("/v1/models", func(c *gin.Context) {
+	engine.GET("/v1/chat/completions", func(c *gin.Context) {
 		c.Set(requestmeta.ModelKey, "coding")
 		c.Set(requestmeta.ProviderKey, "glm")
 		c.Set(requestmeta.ProviderAttemptsKey, []requestmeta.ProviderAttempt{{Provider: "glm", Status: "success"}})
 		c.Status(http.StatusOK)
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
 	request.Header.Set("X-Request-ID", "client-trace-42")
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)

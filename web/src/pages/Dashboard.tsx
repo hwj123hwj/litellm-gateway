@@ -26,6 +26,17 @@ function formatNumber(n: number): string {
   return String(n)
 }
 
+function formatLatency(ms: number): string {
+  return ms < 1000 ? ms.toFixed(0) + 'ms' : (ms / 1000).toFixed(1) + 's'
+}
+
+function dashboardStatus(todayRequests: number, successRate: number): 'idle' | 'ok' | 'degraded' | 'error' {
+  if (todayRequests === 0) return 'idle'
+  if (successRate >= 99) return 'ok'
+  if (successRate >= 95) return 'degraded'
+  return 'error'
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const { dashboard, dashboardLoading, dashboardError, fetchDashboard } = useStore()
@@ -41,14 +52,24 @@ export default function Dashboard() {
   if (!dashboard) return null
 
   const { summary, providers, models } = dashboard
+  const hasRequests = summary.today_requests > 0
+  const status = dashboardStatus(summary.today_requests, summary.success_rate)
+  const sortedModels = models.slice().sort((a, b) => b.requests - a.requests)
+  const statusText = status === 'idle'
+    ? '暂无业务请求'
+    : status === 'ok'
+      ? '所有系统正常运行'
+      : status === 'degraded'
+        ? '部分请求失败，请关注上游状态'
+        : '请求失败率偏高，请检查上游配置'
 
   return (
     <>
       {/* Status row */}
-      <div className="status-row">
+      <div className={`status-row ${status}`}>
         <span className="pulse" />
         <span className="status-text">
-          {summary.today_requests > 0 ? '所有系统正常运行' : '等待请求...'}
+          {statusText}
         </span>
         <span className="status-time">运行 {summary.uptime}</span>
       </div>
@@ -61,10 +82,12 @@ export default function Dashboard() {
         </div>
         <div className="kpi-card">
           <div className="kpi-label">✅ 成功率</div>
-          <div className="kpi-value">{summary.success_rate.toFixed(1)}%</div>
-          <div className={`kpi-trend ${summary.success_rate >= 99 ? 'up' : summary.success_rate >= 95 ? 'neutral' : 'down'}`}>
-            {summary.success_rate >= 99 ? '↑ 优秀' : summary.success_rate >= 95 ? '→ 正常' : '↓ 偏低'}
-          </div>
+          <div className="kpi-value">{hasRequests ? summary.success_rate.toFixed(1) + '%' : '—'}</div>
+          {hasRequests && (
+            <div className={`kpi-trend ${summary.success_rate >= 99 ? 'up' : summary.success_rate >= 95 ? 'neutral' : 'down'}`}>
+              {summary.success_rate >= 99 ? '↑ 优秀' : summary.success_rate >= 95 ? '→ 正常' : '↓ 偏低'}
+            </div>
+          )}
         </div>
         <div className="kpi-card">
           <div className="kpi-label">📦 活跃模型</div>
@@ -72,10 +95,12 @@ export default function Dashboard() {
         </div>
         <div className="kpi-card">
           <div className="kpi-label">⏱ 平均延迟</div>
-          <div className="kpi-value">{summary.avg_latency_ms < 1000 ? summary.avg_latency_ms.toFixed(0) + 'ms' : (summary.avg_latency_ms / 1000).toFixed(1) + 's'}</div>
-          <div className={`kpi-trend ${summary.avg_latency_ms < 2000 ? 'up' : summary.avg_latency_ms < 5000 ? 'neutral' : 'down'}`}>
-            {summary.avg_latency_ms < 2000 ? '→ 正常' : '↓ 偏高'}
-          </div>
+          <div className="kpi-value">{hasRequests ? formatLatency(summary.avg_latency_ms) : '—'}</div>
+          {hasRequests && (
+            <div className={`kpi-trend ${summary.avg_latency_ms < 2000 ? 'up' : summary.avg_latency_ms < 5000 ? 'neutral' : 'down'}`}>
+              {summary.avg_latency_ms < 2000 ? '→ 正常' : '↓ 偏高'}
+            </div>
+          )}
         </div>
       </div>
 
@@ -91,7 +116,7 @@ export default function Dashboard() {
               <span className={`p-dot ${p.status}`} />
               <span className="p-label">{p.name}</span>
               <span className={`p-badge ${p.status}`}>
-                {p.avg_latency < 1000 ? p.avg_latency.toFixed(0) + 'ms' : (p.avg_latency / 1000).toFixed(1) + 's'}
+                {p.requests > 0 ? formatLatency(p.avg_latency) : '未使用'}
               </span>
             </div>
           ))}
@@ -102,17 +127,17 @@ export default function Dashboard() {
       <div className="grid-2col">
         <div className="card-panel">
           <div className="panel-header">
-            <div className="panel-title">活跃模型</div>
+            <div className="panel-title">活跃模型（今日）</div>
             <div className="panel-action" onClick={() => navigate('/models')}>查看全部 →</div>
           </div>
           <div className="model-list">
             {models.length === 0 && (
               <div className="empty-state">
                 <div className="empty-icon">📭</div>
-                <div className="empty-text">暂无模型数据，等待第一个请求...</div>
+                <div className="empty-text">暂无业务请求，模型使用数据将在首个请求后显示</div>
               </div>
             )}
-            {models.slice(0, 5).map((m) => (
+            {sortedModels.slice(0, 5).map((m) => (
               <div key={m.model} className="model-item" onClick={() => navigate('/models')}>
                 <div className="model-icon" style={{ background: providerColor(m.provider || m.model) }}>
                   {m.model.slice(0, 2).toUpperCase()}
@@ -123,7 +148,7 @@ export default function Dashboard() {
                 </div>
                 <span className={`model-status ${m.status}`} />
                 <div className="model-latency">
-                  {m.avg_latency < 1000 ? m.avg_latency.toFixed(0) + 'ms' : (m.avg_latency / 1000).toFixed(1) + 's'}
+                  {m.requests > 0 ? formatLatency(m.avg_latency) : '—'}
                 </div>
               </div>
             ))}
@@ -132,7 +157,7 @@ export default function Dashboard() {
 
         <div className="card-panel">
           <div className="panel-header">
-            <div className="panel-title">模型用量排行</div>
+            <div className="panel-title">今日模型用量排行</div>
           </div>
           {models.length === 0 ? (
             <div className="empty-state">
@@ -150,8 +175,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {models
-                  .sort((a, b) => b.requests - a.requests)
+                {sortedModels
                   .slice(0, 5)
                   .map((m) => {
                     const maxReq = Math.max(...models.map((x) => x.requests), 1)

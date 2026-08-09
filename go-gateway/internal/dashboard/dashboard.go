@@ -41,6 +41,21 @@ func NewHandler() http.Handler {
 	})
 }
 
+// NewFaviconHandler returns a no-content handler for browsers that request a
+// favicon automatically. The Dashboard does not need a binary icon, but the
+// route must be explicit so the request is not mistaken for an unauthorized
+// API call and included in business metrics.
+func NewFaviconHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
 func serveIndex(fileServer http.Handler, w http.ResponseWriter, r *http.Request) {
 	clone := r.Clone(r.Context())
 	// Let FileServer resolve the directory index. Asking it for /index.html

@@ -69,7 +69,7 @@ func BearerAuthWithAdminToken(masterKey string, adminToken string, logger *log.L
 // Token prompt. The UI itself never receives admin data without the Bearer
 // token because every /admin endpoint still runs AdminAuth.
 func isDashboardPath(path string) bool {
-	if path == "/" || path == "/dashboard" || strings.HasPrefix(path, "/dashboard/") || strings.HasPrefix(path, "/assets/") {
+	if path == "/" || path == "/dashboard" || path == "/favicon.ico" || strings.HasPrefix(path, "/dashboard/") || strings.HasPrefix(path, "/assets/") {
 		return true
 	}
 	return false

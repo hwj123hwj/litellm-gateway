@@ -276,6 +276,7 @@ body {
 .p-badge.online { background: var(--green-light); color: var(--green); }
 .p-badge.degraded { background: var(--amber-light); color: var(--amber); }
 .p-badge.offline { background: var(--red-light); color: var(--red); }
+.p-badge.unknown { background: #f3f4f6; color: var(--text-muted); }
 
 /* Grids */
 .grid-2col { display: grid; grid-template-columns: 1fr; gap: 16px; }
@@ -468,6 +469,15 @@ body {
 .status-row .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s infinite; flex-shrink: 0; }
 .status-row .status-text { font-size: 14px; font-weight: 600; color: var(--green); flex: 1; }
 .status-row .status-time { font-size: 12px; color: var(--text-muted); }
+.status-row.idle { background: #f3f4f6; }
+.status-row.idle .pulse { background: var(--text-muted); animation: none; }
+.status-row.idle .status-text { color: var(--text-secondary); }
+.status-row.degraded { background: var(--amber-light); }
+.status-row.degraded .pulse { background: var(--amber); }
+.status-row.degraded .status-text { color: var(--amber); }
+.status-row.error { background: var(--red-light); }
+.status-row.error .pulse { background: var(--red); }
+.status-row.error .status-text { color: var(--red); }
 
 /* Empty state */
 .empty-state {
