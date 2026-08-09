@@ -101,3 +101,61 @@ func TestRouterFallsBackOnRateLimit(t *testing.T) {
 		t.Fatalf("expected fallback provider to be called once, got %d", second.calls)
 	}
 }
+
+func TestRouterFallbackFaultMatrix(t *testing.T) {
+	tests := []struct {
+		name         string
+		err          error
+		wantFallback bool
+	}{
+		{
+			name:         "rate limit",
+			err:          &ProviderError{Provider: "first", StatusCode: http.StatusTooManyRequests, Message: "quota exceeded"},
+			wantFallback: true,
+		},
+		{
+			name:         "internal server error",
+			err:          &ProviderError{Provider: "first", StatusCode: http.StatusInternalServerError, Message: "upstream failed"},
+			wantFallback: true,
+		},
+		{
+			name:         "timeout",
+			err:          context.DeadlineExceeded,
+			wantFallback: true,
+		},
+		{
+			name:         "authentication failure",
+			err:          &ProviderError{Provider: "first", StatusCode: http.StatusUnauthorized, Message: "invalid key"},
+			wantFallback: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter(log.New(io.Discard, "", 0))
+			first := &errorPolicyProvider{name: "first", err: tt.err}
+			second := &errorPolicyProvider{name: "second", resp: &Response{Model: "fallback"}}
+			router.RegisterProvider(first.name, first)
+			router.RegisterProvider(second.name, second)
+			router.RegisterChain("coding", []string{first.name, second.name})
+
+			response, err := router.Forward(context.Background(), "coding", &Request{Model: "coding"})
+			if tt.wantFallback {
+				if err != nil || response == nil || response.Model != "fallback" {
+					t.Fatalf("expected fallback response, got response=%#v err=%v", response, err)
+				}
+				if second.calls != 1 {
+					t.Fatalf("fallback calls = %d, want 1", second.calls)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("expected the original provider error")
+			}
+			if second.calls != 0 {
+				t.Fatalf("fallback calls = %d, want 0", second.calls)
+			}
+		})
+	}
+}
