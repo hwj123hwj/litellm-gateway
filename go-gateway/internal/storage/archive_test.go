@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"log"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/weijian/go-llm-gateway/internal/archive"
+	"github.com/weijian/go-llm-gateway/internal/metrics"
 )
 
 func TestArchiveSchemaMigratesLegacyRows(t *testing.T) {
@@ -116,6 +118,65 @@ func TestSaveArchiveAndQueryArchives(t *testing.T) {
 	}
 	if got.RequestBytes != ar.RequestBytes || got.ResponseBytes != ar.ResponseBytes || !got.Truncated {
 		t.Fatalf("archive size metadata mismatch: %#v", got)
+	}
+}
+
+func TestSQLiteStoreConcurrentMetricAndArchiveWrites(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "concurrent.db"), log.Default())
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	const writes = 40
+	errs := make(chan error, writes*2)
+	var wg sync.WaitGroup
+	for i := 0; i < writes; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			errs <- store.SaveRecord(metrics.RequestRecord{
+				Timestamp: time.Now().UTC(), RequestID: "metric-" + string(rune('A'+i)),
+				Method: "POST", Path: "/v1/chat/completions", Model: "qwen3.8-max",
+				Provider: "ali", StatusCode: 200,
+			})
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			ar := archive.NewArchive()
+			ar.Timestamp = time.Now().UTC()
+			ar.RequestID = "archive-" + string(rune('A'+i))
+			ar.Protocol = archive.ProtocolChatCompletions
+			ar.Model = "qwen3.8-max"
+			ar.Provider = "ali"
+			ar.Status = archive.StatusCompleted
+			ar.StatusCode = 200
+			ar.RequestBody = `{}`
+			ar.ResponseBody = `{}`
+			errs <- store.SaveArchive(ar)
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent SQLite write: %v", err)
+		}
+	}
+
+	archives, total, err := store.QueryArchives(writes, 0)
+	if err != nil {
+		t.Fatalf("QueryArchives: %v", err)
+	}
+	if total != writes || len(archives) != writes {
+		t.Fatalf("archive count = total %d, rows %d; want %d", total, len(archives), writes)
+	}
+	logs, err := store.GetRecentLogs(writes)
+	if err != nil {
+		t.Fatalf("GetRecentLogs: %v", err)
+	}
+	if len(logs) != writes {
+		t.Fatalf("metric count = %d, want %d", len(logs), writes)
 	}
 }
 
