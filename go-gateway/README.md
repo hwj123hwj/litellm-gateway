@@ -266,7 +266,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `glm-haiku` | GLM `glm-4.7` | 文本、工具调用、推理、流式 |
 | `glm-4.7-flash` | GLM `glm-4.7-flash` | 文本、工具调用、流式 |
 | `glm-vision` | GLM Vision `glm-5v-turbo` | 文本、图片、视频、文件、工具调用、推理、流式 |
-| `ali-opus` | 阿里 `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
+| `ali-opus`, `qwen3.8-max` | 阿里 `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
 
 配置了可选的 ChatGPT Codex 代理或 GitHub Copilot 后，额外模型会动态加入目录；不要在客户端硬编码版本，直接读取 `/v1/models`。
 
