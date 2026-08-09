@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -438,6 +439,153 @@ func TestMessagesHandlerArchivedRequestBodyIsRedacted(t *testing.T) {
 	}
 }
 
+func TestMessagesHandlerArchivesStreamUsageMetadata(t *testing.T) {
+	store := &capturingArchiveStore{}
+	archiver := archive.NewArchiver(store, archive.Config{Enabled: true, MaxBodyKB: 256}, nil)
+
+	router := provider.NewRouter(log.New(io.Discard, "", 0))
+	router.RegisterProvider("stub", &stubChatProvider{
+		name: "stub",
+		streamData: strings.Join([]string{
+			"event: message_start",
+			`data: {"type":"message_start","message":{"usage":{"input_tokens":7}}}`,
+			"",
+			"event: message_delta",
+			`data: {"type":"message_delta","usage":{"output_tokens":11}}`,
+			"",
+			"event: message_stop",
+			`data: {"type":"message_stop"}`,
+			"",
+		}, "\n"),
+	})
+	router.RegisterChain("coding", []string{"stub"})
+
+	h := NewMessageHandler(router, log.New(io.Discard, "", 0))
+	h.SetArchiver(archiver)
+	engine := gin.New()
+	engine.POST("/v1/messages", h.Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(`{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	archiver.Close()
+
+	ar := store.first()
+	if ar.InputTokens != 7 || ar.OutputTokens != 11 {
+		t.Fatalf("archived usage = input:%d output:%d, want input:7 output:11", ar.InputTokens, ar.OutputTokens)
+	}
+}
+
+func TestChatCompletionsHandlerArchivesPreBodyStreamErrorAsError(t *testing.T) {
+	store := &capturingArchiveStore{}
+	archiver := archive.NewArchiver(store, archive.Config{Enabled: true, MaxBodyKB: 256}, nil)
+
+	router := provider.NewRouter(log.New(io.Discard, "", 0))
+	router.RegisterProvider("stub", &stubChatProvider{
+		name:      "stub",
+		streamErr: &provider.ProviderError{Provider: "stub", StatusCode: http.StatusUnauthorized, Message: "unauthorized"},
+	})
+	router.RegisterChain("coding", []string{"stub"})
+
+	h := NewChatCompletionsHandler(router, log.New(io.Discard, "", 0))
+	h.SetArchiver(archiver)
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", h.Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"coding","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	archiver.Close()
+
+	if got := store.first().Status; got != archive.StatusError {
+		t.Fatalf("archive status = %s, want error (HTTP %d)", got, w.Code)
+	}
+}
+
+func TestResponsesHandlerArchivesPreBodyStreamErrorAsError(t *testing.T) {
+	store := &capturingArchiveStore{}
+	archiver := archive.NewArchiver(store, archive.Config{Enabled: true, MaxBodyKB: 256}, nil)
+
+	router := provider.NewRouter(log.New(io.Discard, "", 0))
+	router.RegisterProvider("stub", &stubChatProvider{
+		name:      "stub",
+		streamErr: &provider.ProviderError{Provider: "stub", StatusCode: http.StatusUnauthorized, Message: "unauthorized"},
+	})
+	router.RegisterChain("coding", []string{"stub"})
+
+	h := NewResponsesHandler(router, log.New(io.Discard, "", 0))
+	h.SetArchiver(archiver)
+	engine := gin.New()
+	engine.POST("/v1/responses", h.Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"coding","stream":true,"input":"hi"}`))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	archiver.Close()
+
+	if got := store.first().Status; got != archive.StatusError {
+		t.Fatalf("archive status = %s, want error (HTTP %d)", got, w.Code)
+	}
+}
+
+func TestChatCompletionsHandlerArchivesClientModelAlias(t *testing.T) {
+	store := &capturingArchiveStore{}
+	archiver := archive.NewArchiver(store, archive.Config{Enabled: true, MaxBodyKB: 256}, nil)
+
+	router := provider.NewRouter(log.New(io.Discard, "", 0))
+	router.RegisterProvider("glm", &stubChatProvider{
+		name: "glm",
+		streamData: strings.Join([]string{
+			"event: message_start",
+			`data: {"type":"message_start","message":{"id":"msg_alias","model":"glm-5-turbo"}}`,
+			"",
+			"event: message_stop",
+			`data: {"type":"message_stop"}`,
+			"",
+		}, "\n"),
+	})
+	router.RegisterChain("glm-sonnet", []string{"glm"})
+
+	h := NewChatCompletionsHandler(router, log.New(io.Discard, "", 0))
+	h.SetArchiver(archiver)
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", h.Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"glm-sonnet","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	archiver.Close()
+
+	ar := store.first()
+	if !strings.Contains(ar.RequestBody, `"model":"glm-sonnet"`) {
+		t.Fatalf("archive request lost client model alias: %s", ar.RequestBody)
+	}
+	if strings.Contains(ar.RequestBody, `"model":"glm-5-turbo"`) {
+		t.Fatalf("archive request contains provider model instead of client alias: %s", ar.RequestBody)
+	}
+}
+
+func TestResponsesHandlerArchivesChatGPTPreBodyErrorAsError(t *testing.T) {
+	store := &capturingArchiveStore{}
+	archiver := archive.NewArchiver(store, archive.Config{Enabled: true, MaxBodyKB: 256}, nil)
+
+	router := provider.NewRouter(log.New(io.Discard, "", 0))
+	router.RegisterProvider("chatgpt", &stubChatGPTPassthroughProvider{
+		name: "chatgpt",
+		err:  &provider.ProviderError{Provider: "chatgpt", StatusCode: http.StatusUnauthorized, Message: "unauthorized"},
+	})
+	router.RegisterChain("gpt-5", []string{"chatgpt"})
+
+	h := NewResponsesHandler(router, log.New(io.Discard, "", 0))
+	h.SetArchiver(archiver)
+	engine := gin.New()
+	engine.POST("/v1/responses", h.Handle)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","stream":true,"input":"hi"}`))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+	archiver.Close()
+
+	if got := store.first().Status; got != archive.StatusError {
+		t.Fatalf("archive status = %s, want error (HTTP %d)", got, w.Code)
+	}
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 // failingProvider always returns an error from ForwardRequest, for testing
@@ -456,4 +604,23 @@ func (p *failingProvider) ForwardRequest(_ context.Context, _ *provider.Request)
 }
 func (p *failingProvider) ForwardStream(_ context.Context, _ *provider.Request, _ io.Writer) error {
 	return errors.New("upstream stream error")
+}
+
+// stubChatGPTPassthroughProvider exercises the native Responses passthrough
+// path without making any network calls.
+type stubChatGPTPassthroughProvider struct {
+	name string
+	err  error
+}
+
+func (p *stubChatGPTPassthroughProvider) Name() string                   { return p.name }
+func (p *stubChatGPTPassthroughProvider) URL() string                    { return "http://chatgpt" }
+func (p *stubChatGPTPassthroughProvider) APIKey() string                 { return "" }
+func (p *stubChatGPTPassthroughProvider) UseBearer() bool                { return true }
+func (p *stubChatGPTPassthroughProvider) IsHealthy(context.Context) bool { return true }
+func (p *stubChatGPTPassthroughProvider) ForwardRequest(context.Context, *provider.Request) (*provider.Response, error) {
+	return nil, errors.New("not used")
+}
+func (p *stubChatGPTPassthroughProvider) ForwardRawResponsesStream(context.Context, json.RawMessage, io.Writer) error {
+	return p.err
 }

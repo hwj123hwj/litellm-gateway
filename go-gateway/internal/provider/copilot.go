@@ -266,17 +266,19 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 
 	stopReason := mapFinishReason(finishReason)
 	// 用上游真实 usage 构造 message_delta（Anthropic SSE 格式）
+	inputTokens := 0
 	outputTokens := 0
 	cacheReadTokens := 0
 	if streamUsage != nil {
+		inputTokens = streamUsage.PromptTokens
 		outputTokens = streamUsage.CompletionTokens
 		if streamUsage.PromptTokensDetails != nil {
 			cacheReadTokens = streamUsage.PromptTokensDetails.CachedTokens
 		}
 	}
 	writeSSE(w, "message_delta", fmt.Sprintf(
-		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"output_tokens":%d,"prompt_tokens_details":{"cached_tokens":%d}}}`,
-		stopReason, outputTokens, cacheReadTokens,
+		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d,"prompt_tokens_details":{"cached_tokens":%d}}}`,
+		stopReason, inputTokens, outputTokens, cacheReadTokens,
 	))
 	writeSSE(w, "message_stop", `{"type":"message_stop"}`)
 

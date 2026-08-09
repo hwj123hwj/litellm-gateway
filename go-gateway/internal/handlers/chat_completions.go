@@ -243,7 +243,7 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	setRequestMetadata(c, req.Model, req.Stream)
 
 	if req.Stream {
-		h.handleStream(c, providerReq)
+		h.handleStream(c, providerReq, rawBody)
 		return
 	}
 
@@ -255,10 +255,10 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		if h.archiver != nil && h.archiver.Enabled() {
 			// Sanitize the error message for BOTH response_body and error_reason
 			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
-			sanitized := sanitizeErrorReason(err.Error())
+			sanitized := archiveErrorReason(err)
 			submitArchive(c, h.archiver, archive.ProtocolChatCompletions, rawBody,
 				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
-				archive.StatusError, routingErrorStatus(err), err.Error())
+				archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
@@ -276,7 +276,7 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 	c.JSON(http.StatusOK, responseObj)
 }
 
-func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provider.Request) {
+func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provider.Request, rawBody []byte) {
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
@@ -326,14 +326,16 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 	}
 
 	if sink != nil {
-		reqBody, _ := json.Marshal(req)
+		// Archive the exact client request rather than the provider-mapped request
+		// that the retry loop mutates for upstream routing.
+		reqBody := rawBody
 		if !streamOK && lastErr == nil {
 			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 		}
-		if !c.Writer.Written() && lastErr != nil {
+		if !streamOK && sink.Len() == 0 && lastErr != nil {
 			setProviderErrorHeaders(c, lastErr)
 			submitArchive(c, h.archiver, archive.ProtocolChatCompletions, reqBody, nil,
-				archive.StatusError, routingErrorStatus(lastErr), lastErr.Error())
+				archive.StatusError, routingErrorStatus(lastErr), archiveErrorReason(lastErr))
 			c.JSON(routingErrorStatus(lastErr), gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
 			return
 		}

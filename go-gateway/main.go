@@ -62,7 +62,9 @@ func main() {
 
 		// 归档复用同一个 SQLite 文件（独立的 conversation_archives 表），
 		// 避免引入新的外部依赖。
-		archiveStore = store
+		if cfg.Archive.Enabled {
+			archiveStore = store
+		}
 
 		// 启动后台清理任务（每天清理 30 天前的指标数据 + 归档保留期外的对话）
 		go startCleanupTask(store, cfg.Archive, logger)

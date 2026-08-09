@@ -2,8 +2,10 @@ package archive
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
 	"strings"
 )
 
@@ -14,55 +16,59 @@ import (
 var sensitiveKeys = map[string]bool{
 	"authorization": true,
 	"cookie":        true,
-	"set-cookie":    true,
-	"x-api-key":     true,
-	"api-key":       true, // kebab-case variant
-	"api_key":       true,
+	"setcookie":     true,
+	"xapikey":       true,
 	"apikey":        true,
 	"token":         true,
-	"access_token":  true,
 	"accesstoken":   true,
-	"refresh_token": true,
 	"refreshtoken":  true,
-	"id_token":      true,
 	"idtoken":       true,
-	"oauth_token":   true,
 	"oauthtoken":    true,
 	"bearer":        true,
 	"password":      true,
 	"passwd":        true,
 	"secret":        true,
-	"client_secret": true,
 	"clientsecret":  true,
-	"private_key":   true,
 	"privatekey":    true,
 	"session":       true,
-	"session_id":    true,
 	"sessionid":     true,
-	"private-token": true, // some APIs use this
-	"x-auth-token":  true,
-	"x-csrf-token":  true,
+	"privatetoken":  true,
+	"xauthtoken":    true,
+	"xcsrftoken":    true,
 }
 
-// isSensitiveKey returns true if the lowercased key matches any entry in
-// sensitiveKeys OR ends with a known sensitive suffix (e.g. "github_token",
-// "anthropic_api_key", "openai_api_key"). This catches compound names that
-// the static map would miss.
-func isSensitiveKey(lowerKey string) bool {
-	if sensitiveKeys[lowerKey] {
+// normalizeKey makes JSON key matching insensitive to case and common
+// separators, so both "api_key" and "apiKey" become "apikey".
+func normalizeKey(key string) string {
+	var b strings.Builder
+	b.Grow(len(key))
+	for _, r := range strings.ToLower(key) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// isSensitiveKey returns true if the key is sensitive or ends with a sensitive
+// compound suffix. Matching is performed on normalized keys so camelCase,
+// snake_case, kebab-case, and dotted variants are covered consistently.
+func isSensitiveKey(key string) bool {
+	normalized := normalizeKey(key)
+	if sensitiveKeys[normalized] {
 		return true
 	}
-	// Suffix-based matching for compound key names like "openai_api_key",
-	// "github_token", "anthropic_key", etc.
-	sensitiveSuffixes := []string{
-		"_api_key", "-api-key", "_apikey",
-		"_token", "-token",
-		"_secret", "-secret",
-		"_password", "-password",
-		"_private_key", "-private-key",
-	}
-	for _, suffix := range sensitiveSuffixes {
-		if strings.HasSuffix(lowerKey, suffix) {
+	// Suffix-based matching catches names such as githubToken,
+	// anthropic_api_key, and client-secret without treating a generic "key"
+	// field as sensitive.
+	for _, suffix := range []string{
+		"apikey",
+		"token",
+		"secret",
+		"password",
+		"privatekey",
+	} {
+		if len(normalized) > len(suffix) && strings.HasSuffix(normalized, suffix) {
 			return true
 		}
 	}
@@ -73,17 +79,22 @@ func isSensitiveKey(lowerKey string) bool {
 // (images, audio, files). These are replaced by {type, size, sha256} digests
 // so the archive retains provenance without storing potentially large blobs.
 var multimediaFields = map[string]bool{
-	"image":       true,
-	"image_url":   true,
-	"video":       true,
-	"video_url":   true,
-	"source":      true, // Anthropic-style inline source.data
-	"input_audio": true,
-	"audio":       true,
-	"file":        true,
-	"file_url":    true,
-	"input_file":  true,
-	"data":        true, // used by Anthropic source blocks for base64 content
+	"image":      true,
+	"imageurl":   true,
+	"video":      true,
+	"videourl":   true,
+	"source":     true, // Anthropic-style inline source.data
+	"inputaudio": true,
+	"audio":      true,
+	"file":       true,
+	"fileurl":    true,
+	"filedata":   true,
+	"inputfile":  true,
+	"data":       true, // used by Anthropic source blocks for base64 content
+}
+
+func isMultimediaField(key string) bool {
+	return multimediaFields[normalizeKey(key)]
 }
 
 // Redact sanitizes a raw JSON body for archival storage:
@@ -92,23 +103,26 @@ var multimediaFields = map[string]bool{
 //     ({type,size,sha256}) so the original binary never lands in the archive.
 //   - Leaves all other fields untouched.
 //
-// If the input is not valid JSON, it is returned as-is; the caller still gets a
-// faithful (though un-structured) record. This keeps archival best-effort and
-// never blocks a request because a body failed to redact.
+// If the input is not valid JSON, credential-shaped text is scrubbed with
+// RedactText. This keeps archival best-effort without allowing malformed
+// provider responses to bypass the no-secrets-at-rest guarantee.
 func Redact(raw []byte) []byte {
 	if len(raw) == 0 {
 		return raw
 	}
 	var data any
 	if err := json.Unmarshal(raw, &data); err != nil {
-		return raw
+		return RedactText(raw)
 	}
 	redacted := redactValue(data)
 	out, err := json.Marshal(redacted)
 	if err != nil {
 		return raw
 	}
-	return out
+	// A valid JSON body can still contain an unstructured provider error string
+	// such as {"message":"api_key=..."}; scrub that text after the recursive
+	// key-based pass as well.
+	return RedactText(out)
 }
 
 // redactValue dispatches on the dynamic type of a decoded JSON value.
@@ -125,12 +139,11 @@ func redactValue(v any) any {
 
 func redactObject(m map[string]any) map[string]any {
 	for key, value := range m {
-		lowerKey := strings.ToLower(key)
-		if isSensitiveKey(lowerKey) {
+		if isSensitiveKey(key) {
 			m[key] = "[REDACTED]"
 			continue
 		}
-		if multimediaFields[lowerKey] {
+		if isMultimediaField(key) {
 			m[key] = redactMultimedia(value)
 			continue
 		}
@@ -168,23 +181,23 @@ func redactMultimedia(v any) any {
 	case map[string]any:
 		// Walk the object: keep metadata fields, digest any "data" subfield.
 		for key, inner := range val {
-			lowerKey := strings.ToLower(key)
 			// Check for sensitive keys inside multimedia objects first —
 			// these must be redacted regardless of where they appear.
-			if isSensitiveKey(lowerKey) {
+			if isSensitiveKey(key) {
 				val[key] = "[REDACTED]"
 				continue
 			}
+			normalizedKey := normalizeKey(key)
 			// Digest known binary-carrying subfields.
-			if lowerKey == "data" || lowerKey == "base64" || lowerKey == "file_data" {
+			if normalizedKey == "data" || normalizedKey == "base64" || normalizedKey == "filedata" {
 				if s, ok := inner.(string); ok && looksLikeBase64(s) {
 					val[key] = digestString(s)
 					continue
 				}
 			}
 			// "url" subfield: only digest if it's a data: URI, not https://
-			if lowerKey == "url" {
-				if s, ok := inner.(string); ok && strings.HasPrefix(s, "data:") {
+			if normalizedKey == "url" {
+				if s, ok := inner.(string); ok && looksLikeBase64(s) && strings.HasPrefix(strings.ToLower(strings.TrimSpace(s)), "data:") {
 					val[key] = digestString(s)
 					continue
 				}
@@ -193,7 +206,7 @@ func redactMultimedia(v any) any {
 				continue
 			}
 			// Recurse into nested multimedia objects (e.g. nested image_url objects).
-			if multimediaFields[lowerKey] {
+			if isMultimediaField(key) {
 				val[key] = redactMultimedia(inner)
 			} else {
 				val[key] = redactValue(inner)
@@ -211,30 +224,53 @@ func redactMultimedia(v any) any {
 // data: URIs or long base64 blobs. Short strings and regular URLs
 // (e.g. https://...) are left untouched.
 func looksLikeBase64(s string) bool {
-	if strings.HasPrefix(s, "data:") {
+	trimmed := strings.TrimSpace(s)
+	if strings.HasPrefix(strings.ToLower(trimmed), "data:") {
 		return true
 	}
 	// Don't touch regular URLs
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+	if strings.HasPrefix(strings.ToLower(trimmed), "http://") || strings.HasPrefix(strings.ToLower(trimmed), "https://") {
 		return false
 	}
 	// Heuristic: a long string of base64 characters (>=64 chars) is almost
 	// certainly an inline binary, not a normal URL or text value.
 	// Also validate that the length is a multiple of 4 (valid base64 padding).
-	if len(s) >= 64 {
-		isBase64 := true
-		for _, c := range s {
-			if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-				(c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=' || c == '\n' || c == '\r') {
-				isBase64 = false
-				break
+	if len(trimmed) >= 64 {
+		for _, encoding := range []*base64.Encoding{
+			base64.StdEncoding,
+			base64.RawStdEncoding,
+			base64.URLEncoding,
+			base64.RawURLEncoding,
+		} {
+			if _, err := encoding.DecodeString(trimmed); err == nil {
+				return true
 			}
-		}
-		if isBase64 {
-			return true
 		}
 	}
 	return false
+}
+
+var (
+	// keyValueSecretPattern handles unstructured provider errors such as
+	// "api_key=...", "githubToken: ...", and "password=...".
+	keyValueSecretPattern = regexp.MustCompile(`(?i)((?:[a-z0-9]+[-_ ]?)?(?:authorization|cookie|set[-_ ]?cookie|x[-_ ]?api[-_ ]?key|api[-_ ]?key|token|secret|password|passwd|private[-_ ]?key)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)`)
+	bearerSecretPattern   = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
+	prefixSecretPattern   = regexp.MustCompile(`(?i)\b(?:sk-[A-Za-z0-9._-]+|gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|AIza[A-Za-z0-9_-]+|AKIA[0-9A-Z]{12,})\b`)
+)
+
+// RedactText removes credential-shaped values from unstructured text. It is
+// used as a safe fallback when an upstream body or error is not valid JSON.
+// Ordinary prose remains unchanged; only explicit key/value credentials,
+// bearer tokens, and well-known provider token prefixes are replaced.
+func RedactText(raw []byte) []byte {
+	if len(raw) == 0 {
+		return raw
+	}
+	result := string(raw)
+	result = keyValueSecretPattern.ReplaceAllString(result, "${1}[REDACTED]")
+	result = bearerSecretPattern.ReplaceAllString(result, "[REDACTED]")
+	result = prefixSecretPattern.ReplaceAllString(result, "[REDACTED]")
+	return []byte(result)
 }
 
 // digestString returns a compact digest object for a (potentially base64-encoded)

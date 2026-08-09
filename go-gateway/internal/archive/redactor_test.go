@@ -126,3 +126,61 @@ func TestRedactCaseInsensitiveKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactHandlesCompoundCamelCaseKeysAndFileData(t *testing.T) {
+	payload := strings.Repeat("QUJD", 32)
+	input := `{"credentials":{"githubToken":"gh-secret","anthropicApiKey":"anthropic-secret","clientSecret":"client-secret"},"content":[{"type":"file","file_data":"` + payload + `"}]}`
+	out := Redact([]byte(input))
+	result := string(out)
+	for _, secret := range []string{"gh-secret", "anthropic-secret", "client-secret", payload} {
+		if strings.Contains(result, secret) {
+			t.Fatalf("secret %q leaked into redacted body: %s", secret, result)
+		}
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("redacted output is not valid JSON: %v", err)
+	}
+	content := decoded["content"].([]any)[0].(map[string]any)
+	fileData := content["file_data"].(map[string]any)
+	if fileData["type"] != "redacted_base64" {
+		t.Fatalf("file_data type = %v, want redacted_base64", fileData["type"])
+	}
+}
+
+func TestRedactTextScrubsCredentialFormats(t *testing.T) {
+	input := []byte("api_key=plain-secret token=token-secret password=password-secret githubToken=gh-secret sk-live-secret")
+	out := string(RedactText(input))
+	for _, secret := range []string{"plain-secret", "token-secret", "password-secret", "gh-secret", "sk-live-secret"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("secret %q leaked from text redaction: %q", secret, out)
+		}
+	}
+}
+
+func TestRedactScrubsCredentialTextInsideValidJSON(t *testing.T) {
+	input := []byte(`{"error":{"message":"api_key=embedded-secret Bearer embedded-token"}}`)
+	out := Redact(input)
+	for _, secret := range []string{"embedded-secret", "embedded-token"} {
+		if strings.Contains(string(out), secret) {
+			t.Errorf("secret %q leaked from valid JSON text: %s", secret, out)
+		}
+	}
+	if !json.Valid(out) {
+		t.Fatalf("redacted valid JSON became invalid: %s", out)
+	}
+}
+
+func TestRedactHandlesURLSafeBase64(t *testing.T) {
+	payload := strings.Repeat("ab-_", 24)
+	input := `{"file_data":"` + payload + `"}`
+	out := Redact([]byte(input))
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("redacted output is not valid JSON: %v", err)
+	}
+	if decoded["file_data"].(map[string]any)["type"] != "redacted_base64" {
+		t.Fatalf("URL-safe file_data was not digested: %v", decoded["file_data"])
+	}
+}

@@ -87,10 +87,10 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 		if !streamOK && lastErr == nil {
 			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 		}
-		if !c.Writer.Written() && lastErr != nil {
+		if !streamOK && sink.Len() == 0 && lastErr != nil {
 			setProviderErrorHeaders(c, lastErr)
 			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, nil,
-				archive.StatusError, routingErrorStatus(lastErr), lastErr.Error())
+				archive.StatusError, routingErrorStatus(lastErr), archiveErrorReason(lastErr))
 			c.JSON(routingErrorStatus(lastErr), gin.H{"error": gin.H{
 				"message": fmt.Sprintf("all providers failed: %v", lastErr),
 				"type":    "server_error",

@@ -201,10 +201,10 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 		if h.archiver != nil && h.archiver.Enabled() {
 			// Sanitize the error message for BOTH response_body and error_reason
 			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
-			sanitized := sanitizeErrorReason(err.Error())
+			sanitized := archiveErrorReason(err)
 			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody,
 				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
-				archive.StatusError, routingErrorStatus(err), err.Error())
+				archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
 			"message": err.Error(),
@@ -564,17 +564,14 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			if sink != nil {
 				streamWriter = newTeeStreamWriter(streamWriterBase, sink)
 			}
+			usageWriter := newUsageTrackingWriter(streamWriter, c)
 
 			// 直接透传原始请求体到 ChatGPT
-			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), streamWriter); err != nil {
+			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), usageWriter); err != nil {
+				usageWriter.Finish()
 				recordProviderAttempt(c, p.Name(), started, err)
 				h.router.RecordProviderFailureFor(req.Model, p, err)
 				h.logger.Printf("[RESPONSES] ChatGPT passthrough failed: %v", err)
-				if sink != nil {
-					status, reason := parseStreamEndState(sink.Bytes(), err)
-					submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sink.Bytes(),
-						status, c.Writer.Status(), reason)
-				}
 				if c.Writer.Written() {
 					_ = writeResponsesStreamError(c.Writer, err)
 				} else {
@@ -584,8 +581,20 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 						"type":    "server_error",
 					}})
 				}
+				if sink != nil {
+					sinkBody := sink.Bytes()
+					if len(sinkBody) == 0 {
+						submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, nil,
+							archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
+					} else {
+						status, reason := parseStreamEndState(sinkBody, err)
+						submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sinkBody,
+							status, c.Writer.Status(), reason)
+					}
+				}
 				return true
 			}
+			usageWriter.Finish()
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(req.Model, p)
 			streamWriterBase.Commit()

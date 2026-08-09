@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -9,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/archive"
+	"github.com/weijian/go-llm-gateway/internal/provider"
 	"github.com/weijian/go-llm-gateway/internal/requestmeta"
 )
 
@@ -25,7 +29,6 @@ import (
 const (
 	defaultSinkMaxBytes = 256 * 1024 // 256 KB per stream
 	sinkHeadBytes       = 32 * 1024  // 32 KB head (request start context)
-	sinkTailBytes       = 128 * 1024 // 128 KB tail (terminal events + recent data)
 )
 
 // archiveSink is a thread-safe, bounded buffer used to tee streamed SSE data
@@ -36,31 +39,43 @@ const (
 // tailBytes, discarding the middle. This preserves the terminal SSE event
 // (always at the tail) for endState detection while staying memory-bounded.
 type archiveSink struct {
-	mu       sync.Mutex
-	head     []byte // first headBytes of the transcript
-	tail     []byte // ring buffer for the tail (overwrites old data)
-	maxBytes int
-	capped   bool // true once the cap was hit
+	mu        sync.Mutex
+	head      []byte // first headLimit bytes of the transcript
+	tail      []byte // ring buffer for the tail (overwrites old data)
+	headLimit int
+	tailLimit int
+	capped    bool // true once the cap was hit
 }
 
-func newArchiveSink() *archiveSink {
+func newArchiveSink(maxBytes ...int) *archiveSink {
+	limit := defaultSinkMaxBytes
+	if len(maxBytes) > 0 && maxBytes[0] > 0 {
+		limit = maxBytes[0]
+	}
+	headLimit := limit
+	if headLimit > sinkHeadBytes {
+		headLimit = sinkHeadBytes
+	}
+	tailLimit := limit - headLimit
 	return &archiveSink{
-		maxBytes: defaultSinkMaxBytes,
-		head:     make([]byte, 0, sinkHeadBytes),
-		tail:     make([]byte, 0, sinkTailBytes),
+		headLimit: headLimit,
+		tailLimit: tailLimit,
+		head:      make([]byte, 0, headLimit),
+		tail:      make([]byte, 0, tailLimit),
 	}
 }
 
 func (s *archiveSink) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	originalLen := len(p)
 
 	// Phase 1: fill the head buffer.
-	if !s.capped && len(s.head) < sinkHeadBytes {
-		space := sinkHeadBytes - len(s.head)
+	if !s.capped && len(s.head) < s.headLimit {
+		space := s.headLimit - len(s.head)
 		if len(p) <= space {
 			s.head = append(s.head, p...)
-			return len(p), nil
+			return originalLen, nil
 		}
 		s.head = append(s.head, p[:space]...)
 		p = p[space:]
@@ -70,30 +85,29 @@ func (s *archiveSink) Write(p []byte) (int, error) {
 	// Phase 2: write to the tail ring buffer. The tail has fixed capacity;
 	// when full, it overwrites old data (classic ring buffer).
 	if len(p) > 0 {
-		if len(s.tail)+len(p) <= sinkTailBytes {
+		if s.tailLimit <= 0 {
+			s.capped = true
+		} else if len(s.tail)+len(p) <= s.tailLimit {
 			s.tail = append(s.tail, p...)
 		} else {
-			// Ring overwrite: keep only the last sinkTailBytes of combined data.
-			combined := make([]byte, sinkTailBytes)
-			if len(s.tail)+len(p) > sinkTailBytes {
-				copyStart := len(s.tail) + len(p) - sinkTailBytes
-				if copyStart < len(s.tail) {
-					// Part of old tail + all of new p fits
-					copy(combined, s.tail[copyStart:])
-					copy(combined[len(s.tail)-copyStart:], p)
-				} else {
-					// All from new p
-					offset := copyStart - len(s.tail)
-					copy(combined, p[offset:])
+			// Ring overwrite: keep only the last tailLimit bytes of the
+			// combined old tail and new input.
+			combined := make([]byte, s.tailLimit)
+			if len(p) >= s.tailLimit {
+				copy(combined, p[len(p)-s.tailLimit:])
+			} else {
+				keepOld := s.tailLimit - len(p)
+				if keepOld > len(s.tail) {
+					keepOld = len(s.tail)
 				}
+				copy(combined, s.tail[len(s.tail)-keepOld:])
+				copy(combined[keepOld:], p)
 			}
 			s.tail = combined
-			if !s.capped {
-				s.capped = true
-			}
+			s.capped = true
 		}
 	}
-	return len(p), nil
+	return originalLen, nil
 }
 
 func (s *archiveSink) Bytes() []byte {
@@ -203,31 +217,56 @@ func submitArchive(
 	archiver.Submit(ar)
 }
 
-// redactSSETranscript parses an SSE byte stream and redacts each "data:"
-// payload individually. Lines that are not valid JSON (e.g. "data: [DONE]")
-// are left as-is. Non-data lines (event:, comments) are also preserved.
+// redactSSETranscript parses an SSE byte stream event-by-event and redacts the
+// complete data payload. SSE permits one JSON payload to span multiple data:
+// lines; joining those lines before parsing prevents multiline payloads from
+// bypassing the JSON redactor.
 func redactSSETranscript(raw []byte) []byte {
 	if len(raw) == 0 {
 		return raw
 	}
-	lines := strings.Split(string(raw), "\n")
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	blocks := strings.Split(text, "\n\n")
+	for i, block := range blocks {
+		blocks[i] = redactSSEBlock(block)
+	}
+	return []byte(strings.Join(blocks, "\n\n"))
+}
+
+func redactSSEBlock(block string) string {
+	lines := strings.Split(block, "\n")
+	dataPayloads := make([]string, 0, 1)
+	dataLine := make([]bool, len(lines))
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "data: ") && !strings.HasPrefix(trimmed, "data:") {
+		if !strings.HasPrefix(trimmed, "data:") {
 			continue
 		}
-		payload := strings.TrimPrefix(trimmed, "data: ")
-		payload = strings.TrimPrefix(payload, "data:")
-		payload = strings.TrimSpace(payload)
-		// Skip non-JSON payloads like [DONE]
-		if payload == "[DONE]" || payload == "" {
-			continue
-		}
-		// Redact the individual JSON payload
-		redacted := archive.Redact([]byte(payload))
-		lines[i] = "data: " + string(redacted)
+		dataLine[i] = true
+		dataPayloads = append(dataPayloads, strings.TrimSpace(strings.TrimPrefix(trimmed, "data:")))
 	}
-	return []byte(strings.Join(lines, "\n"))
+	if len(dataPayloads) == 0 {
+		return block
+	}
+
+	payload := strings.Join(dataPayloads, "\n")
+	if payload != "" && payload != "[DONE]" {
+		payload = string(archive.Redact([]byte(payload)))
+	}
+	result := make([]string, 0, len(lines)-len(dataPayloads)+1)
+	inserted := false
+	for i, line := range lines {
+		if dataLine[i] {
+			if !inserted {
+				result = append(result, "data: "+payload)
+				inserted = true
+			}
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }
 
 // sanitizeErrorReason redacts any credential-like content from an error
@@ -238,23 +277,32 @@ func sanitizeErrorReason(reason string) string {
 	if reason == "" {
 		return ""
 	}
-	// Try to parse as JSON and redact; if not JSON, apply pattern-based
-	// scrubbing for common credential formats.
 	redacted := archive.Redact([]byte(reason))
-	// Even if Redact returns the raw string (non-JSON), apply a regex-free
-	// scrub for common credential prefixes that upstream APIs might echo.
-	result := string(redacted)
-	for _, pattern := range []string{"sk-", "Bearer ", "x-api-key:"} {
-		if idx := strings.Index(result, pattern); idx >= 0 {
-			// Replace from the pattern to the next space or end of string
-			end := idx + len(pattern)
-			for end < len(result) && result[end] != ' ' && result[end] != '\n' && result[end] != '"' && result[end] != '\'' {
-				end++
-			}
-			result = result[:idx] + "[REDACTED]" + result[end:]
-		}
+	// RedactText also catches credential-shaped text embedded in otherwise
+	// valid JSON error messages, such as {"message":"api_key=..."}.
+	return truncateReason(string(archive.RedactText(redacted)))
+}
+
+// archiveErrorReason deliberately omits ProviderError.Message. That message
+// comes directly from an upstream response and may contain a provider API key
+// that has no recognizable prefix. The archive keeps provider and status
+// context while preserving the no-secrets-at-rest guarantee.
+func archiveErrorReason(err error) string {
+	if err == nil {
+		return ""
 	}
-	return truncateReason(result)
+	var providerErr *provider.ProviderError
+	if errors.As(err, &providerErr) {
+		providerName := providerErr.Provider
+		if providerName == "" {
+			providerName = "upstream"
+		}
+		if providerErr.StatusCode > 0 {
+			return fmt.Sprintf("provider %s returned HTTP %d", providerName, providerErr.StatusCode)
+		}
+		return fmt.Sprintf("provider %s request failed", providerName)
+	}
+	return sanitizeErrorReason(err.Error())
 }
 
 // parseStreamEndState inspects raw SSE bytes to determine whether the stream
@@ -267,7 +315,10 @@ func sanitizeErrorReason(reason string) string {
 //   - Anthropic Messages: event: message_stop
 func parseStreamEndState(raw []byte, streamErr error) (archive.Status, string) {
 	if streamErr != nil {
-		return archive.StatusInterrupted, sanitizeErrorReason(streamErr.Error())
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return archive.StatusError, archiveErrorReason(streamErr)
+		}
+		return archive.StatusInterrupted, archiveErrorReason(streamErr)
 	}
 	text := string(raw)
 

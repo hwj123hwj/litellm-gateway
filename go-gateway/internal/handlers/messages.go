@@ -58,13 +58,13 @@ func (h *MessageHandler) Handle(c *gin.Context) {
 	setRequestMetadata(c, req.Model, req.Stream)
 
 	if req.Stream {
-		h.handleStream(c, &req)
+		h.handleStream(c, &req, rawBody)
 	} else {
-		h.handleNonStream(c, &req)
+		h.handleNonStream(c, &req, rawBody)
 	}
 }
 
-func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) {
+func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request, rawBody []byte) {
 	resp, finalProvider, attempts, err := h.router.ForwardWithDetails(c.Request.Context(), req.Model, req)
 	setForwardMetadata(c, finalProvider, attempts, err)
 	if err != nil {
@@ -72,13 +72,12 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) 
 		setProviderErrorHeaders(c, err)
 		// Archive the failed attempt: request body is known, response is the error.
 		if h.archiver != nil && h.archiver.Enabled() {
-			reqBody, _ := json.Marshal(req)
 			// Sanitize the error message for BOTH response_body and error_reason
 			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
-			sanitized := sanitizeErrorReason(err.Error())
-			submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody,
-				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
-				archive.StatusError, routingErrorStatus(err), err.Error())
+				sanitized := archiveErrorReason(err)
+				submitArchive(c, h.archiver, archive.ProtocolMessages, rawBody,
+					[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
+					archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
@@ -89,15 +88,14 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) 
 	// the response ourselves so the archived body matches what the client gets.
 	respBody, _ := json.Marshal(resp)
 	if h.archiver != nil && h.archiver.Enabled() {
-		reqBody, _ := json.Marshal(req)
-		submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, respBody,
+		submitArchive(c, h.archiver, archive.ProtocolMessages, rawBody, respBody,
 			archive.StatusCompleted, http.StatusOK, "")
 	}
 
 	c.JSON(http.StatusOK, resp)
 }
 
-func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
+func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, rawBody []byte) {
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
@@ -151,10 +149,9 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 	}
 
 	if sink != nil {
-		// Restore original model for the archive — the provider loop above
-		// overwrites req.Model with the mapped/bound provider model.
-		req.Model = originalModel
-		reqBody, _ := json.Marshal(req)
+		// Archive the exact client request; providers may mutate the internal
+		// request while mapping models or adding stream fields.
+		reqBody := rawBody
 		if !streamOK && lastErr == nil {
 			lastErr = &provider.NoAvailableProvidersError{Model: originalModel, Reason: "disabled, unavailable, or circuit open"}
 		}
@@ -163,15 +160,15 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 		// triggers c.JSON before any SSE bytes, the sink is empty but the HTTP
 		// writer reports written=true — that should be StatusError, not
 		// StatusInterrupted.
-		if sink.Len() == 0 && lastErr != nil {
+		if !streamOK && sink.Len() == 0 && lastErr != nil {
 			// No stream bytes were emitted → archive as a failed attempt.
 			h.logger.Printf("All stream providers failed: %v", lastErr)
 			if !c.Writer.Written() {
 				setProviderErrorHeaders(c, lastErr)
 				c.JSON(routingErrorStatus(lastErr), gin.H{"error": lastErr.Error()})
 			}
-			submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, nil,
-				archive.StatusError, routingErrorStatus(lastErr), lastErr.Error())
+				submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, nil,
+					archive.StatusError, routingErrorStatus(lastErr), archiveErrorReason(lastErr))
 			return
 		}
 		// Bytes were streamed → archive the captured transcript.
@@ -212,10 +209,12 @@ func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Reques
 	} else {
 		streamWriter = streamWriterBase
 	}
+	usageWriter := newUsageTrackingWriter(streamWriter, c)
+	defer usageWriter.Finish()
 
 	// 若提供商实现了 StreamProvider（如 OpenAI 格式），使用其内置流式逻辑
 	if sp, ok := p.(provider.StreamProvider); ok {
-		err := sp.ForwardStream(c.Request.Context(), req, streamWriter)
+		err := sp.ForwardStream(c.Request.Context(), req, usageWriter)
 		if err == nil {
 			streamWriterBase.Commit()
 		}
@@ -255,12 +254,10 @@ func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Reques
 	// 逐行透传 SSE 流
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
-		if _, err := fmt.Fprintf(streamWriter, "%s\n", scanner.Bytes()); err != nil {
+		if _, err := fmt.Fprintf(usageWriter, "%s\n", scanner.Bytes()); err != nil {
 			return nil // 客户端断开，正常退出
 		}
-		if flusher, ok := streamWriter.(interface{ Flush() }); ok {
-			flusher.Flush()
-		}
+		usageWriter.Flush()
 	}
 	if err := scanner.Err(); err != nil {
 		return err
