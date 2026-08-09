@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,54 +15,102 @@ import (
 // defaultSinkMaxBytes caps how much of a streamed SSE transcript the archive
 // sink retains in memory. This is independent of ARCHIVE_MAX_BODY_KB (which
 // applies during the final Submit) because the sink must stay bounded *during*
-// streaming, not just after. When the cap is reached the sink stops accepting
-// data and records a truncation marker so terminal-event detection can still
-// inspect the tail.
-const defaultSinkMaxBytes = 256 * 1024 // 256 KB per stream
+// streaming, not just after.
+//
+// Strategy: when the cap is reached, the buffer switches to ring mode — it
+// keeps the head (first headBytes) and tail (last tailBytes) of the transcript,
+// discarding the middle. This ensures the terminal SSE event (which arrives
+// at the end) is always captured for endState detection, while preventing
+// unbounded memory growth from long streams.
+const (
+	defaultSinkMaxBytes = 256 * 1024 // 256 KB per stream
+	sinkHeadBytes       = 32 * 1024  // 32 KB head (request start context)
+	sinkTailBytes       = 128 * 1024 // 128 KB tail (terminal events + recent data)
+)
 
 // archiveSink is a thread-safe, bounded buffer used to tee streamed SSE data
 // so it can be archived after the stream completes. It implements io.Writer.
 //
-// The buffer has a hard capacity (maxBytes). Once the cap is reached, further
-// writes are silently dropped and a truncation marker is appended. This
-// prevents unbounded memory growth from long or non-terminating streams.
+// The buffer has a hard capacity (maxBytes). Once the cap is reached, the
+// buffer switches to ring mode: it retains the first headBytes and last
+// tailBytes, discarding the middle. This preserves the terminal SSE event
+// (always at the tail) for endState detection while staying memory-bounded.
 type archiveSink struct {
 	mu       sync.Mutex
-	buf      bytes.Buffer
+	head     []byte // first headBytes of the transcript
+	tail     []byte // ring buffer for the tail (overwrites old data)
 	maxBytes int
 	capped   bool // true once the cap was hit
 }
 
 func newArchiveSink() *archiveSink {
-	return &archiveSink{maxBytes: defaultSinkMaxBytes}
+	return &archiveSink{
+		maxBytes: defaultSinkMaxBytes,
+		head:     make([]byte, 0, sinkHeadBytes),
+		tail:     make([]byte, 0, sinkTailBytes),
+	}
 }
 
 func (s *archiveSink) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.capped {
-		return len(p), nil // silently drop beyond the cap
+
+	// Phase 1: fill the head buffer.
+	if !s.capped && len(s.head) < sinkHeadBytes {
+		space := sinkHeadBytes - len(s.head)
+		if len(p) <= space {
+			s.head = append(s.head, p...)
+			return len(p), nil
+		}
+		s.head = append(s.head, p[:space]...)
+		p = p[space:]
+		// Fall through to write remaining bytes to tail.
 	}
-	remaining := s.maxBytes - s.buf.Len()
-	if remaining <= 0 {
-		s.capped = true
-		_, _ = s.buf.WriteString("\n...[stream archive truncated at capacity]\n")
-		return len(p), nil
+
+	// Phase 2: write to the tail ring buffer. The tail has fixed capacity;
+	// when full, it overwrites old data (classic ring buffer).
+	if len(p) > 0 {
+		if len(s.tail)+len(p) <= sinkTailBytes {
+			s.tail = append(s.tail, p...)
+		} else {
+			// Ring overwrite: keep only the last sinkTailBytes of combined data.
+			combined := make([]byte, sinkTailBytes)
+			if len(s.tail)+len(p) > sinkTailBytes {
+				copyStart := len(s.tail) + len(p) - sinkTailBytes
+				if copyStart < len(s.tail) {
+					// Part of old tail + all of new p fits
+					copy(combined, s.tail[copyStart:])
+					copy(combined[len(s.tail)-copyStart:], p)
+				} else {
+					// All from new p
+					offset := copyStart - len(s.tail)
+					copy(combined, p[offset:])
+				}
+			}
+			s.tail = combined
+			if !s.capped {
+				s.capped = true
+			}
+		}
 	}
-	if len(p) > remaining {
-		_, _ = s.buf.Write(p[:remaining])
-		s.capped = true
-		_, _ = s.buf.WriteString("\n...[stream archive truncated at capacity]\n")
-		return len(p), nil
-	}
-	return s.buf.Write(p)
+	return len(p), nil
 }
 
 func (s *archiveSink) Bytes() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]byte, s.buf.Len())
-	copy(out, s.buf.Bytes())
+	var out []byte
+	if s.capped {
+		// Insert truncation marker between head and tail.
+		out = make([]byte, 0, len(s.head)+len(s.tail)+60)
+		out = append(out, s.head...)
+		out = append(out, []byte("\n...[stream archive middle truncated at capacity]...\n")...)
+		out = append(out, s.tail...)
+	} else {
+		out = make([]byte, 0, len(s.head)+len(s.tail))
+		out = append(out, s.head...)
+		out = append(out, s.tail...)
+	}
 	return out
 }
 
@@ -71,7 +118,7 @@ func (s *archiveSink) Bytes() []byte {
 func (s *archiveSink) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.buf.Len()
+	return len(s.head) + len(s.tail)
 }
 
 // teeStreamWriter wraps an io.Writer (typically the deferredStreamWriter that

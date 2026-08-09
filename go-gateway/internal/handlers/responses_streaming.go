@@ -97,7 +97,12 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 			}})
 			return
 		}
-		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
+		status, reason := parseStreamEndState(sink.Bytes(), func() error {
+			if !streamOK {
+				return lastErr
+			}
+			return nil
+		}())
 		submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sink.Bytes(),
 			status, c.Writer.Status(), reason)
 		return
@@ -135,7 +140,7 @@ func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Requ
 		}
 	}()
 
-	err := anthropicSSEToResponsesSSE(pr, streamWriter, model)
+	err := anthropicSSEToResponsesSSEWithUsage(pr, streamWriter, model, c)
 	_ = pr.Close()
 
 	if streamErr := <-errCh; streamErr != nil && err == nil {
@@ -192,6 +197,13 @@ func (h *responsesHandler) forwardRawStream(c *gin.Context, req *provider.Reques
 //   - response.content_part.added 被 Codex 忽略，不需要发
 
 func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
+	return anthropicSSEToResponsesSSEWithUsage(r, w, model, nil)
+}
+
+// anthropicSSEToResponsesSSEWithUsage is like anthropicSSEToResponsesSSE but
+// also propagates parsed usage into gin.Context for archive token metadata.
+// c may be nil (unit tests) — usage propagation is skipped.
+func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string, c *gin.Context) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
 
@@ -421,6 +433,10 @@ func anthropicSSEToResponsesSSE(r io.Reader, w io.Writer, model string) error {
 					},
 				},
 			})
+			// Propagate usage to gin.Context for archive metadata.
+			if c != nil {
+				setUsageMetadata(c, inputTokens, outputTokens)
+			}
 
 		case "message_stop":
 			// 已通过 response.completed 处理

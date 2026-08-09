@@ -199,8 +199,11 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 		h.logger.Printf("Responses forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
 		if h.archiver != nil && h.archiver.Enabled() {
+			// Sanitize the error message for BOTH response_body and error_reason
+			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
+			sanitized := sanitizeErrorReason(err.Error())
 			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody,
-				[]byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
 				archive.StatusError, routingErrorStatus(err), err.Error())
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{

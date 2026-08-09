@@ -134,6 +134,9 @@ func redactObject(m map[string]any) map[string]any {
 			m[key] = redactMultimedia(value)
 			continue
 		}
+		// Recurse into nested objects so that sensitive keys nested inside
+		// multimedia objects (e.g. {"image": {"url": "...", "api_key": "sk-xxx"}})
+		// are still caught by the regular redactObject path.
 		m[key] = redactValue(value)
 	}
 	return m
@@ -166,13 +169,31 @@ func redactMultimedia(v any) any {
 		// Walk the object: keep metadata fields, digest any "data" subfield.
 		for key, inner := range val {
 			lowerKey := strings.ToLower(key)
-			if lowerKey == "data" || lowerKey == "base64" || lowerKey == "url" {
+			// Check for sensitive keys inside multimedia objects first —
+			// these must be redacted regardless of where they appear.
+			if isSensitiveKey(lowerKey) {
+				val[key] = "[REDACTED]"
+				continue
+			}
+			// Digest known binary-carrying subfields.
+			if lowerKey == "data" || lowerKey == "base64" || lowerKey == "file_data" {
 				if s, ok := inner.(string); ok && looksLikeBase64(s) {
 					val[key] = digestString(s)
 					continue
 				}
 			}
-			if multimediaFields[lowerKey] || isSensitiveKey(lowerKey) {
+			// "url" subfield: only digest if it's a data: URI, not https://
+			if lowerKey == "url" {
+				if s, ok := inner.(string); ok && strings.HasPrefix(s, "data:") {
+					val[key] = digestString(s)
+					continue
+				}
+				// Regular URL → preserve, but still recurse for nested sensitive keys
+				val[key] = redactValue(inner)
+				continue
+			}
+			// Recurse into nested multimedia objects (e.g. nested image_url objects).
+			if multimediaFields[lowerKey] {
 				val[key] = redactMultimedia(inner)
 			} else {
 				val[key] = redactValue(inner)

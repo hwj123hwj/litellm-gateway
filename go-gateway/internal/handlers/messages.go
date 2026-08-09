@@ -73,8 +73,11 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request) 
 		// Archive the failed attempt: request body is known, response is the error.
 		if h.archiver != nil && h.archiver.Enabled() {
 			reqBody, _ := json.Marshal(req)
+			// Sanitize the error message for BOTH response_body and error_reason
+			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
+			sanitized := sanitizeErrorReason(err.Error())
 			submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody,
-				[]byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
 				archive.StatusError, routingErrorStatus(err), err.Error())
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
@@ -172,7 +175,14 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request) {
 			return
 		}
 		// Bytes were streamed → archive the captured transcript.
-		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
+		// When a fallback provider succeeded, lastErr is stale (from the failed
+		// first provider) — pass nil so parseStreamEndState doesn't misclassify
+		// a completed stream as interrupted.
+		var archiveErr error
+		if !streamOK {
+			archiveErr = lastErr
+		}
+		status, reason := parseStreamEndState(sink.Bytes(), archiveErr)
 		submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, sink.Bytes(),
 			status, c.Writer.Status(), reason)
 		return

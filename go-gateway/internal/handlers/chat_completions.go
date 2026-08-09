@@ -253,8 +253,11 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		h.logger.Printf("Forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
 		if h.archiver != nil && h.archiver.Enabled() {
+			// Sanitize the error message for BOTH response_body and error_reason
+			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
+			sanitized := sanitizeErrorReason(err.Error())
 			submitArchive(c, h.archiver, archive.ProtocolChatCompletions, rawBody,
-				[]byte(fmt.Sprintf(`{"error":%q}`, err.Error())),
+				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
 				archive.StatusError, routingErrorStatus(err), err.Error())
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
@@ -334,7 +337,12 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 			c.JSON(routingErrorStatus(lastErr), gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
 			return
 		}
-		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
+		status, reason := parseStreamEndState(sink.Bytes(), func() error {
+			if !streamOK {
+				return lastErr
+			}
+			return nil
+		}())
 		submitArchive(c, h.archiver, archive.ProtocolChatCompletions, reqBody, sink.Bytes(),
 			status, c.Writer.Status(), reason)
 		return
@@ -366,7 +374,7 @@ func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *p
 		_ = pw.Close()
 	}()
 
-	if err := anthropicSSEToOpenAISSE(pr, streamWriter); err != nil {
+	if err := anthropicSSEToOpenAISSEWithUsage(pr, streamWriter, c); err != nil {
 		_ = pr.Close()
 		return err
 	}
@@ -529,6 +537,14 @@ func toOpenAIChatCompletionResponse(resp *provider.Response) *openAIChatCompleti
 }
 
 func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
+	return anthropicSSEToOpenAISSEWithUsage(r, w, nil)
+}
+
+// anthropicSSEToOpenAISSEWithUsage is like anthropicSSEToOpenAISSE but also
+// propagates parsed usage (input/output tokens) into the gin.Context so the
+// archive can record accurate token counts for streamed conversations.
+// c may be nil (e.g. in unit tests) — usage propagation is skipped.
+func anthropicSSEToOpenAISSEWithUsage(r io.Reader, w io.Writer, c *gin.Context) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
 
@@ -615,6 +631,10 @@ func anthropicSSEToOpenAISSE(r io.Reader, w io.Writer) error {
 				},
 			}); err != nil {
 				return err
+			}
+			// Propagate usage to gin.Context for archive metadata.
+			if c != nil {
+				setUsageMetadata(c, accInputTokens, accOutputTokens)
 			}
 			eventType = ""
 			dataLines = nil
