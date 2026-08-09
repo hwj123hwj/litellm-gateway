@@ -171,6 +171,7 @@ func main() {
 	engine.GET("/dashboard", gin.WrapH(dashboardHandler))
 	engine.GET("/dashboard/*path", gin.WrapH(dashboardHandler))
 	engine.GET("/assets/*filepath", gin.WrapH(dashboardHandler))
+	engine.GET("/favicon.ico", gin.WrapH(dashboard.NewFaviconHandler()))
 	// 兼容不带 /v1 前缀的客户端
 	engine.POST("/messages", msgHandler.Handle)
 	engine.POST("/chat/completions", chatHandler.Handle)

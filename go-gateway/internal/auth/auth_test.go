@@ -23,6 +23,7 @@ func newTestRouter(masterKey string) *gin.Engine {
 	e.GET("/readyz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
 	e.GET("/dashboard", func(c *gin.Context) { c.Status(http.StatusOK) })
 	e.GET("/assets/index.js", func(c *gin.Context) { c.Status(http.StatusOK) })
+	e.GET("/favicon.ico", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	return e
 }
 
@@ -83,12 +84,20 @@ func TestBearerAuthDashboardPublic(t *testing.T) {
 	e := newTestRouter("test-key")
 	e.GET("/", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	for _, path := range []string{"/", "/assets/index.js", "/dashboard"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+	for _, test := range []struct {
+		path   string
+		status int
+	}{
+		{path: "/", status: http.StatusOK},
+		{path: "/assets/index.js", status: http.StatusOK},
+		{path: "/dashboard", status: http.StatusOK},
+		{path: "/favicon.ico", status: http.StatusNoContent},
+	} {
+		req := httptest.NewRequest(http.MethodGet, test.path, nil)
 		w := httptest.NewRecorder()
 		e.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("expected dashboard path %s to be public, got %d", path, w.Code)
+		if w.Code != test.status {
+			t.Errorf("expected dashboard path %s to be public with status %d, got %d", test.path, test.status, w.Code)
 		}
 	}
 }

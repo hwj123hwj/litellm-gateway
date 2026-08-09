@@ -11,11 +11,13 @@ func TestIsMetricsExcludedPath(t *testing.T) {
 		{path: "/dashboard", excluded: true},
 		{path: "/dashboard/settings", excluded: true},
 		{path: "/assets/index.js", excluded: true},
+		{path: "/favicon.ico", excluded: true},
 		{path: "/health", excluded: true},
 		{path: "/readyz", excluded: true},
 		{path: "/admin/dashboard", excluded: true},
+		{path: "/v1/models", excluded: true},
+		{path: "/models", excluded: true},
 		{path: "/v1/chat/completions", excluded: false},
-		{path: "/models", excluded: false},
 	}
 
 	for _, test := range tests {
