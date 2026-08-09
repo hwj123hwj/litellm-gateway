@@ -217,6 +217,9 @@ litellm-gateway/
 | `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
 | `ADMIN_TOKEN` | 否 | Dashboard/Admin API 独立 token；未设置时回退到主 token |
 | `PORT` | 否 | 监听端口（默认 4001） |
+| `ARCHIVE_ENABLED` | 否 | 对话归档总开关（默认 false）；启用后供知识库增量导出 |
+| `ARCHIVE_MAX_BODY_KB` | 否 | 单条归档 body 安全上限（默认 16384 KB） |
+| `ARCHIVE_RETENTION_DAYS` | 否 | 归档保留天数（默认 90） |
 | `CIRCUIT_FAILURE_THRESHOLD` | 否 | 连续可重试失败后打开熔断（默认 3） |
 | `CIRCUIT_RECOVERY_SECONDS` | 否 | 熔断恢复探测间隔（默认 30） |
 | `CIRCUIT_SUCCESS_THRESHOLD` | 否 | 半开状态连续成功次数（默认 1） |

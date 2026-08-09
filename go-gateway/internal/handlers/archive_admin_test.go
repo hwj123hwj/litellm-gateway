@@ -42,8 +42,8 @@ func TestArchiveExportEmitsJSONLWithCursor(t *testing.T) {
 	if cursor == "" {
 		t.Fatal("missing X-Archive-Next-Cursor header")
 	}
-	if v := w.Header().Get("X-Archive-Schema-Version"); v != "1" {
-		t.Errorf("schema version = %s, want 1", v)
+	if v := w.Header().Get("X-Archive-Schema-Version"); v != "2" {
+		t.Errorf("schema version = %s, want 2", v)
 	}
 
 	// Verify JSONL: each line must be a standalone JSON object

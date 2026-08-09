@@ -26,6 +26,8 @@ func TestArchiverEnabledPersistsAsync(t *testing.T) {
 		ResponseBody: `{"content":"hi"}`,
 	})
 	a.Close()
+	// A handler that finishes after shutdown must not panic when it submits.
+	a.Submit(Archive{RequestID: "late"})
 
 	if len(store.saved) != 1 {
 		t.Fatalf("expected 1 saved archive, got %d", len(store.saved))
@@ -58,18 +60,31 @@ func TestArchiverTruncatesOversizedBody(t *testing.T) {
 	}
 }
 
-func TestArchiverQueueFullDropsGracefully(t *testing.T) {
+func TestArchiverQueueBackpressurePreservesEveryRecord(t *testing.T) {
 	store := &slowStore{block: make(chan struct{})}
 	a := NewArchiver(store, Config{Enabled: true, MaxBodyKB: 64}, nil)
 
-	// Block the worker so the queue fills up.
-	// Submit way more than the queue can hold; Submit should never block.
-	for i := 0; i < 600; i++ {
-		a.Submit(Archive{RequestID: "flood"})
-	}
-	// Unblock the worker so Close can proceed.
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 600; i++ {
+			a.Submit(Archive{RequestID: "flood"})
+		}
+		close(done)
+	}()
+
+	// Submit must apply backpressure once the queue is full, then continue
+	// without dropping records after the store becomes available.
+	time.Sleep(20 * time.Millisecond)
 	close(store.block)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("archive submissions remained blocked after store recovery")
+	}
 	a.Close()
+	if got := store.saved; got != 600 {
+		t.Fatalf("saved archives = %d, want 600", got)
+	}
 }
 
 func contains(s, sub string) bool {
@@ -102,28 +117,16 @@ func (s *captureStore) DeleteArchivesBefore(time.Time) (int64, error) { return 0
 func (s *captureStore) DeleteArchive(int64) error                     { return nil }
 func (s *captureStore) Close() error                                  { return nil }
 
-// blockingStore is a Store whose SaveArchive blocks until the test releases it;
-// used to saturate the archiver queue and verify it drops instead of blocking
-// callers.
-type blockingStore struct{}
-
-func (s *blockingStore) SaveArchive(Archive) error                      { select {} }
-func (s *blockingStore) QueryArchives(int, int) ([]Archive, int, error) { return nil, 0, nil }
-func (s *blockingStore) ExportArchives(int64, time.Time, int) ([]Archive, error) {
-	return nil, nil
-}
-func (s *blockingStore) DeleteArchivesBefore(time.Time) (int64, error) { return 0, nil }
-func (s *blockingStore) DeleteArchive(int64) error                     { return nil }
-func (s *blockingStore) Close() error                                  { return nil }
-
 // slowStore blocks on a channel for each SaveArchive call. Tests close the
 // channel to let the worker drain and Close() to return.
 type slowStore struct {
 	block chan struct{}
+	saved int
 }
 
 func (s *slowStore) SaveArchive(Archive) error {
 	<-s.block
+	s.saved++
 	return nil
 }
 func (s *slowStore) QueryArchives(int, int) ([]Archive, int, error) { return nil, 0, nil }

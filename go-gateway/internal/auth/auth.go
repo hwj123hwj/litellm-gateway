@@ -35,8 +35,8 @@ func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
 // outer gate and does not weaken non-admin endpoints.
 func BearerAuthWithAdminToken(masterKey string, adminToken string, logger *log.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// /health 和 OPTIONS 请求不需要认证
-		if c.Request.URL.Path == "/health" || c.Request.Method == "OPTIONS" {
+		// Liveness/readiness probes and CORS preflight do not need credentials.
+		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/readyz" || c.Request.Method == "OPTIONS" {
 			c.Next()
 			return
 		}

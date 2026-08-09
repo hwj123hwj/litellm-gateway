@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"log"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,65 @@ import (
 
 	"github.com/weijian/go-llm-gateway/internal/archive"
 )
+
+func TestArchiveSchemaMigratesLegacyRows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE conversation_archives (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp DATETIME NOT NULL,
+			request_id TEXT DEFAULT '',
+			protocol TEXT DEFAULT '',
+			model TEXT DEFAULT '',
+			provider TEXT DEFAULT '',
+			is_stream BOOLEAN DEFAULT 0,
+			status TEXT DEFAULT '',
+			status_code INTEGER DEFAULT 0,
+			input_tokens INTEGER DEFAULT 0,
+			output_tokens INTEGER DEFAULT 0,
+			request_body TEXT DEFAULT '',
+			response_body TEXT DEFAULT '',
+			error_reason TEXT DEFAULT '',
+			schema_version INTEGER DEFAULT 1
+		)
+	`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	store, err := NewSQLiteStore(dbPath, log.Default())
+	if err != nil {
+		t.Fatalf("NewSQLiteStore migration: %v", err)
+	}
+	defer store.Close()
+
+	ar := archive.NewArchive()
+	ar.Timestamp = time.Now().UTC()
+	ar.RequestID = "migrated-1"
+	ar.Source = "gateway"
+	ar.ConversationID = "conv-1"
+	ar.RequestBytes = 12
+	ar.ResponseBytes = 34
+	ar.Truncated = true
+	if err := store.SaveArchive(ar); err != nil {
+		t.Fatalf("SaveArchive after migration: %v", err)
+	}
+	records, _, err := store.QueryArchives(10, 0)
+	if err != nil {
+		t.Fatalf("QueryArchives after migration: %v", err)
+	}
+	if len(records) != 1 || records[0].Source != "gateway" || !records[0].Truncated {
+		t.Fatalf("migrated archive metadata mismatch: %#v", records)
+	}
+}
 
 func TestSaveArchiveAndQueryArchives(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "archives.db"), log.Default())
@@ -20,6 +80,9 @@ func TestSaveArchiveAndQueryArchives(t *testing.T) {
 	ar.RequestID = "req-archive-1"
 	ar.Timestamp = time.Now().UTC()
 	ar.Protocol = archive.ProtocolMessages
+	ar.Source = "h w j-code"
+	ar.ConversationID = "conversation-1"
+	ar.SessionID = "session-1"
 	ar.Model = "coding"
 	ar.Provider = "glm"
 	ar.IsStream = false
@@ -29,6 +92,9 @@ func TestSaveArchiveAndQueryArchives(t *testing.T) {
 	ar.OutputTokens = 20
 	ar.RequestBody = `{"model":"coding","messages":[{"role":"user","content":"hi"}]}`
 	ar.ResponseBody = `{"content":[{"type":"text","text":"hello"}]}`
+	ar.RequestBytes = len(ar.RequestBody)
+	ar.ResponseBytes = len(ar.ResponseBody)
+	ar.Truncated = true
 
 	if err := store.SaveArchive(ar); err != nil {
 		t.Fatalf("SaveArchive: %v", err)
@@ -44,6 +110,12 @@ func TestSaveArchiveAndQueryArchives(t *testing.T) {
 	got := records[0]
 	if got.RequestID != "req-archive-1" || got.Model != "coding" || got.Status != archive.StatusCompleted {
 		t.Fatalf("queried record mismatch: %#v", got)
+	}
+	if got.Source != ar.Source || got.ConversationID != ar.ConversationID || got.SessionID != ar.SessionID {
+		t.Fatalf("correlation metadata mismatch: %#v", got)
+	}
+	if got.RequestBytes != ar.RequestBytes || got.ResponseBytes != ar.ResponseBytes || !got.Truncated {
+		t.Fatalf("archive size metadata mismatch: %#v", got)
 	}
 }
 

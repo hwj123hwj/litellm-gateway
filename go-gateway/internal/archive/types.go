@@ -11,7 +11,7 @@ import "time"
 
 // SchemaVersion identifies the JSONL export payload shape. Bump this whenever
 // the Archive struct gains/loses a field so downstream consumers can branch.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Status classifies how an archived conversation terminated.
 type Status string
@@ -35,21 +35,27 @@ const (
 // emitted by the JSONL exporter. Raw JSON bodies are stored as sanitized
 // text (sensitive headers redacted, multimedia replaced by digests).
 type Archive struct {
-	ID            int64     `json:"id"`
-	RequestID     string    `json:"request_id"`
-	Timestamp     time.Time `json:"timestamp"`
-	Protocol      Protocol  `json:"protocol"`
-	Model         string    `json:"model"`
-	Provider      string    `json:"provider"`
-	IsStream      bool      `json:"is_stream"`
-	Status        Status    `json:"status"`
-	StatusCode    int       `json:"status_code"`
-	InputTokens   int       `json:"input_tokens"`
-	OutputTokens  int       `json:"output_tokens"`
-	RequestBody   string    `json:"request_body"`           // sanitized JSON text
-	ResponseBody  string    `json:"response_body"`          // sanitized JSON text (final aggregated state for streams)
-	ErrorReason   string    `json:"error_reason,omitempty"` // populated when Status != completed
-	SchemaVersion int       `json:"schema_version"`
+	ID             int64     `json:"id"`
+	RequestID      string    `json:"request_id"`
+	Timestamp      time.Time `json:"timestamp"`
+	Protocol       Protocol  `json:"protocol"`
+	Source         string    `json:"source,omitempty"`
+	ConversationID string    `json:"conversation_id,omitempty"`
+	SessionID      string    `json:"session_id,omitempty"`
+	Model          string    `json:"model"`
+	Provider       string    `json:"provider"`
+	IsStream       bool      `json:"is_stream"`
+	Status         Status    `json:"status"`
+	StatusCode     int       `json:"status_code"`
+	InputTokens    int       `json:"input_tokens"`
+	OutputTokens   int       `json:"output_tokens"`
+	RequestBytes   int       `json:"request_bytes,omitempty"`
+	ResponseBytes  int       `json:"response_bytes,omitempty"`
+	Truncated      bool      `json:"truncated,omitempty"`
+	RequestBody    string    `json:"request_body"`           // sanitized JSON text
+	ResponseBody   string    `json:"response_body"`          // sanitized JSON text (final aggregated state for streams)
+	ErrorReason    string    `json:"error_reason,omitempty"` // populated when Status != completed
+	SchemaVersion  int       `json:"schema_version"`
 }
 
 // NewArchive builds an Archive with the schema version pre-filled.
@@ -65,12 +71,12 @@ type Config struct {
 	RetentionDays int  // rows older than this are purged by Cleanup, mirrors ARCHIVE_RETENTION_DAYS
 }
 
-// DefaultConfig returns production-safe defaults: disabled, 256 KB per body,
+// DefaultConfig returns production-safe defaults: disabled, 16 MB per body,
 // 90-day retention. These are overridden by environment variables in config.Load.
 func DefaultConfig() Config {
 	return Config{
 		Enabled:       false,
-		MaxBodyKB:     256,
+		MaxBodyKB:     16 * 1024,
 		RetentionDays: 90,
 	}
 }

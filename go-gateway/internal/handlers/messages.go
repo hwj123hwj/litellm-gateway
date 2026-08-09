@@ -74,10 +74,10 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request, 
 		if h.archiver != nil && h.archiver.Enabled() {
 			// Sanitize the error message for BOTH response_body and error_reason
 			// to prevent credential leakage (e.g. "invalid api key: sk-secret").
-				sanitized := archiveErrorReason(err)
-				submitArchive(c, h.archiver, archive.ProtocolMessages, rawBody,
-					[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
-					archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
+			sanitized := archiveErrorReason(err)
+			submitArchive(c, h.archiver, archive.ProtocolMessages, rawBody,
+				[]byte(fmt.Sprintf(`{"error":%q}`, sanitized)),
+				archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
 		}
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
@@ -108,7 +108,7 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, raw
 	// allocated when archiving is enabled to avoid overhead in the common case.
 	var sink *archiveSink
 	if h.archiver != nil && h.archiver.Enabled() {
-		sink = newArchiveSink()
+		sink = newArchiveSink(h.archiver.MaxBodyBytes())
 	}
 
 	originalModel := req.Model
@@ -167,8 +167,8 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, raw
 				setProviderErrorHeaders(c, lastErr)
 				c.JSON(routingErrorStatus(lastErr), gin.H{"error": lastErr.Error()})
 			}
-				submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, nil,
-					archive.StatusError, routingErrorStatus(lastErr), archiveErrorReason(lastErr))
+			submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, nil,
+				archive.StatusError, routingErrorStatus(lastErr), archiveErrorReason(lastErr))
 			return
 		}
 		// Bytes were streamed → archive the captured transcript.

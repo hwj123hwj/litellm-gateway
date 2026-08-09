@@ -17,9 +17,8 @@ import (
 )
 
 // defaultSinkMaxBytes caps how much of a streamed SSE transcript the archive
-// sink retains in memory. This is independent of ARCHIVE_MAX_BODY_KB (which
-// applies during the final Submit) because the sink must stay bounded *during*
-// streaming, not just after.
+// sink retains in memory. The enabled archiver passes ARCHIVE_MAX_BODY_KB so
+// the capture limit and persisted-body limit stay aligned.
 //
 // Strategy: when the cap is reached, the buffer switches to ring mode — it
 // keeps the head (first headBytes) and tail (last tailBytes) of the transcript,
@@ -27,8 +26,8 @@ import (
 // at the end) is always captured for endState detection, while preventing
 // unbounded memory growth from long streams.
 const (
-	defaultSinkMaxBytes = 256 * 1024 // 256 KB per stream
-	sinkHeadBytes       = 32 * 1024  // 32 KB head (request start context)
+	defaultSinkMaxBytes = 16 * 1024 * 1024 // 16 MB per stream
+	sinkHeadBytes       = 32 * 1024        // 32 KB head (request start context)
 )
 
 // archiveSink is a thread-safe, bounded buffer used to tee streamed SSE data
@@ -191,6 +190,9 @@ func submitArchive(
 	ar.RequestID = c.GetString(requestmeta.RequestIDKey)
 	ar.Timestamp = nowFunc()
 	ar.Protocol = protocol
+	ar.Source = sanitizeArchiveHeader(c.GetHeader("X-AI-Source"))
+	ar.ConversationID = sanitizeArchiveHeader(c.GetHeader("X-Conversation-ID"))
+	ar.SessionID = sanitizeArchiveHeader(c.GetHeader("X-Session-ID"))
 	ar.Model = c.GetString(requestmeta.ModelKey)
 	ar.Provider = c.GetString(requestmeta.ProviderKey)
 	ar.IsStream = c.GetBool(requestmeta.RequestIsStreamKey)
@@ -215,6 +217,22 @@ func submitArchive(
 	// (e.g. "invalid api key: sk-secret"). Apply the same redaction logic.
 	ar.ErrorReason = sanitizeErrorReason(errorReason)
 	archiver.Submit(ar)
+}
+
+// sanitizeArchiveHeader bounds caller-provided correlation metadata before it
+// reaches SQLite/export. It is intentionally conservative: these fields are
+// identifiers for joining external histories, never untrusted prose.
+func sanitizeArchiveHeader(value string) string {
+	value = strings.TrimSpace(string(archive.RedactText([]byte(value))))
+	if len(value) > 256 {
+		value = value[:256]
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' || r < 0x20 {
+			return -1
+		}
+		return r
+	}, value)
 }
 
 // redactSSETranscript parses an SSE byte stream event-by-event and redacts the

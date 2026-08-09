@@ -87,6 +87,7 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | 端点 | 方法 | 认证 | 说明 |
 |------|------|------|------|
 | `/health` | GET | 无需 | 健康检查 |
+| `/readyz` | GET | 无需 | 就绪检查；未加载任何 Provider 时返回 503 |
 | `/v1/models` | GET | Bearer | 列出可用模型 |
 | `/v1/chat/completions` | POST | Bearer | OpenAI 兼容接口，支持流式 |
 | `/v1/messages` | POST | Bearer | Anthropic 兼容接口，支持流式 |
@@ -120,7 +121,7 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARCHIVE_ENABLED` | `false` | 总开关，关闭时归档器为纯 no-op，零开销 |
-| `ARCHIVE_MAX_BODY_KB` | `256` | 单条 request/response body 的截断阈值（KB） |
+| `ARCHIVE_MAX_BODY_KB` | `16384` | 单条 request/response body 的安全上限（KB）；超限记录 `truncated=true`，不会写入破损 JSON |
 | `ARCHIVE_RETENTION_DAYS` | `90` | 归档保留天数，超期由后台任务自动清理 |
 
 **脱敏规则：** 归档写入前会递归清除 `Authorization`、`Cookie`、`x-api-key`、`api_key`、`token`、`password`、`secret` 等敏感字段的值（替换为 `[REDACTED]`）；图片/音频/文件等多媒体内容只保留 `{type, size, sha256}` 摘要，不存 Base64 原文。流式响应在透传 SSE 的同时 tee 到内部 buffer，流结束后聚合归档；中断时记录原因。
@@ -144,7 +145,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
   -o batch_2.jsonl
 ```
 
-每行 JSON 包含 `schema_version`、`request_id`、`timestamp`、`protocol`、`model`、`provider`、`is_stream`、`status`、`status_code`、`input_tokens`、`output_tokens`、`request_body`、`response_body`、`error_reason` 等字段。`schema_version` 当前为 `1`，后续 schema 变更会递增。
+每行 JSON 包含 `schema_version`、`request_id`、`timestamp`、`protocol`、`source`、`conversation_id`、`session_id`、`model`、`provider`、`is_stream`、`status`、`status_code`、`input_tokens`、`output_tokens`、`request_bytes`、`response_bytes`、`truncated`、`request_body`、`response_body`、`error_reason` 等字段。`schema_version` 当前为 `2`。客户端可以通过 `X-AI-Source`、`X-Conversation-ID`、`X-Session-ID` 写入可关联的来源与会话标识；密钥类内容仍会被脱敏。
 
 Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后允许一次半开探测；可通过 `CIRCUIT_FAILURE_THRESHOLD`、`CIRCUIT_RECOVERY_SECONDS` 和 `CIRCUIT_SUCCESS_THRESHOLD` 调整。管理接口只返回脱敏的运行状态，API key 始终来自环境变量。
 
@@ -187,6 +188,9 @@ grep 'request_id=client-trace-42' gateway.log
 ```bash
 curl http://localhost:4001/health
 # {"status":"ok"}
+
+curl http://localhost:4001/readyz
+# {"status":"ready"}
 ```
 
 ### OpenAI 兼容：chat completions（非流式）
@@ -285,7 +289,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `CIRCUIT_RECOVERY_SECONDS` | 否 | 30 | 打开后等待半开探测的秒数 |
 | `CIRCUIT_SUCCESS_THRESHOLD` | 否 | 1 | 半开状态连续成功后关闭熔断 |
 | `ARCHIVE_ENABLED` | 否 | `false` | 对话归档总开关，关闭时零开销 |
-| `ARCHIVE_MAX_BODY_KB` | 否 | 256 | 单条 body 截断阈值（KB） |
+| `ARCHIVE_MAX_BODY_KB` | 否 | 16384 | 单条 body 安全上限（KB），超限标记 `truncated=true` |
 | `ARCHIVE_RETENTION_DAYS` | 否 | 90 | 归档保留天数 |
 
 未配置 key 的 provider 会被自动跳过，不影响其他 provider 正常工作。
@@ -424,29 +428,32 @@ cat > /opt/go-gateway/.env << 'EOF'
 LITELLM_MASTER_KEY=sk-local-gateway-xxx
 GLM_API_KEY=
 ALI_API_KEY=
-PORT=8080
+PORT=4001
 LOG_LEVEL=info
+ARCHIVE_ENABLED=true
+ARCHIVE_MAX_BODY_KB=16384
+ARCHIVE_RETENTION_DAYS=90
 EOF
 
 # 启动
 docker run -d \
   --name go-gateway \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 4001:4001 \
   --env-file /opt/go-gateway/.env \
   go-llm-gateway:latest
 ```
 
 ### 服务器防火墙
 
-确保服务器开放 8080 端口：
+确保服务器开放 4001 端口：
 
 ```bash
 # ufw
-ufw allow 8080/tcp
+ufw allow 4001/tcp
 
 # iptables
-iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+iptables -A INPUT -p tcp --dport 4001 -j ACCEPT
 ```
 
 ### 验证
