@@ -81,6 +81,32 @@ func TestAdminProviderControlsExposeAndUpdateRuntimeState(t *testing.T) {
 	}
 }
 
+func TestAdminHealthDoesNotTreatUnprobedProvidersAsDegraded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := log.New(io.Discard, "", 0)
+	router := provider.NewRouter(logger)
+	router.RegisterProvider("unprobed", &adminTestProvider{name: "unprobed"})
+	handler := NewAdminHandler(router, metrics.NewCollector(), logger)
+
+	engine := gin.New()
+	engine.GET("/admin/health", handler.HandleHealth)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/health", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET health status = %d: %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if payload.Status != "ok" {
+		t.Fatalf("unprobed provider health status = %q, want ok", payload.Status)
+	}
+}
+
 type adminTestProvider struct {
 	name string
 }
