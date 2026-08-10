@@ -99,6 +99,7 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, raw
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
+		submitRoutingErrorArchive(c, h.archiver, archive.ProtocolMessages, rawBody, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}

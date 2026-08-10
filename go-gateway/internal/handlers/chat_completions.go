@@ -280,6 +280,7 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 	providerChain, err := h.router.RouteForStreamRequest(req.Model, req)
 	if err != nil {
 		setProviderErrorHeaders(c, err)
+		submitRoutingErrorArchive(c, h.archiver, archive.ProtocolChatCompletions, rawBody, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}

@@ -51,9 +51,15 @@ func newArchiveSink(maxBytes ...int) *archiveSink {
 	if len(maxBytes) > 0 && maxBytes[0] > 0 {
 		limit = maxBytes[0]
 	}
+	// Always reserve tail capacity when the configured limit permits it. Using
+	// the whole limit for the head at limits <= sinkHeadBytes drops terminal SSE
+	// events from long streams and falsely classifies them as interrupted.
 	headLimit := limit
-	if headLimit > sinkHeadBytes {
-		headLimit = sinkHeadBytes
+	if limit > 1 {
+		headLimit = limit / 2
+		if headLimit > sinkHeadBytes {
+			headLimit = sinkHeadBytes
+		}
 	}
 	tailLimit := limit - headLimit
 	return &archiveSink{
@@ -217,6 +223,32 @@ func submitArchive(
 	// (e.g. "invalid api key: sk-secret"). Apply the same redaction logic.
 	ar.ErrorReason = sanitizeErrorReason(errorReason)
 	archiver.Submit(ar)
+}
+
+// submitRoutingErrorArchive records failures that happen before a streaming
+// provider starts. Without this path, request metrics include the rejected
+// request while conversation archives silently omit it.
+func submitRoutingErrorArchive(
+	c *gin.Context,
+	archiver *archive.Archiver,
+	protocol archive.Protocol,
+	requestBody []byte,
+	err error,
+) {
+	if archiver == nil || !archiver.Enabled() || err == nil {
+		return
+	}
+	reason := archiveErrorReason(err)
+	submitArchive(
+		c,
+		archiver,
+		protocol,
+		requestBody,
+		[]byte(fmt.Sprintf(`{"error":%q}`, reason)),
+		archive.StatusError,
+		routingErrorStatus(err),
+		reason,
+	)
 }
 
 // sanitizeArchiveHeader bounds caller-provided correlation metadata before it
