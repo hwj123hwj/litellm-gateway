@@ -263,7 +263,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 |--------|---------|------|
 | `coding` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
 | `coding-anthropic` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | `/v1/messages` 兼容链 |
-| `glm-opus` | GLM `glm-5.2` | 文本、工具调用、推理、流式 |
+| `glm-opus` | GLM `glm-5.2` → Ali `qwen3.8-max-preview` → Copilot `gpt-4o` | 知识编译专用 fallback 链；文本、工具调用、推理、流式 |
 | `glm-sonnet` | GLM `glm-5-turbo` | 文本、工具调用、推理、流式 |
 | `glm-haiku` | GLM `glm-4.7` | 文本、工具调用、推理、流式 |
 | `glm-4.7-flash` | GLM `glm-4.7-flash` | 文本、工具调用、流式 |
@@ -271,6 +271,11 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `ali-opus`, `qwen3.8-max` | 阿里 `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
 
 配置了可选的 ChatGPT Codex 代理或 GitHub Copilot 后，额外模型会动态加入目录；不要在客户端硬编码版本，直接读取 `/v1/models`。
+
+OpenAI 兼容 Provider 的请求超时默认是 120 秒。需要承载长推理请求时，可在
+`providers.yaml` 的 Provider 节点设置 `request_timeout_seconds`；当前 GLM Provider
+为知识飞轮的长请求设置了 900 秒。这个值只控制 Provider HTTP 客户端的墙钟超时，
+调用方的取消信号仍然优先生效。
 
 ---
 

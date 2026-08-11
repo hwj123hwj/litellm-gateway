@@ -161,10 +161,16 @@ type OpenAIProvider struct {
 	client *http.Client
 }
 
+const defaultOpenAIRequestTimeout = 120 * time.Second
+
 func NewOpenAIProvider(config *Config) *OpenAIProvider {
+	requestTimeout := config.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = defaultOpenAIRequestTimeout
+	}
 	return &OpenAIProvider{
 		config: config,
-		client: &http.Client{Timeout: 120 * time.Second},
+		client: &http.Client{Timeout: requestTimeout},
 	}
 }
 

@@ -69,6 +69,10 @@ func (p *CopilotProvider) mapModel(reqModel string) string {
 	switch reqModel {
 	case "gpt-4o-mini", "copilot-haiku":
 		return "gpt-4o-mini"
+	case "glm-opus":
+		// glm-opus is also the stable logical name used by the knowledge
+		// compilation fallback chain. Copilot receives its own supported model.
+		return "gpt-4o"
 	default:
 		return "gpt-4o"
 	}

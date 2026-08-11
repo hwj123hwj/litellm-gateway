@@ -17,6 +17,7 @@ func TestCopilotMapModel(t *testing.T) {
 		{"copilot-opus", "gpt-4o"},
 		{"copilot-sonnet", "gpt-4o"},
 		{"copilot-haiku", "gpt-4o-mini"},
+		{"glm-opus", "gpt-4o"},
 		{"gpt-4o-mini", "gpt-4o-mini"},
 		{"unknown-model", "gpt-4o"},
 	}

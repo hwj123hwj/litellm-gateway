@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"time"
 )
 
 // MessageContent 支持两种格式：
@@ -328,8 +329,9 @@ type BoundModelProvider interface {
 
 // Config 提供商配置
 type Config struct {
-	Name      string
-	URL       string
-	APIKey    string
-	UseBearer bool
+	Name           string
+	URL            string
+	APIKey         string
+	UseBearer      bool
+	RequestTimeout time.Duration
 }
