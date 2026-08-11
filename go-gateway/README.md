@@ -263,7 +263,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
 |--------|---------|------|
 | `coding` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
 | `coding-anthropic` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | `/v1/messages` 兼容链 |
-| `glm-opus` | GLM `glm-5.2` | 文本、工具调用、推理、流式 |
+| `glm-opus` | GLM `glm-5.2` → Ali `qwen3.8-max-preview` → Copilot `gpt-4o` | 知识编译专用 fallback 链；文本、工具调用、推理、流式 |
 | `glm-sonnet` | GLM `glm-5-turbo` | 文本、工具调用、推理、流式 |
 | `glm-haiku` | GLM `glm-4.7` | 文本、工具调用、推理、流式 |
 | `glm-4.7-flash` | GLM `glm-4.7-flash` | 文本、工具调用、流式 |

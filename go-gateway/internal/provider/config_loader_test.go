@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -51,5 +54,22 @@ func TestOpenAIProviderUsesSafeDefaultRequestTimeout(t *testing.T) {
 	provider := NewOpenAIProvider(&Config{Name: "test"})
 	if provider.client.Timeout != defaultOpenAIRequestTimeout {
 		t.Fatalf("request timeout = %s, want %s", provider.client.Timeout, defaultOpenAIRequestTimeout)
+	}
+}
+
+func TestProvidersConfigKeepsKnowledgeCompileFallbackOrder(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	configPath := filepath.Join(filepath.Dir(sourceFile), "..", "..", "providers.yaml")
+	config, err := LoadProvidersConfig(configPath)
+	if err != nil {
+		t.Fatalf("load providers.yaml: %v", err)
+	}
+
+	want := []string{"glm-glm-5.2", "ali-qwen3.8-max-preview", "copilot"}
+	if got := config.Chains["glm-opus"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("glm-opus fallback chain = %#v, want %#v", got, want)
 	}
 }

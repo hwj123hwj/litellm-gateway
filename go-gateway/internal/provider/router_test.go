@@ -182,6 +182,42 @@ func TestRouterForwardWithDetailsTracksFallbackAndFinalProvider(t *testing.T) {
 	}
 }
 
+func TestRouterKnowledgeCompileFallsBackAcrossConfiguredProviders(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	router := NewRouter(logger)
+	first := &errorPolicyProvider{
+		name: "glm-glm-5.2",
+		err:  &ProviderError{Provider: "glm-glm-5.2", StatusCode: http.StatusTooManyRequests, Message: "quota exceeded"},
+	}
+	second := &errorPolicyProvider{
+		name: "ali-qwen3.8-max-preview",
+		err:  &ProviderError{Provider: "ali-qwen3.8-max-preview", StatusCode: http.StatusServiceUnavailable, Message: "temporarily unavailable"},
+	}
+	third := &errorPolicyProvider{
+		name: "copilot",
+		resp: &Response{Model: "gpt-4o"},
+	}
+	for _, candidate := range []*errorPolicyProvider{first, second, third} {
+		router.RegisterProvider(candidate.name, candidate)
+	}
+	router.RegisterChain("glm-opus", []string{first.name, second.name, third.name})
+
+	response, finalProvider, attempts, err := router.ForwardWithDetails(
+		context.Background(),
+		"glm-opus",
+		&Request{Model: "glm-opus"},
+	)
+	if err != nil {
+		t.Fatalf("expected Copilot fallback to succeed: %v", err)
+	}
+	if response == nil || finalProvider != "copilot" || response.Model != "gpt-4o" {
+		t.Fatalf("response/provider = %#v/%q, want gpt-4o/copilot", response, finalProvider)
+	}
+	if len(attempts) != 3 || first.calls != 1 || second.calls != 1 || third.calls != 1 {
+		t.Fatalf("attempts/calls = %#v/%d/%d/%d, want three attempts", attempts, first.calls, second.calls, third.calls)
+	}
+}
+
 func TestRouterProviderAndRouteControls(t *testing.T) {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	router := NewRouter(logger)

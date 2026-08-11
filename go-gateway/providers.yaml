@@ -59,4 +59,10 @@ chains:
     - glm-glm-5-turbo
     - ali-qwen3.8-max-preview
 
+  # Knowledge flywheel chain. Keep the stable glm-opus model name for clients
+  # while routing failures to the bound Ali model and optional Copilot provider.
+  glm-opus:
+    - glm-glm-5.2
+    - ali-qwen3.8-max-preview
+    - copilot
 
