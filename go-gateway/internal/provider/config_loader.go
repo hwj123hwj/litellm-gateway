@@ -6,17 +6,19 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // ProviderConfig 提供商配置
 type ProviderConfig struct {
-	Name      string        `yaml:"name"`
-	Type      string        `yaml:"type"` // openai 或 anthropic
-	URL       string        `yaml:"url"`
-	APIKeyEnv string        `yaml:"api_key_env"`
-	Models    []ModelConfig `yaml:"models"`
+	Name                  string        `yaml:"name"`
+	Type                  string        `yaml:"type"` // openai 或 anthropic
+	URL                   string        `yaml:"url"`
+	APIKeyEnv             string        `yaml:"api_key_env"`
+	RequestTimeoutSeconds int           `yaml:"request_timeout_seconds,omitempty"`
+	Models                []ModelConfig `yaml:"models"`
 }
 
 // ModelConfig 模型配置
@@ -99,9 +101,10 @@ func NewOpenAIProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 	}
 
 	return NewOpenAIProvider(&Config{
-		Name:   cfg.Name,
-		URL:    cfg.URL,
-		APIKey: apiKey,
+		Name:           cfg.Name,
+		URL:            cfg.URL,
+		APIKey:         apiKey,
+		RequestTimeout: time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
 	}), nil
 }
 

@@ -10,6 +10,11 @@ providers:
     type: openai
     url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     api_key_env: GLM_API_KEY
+    # GLM-5.2 reasoning requests used by the knowledge flywheel can exceed
+    # the normal 120-second provider deadline. Keep this provider-level
+    # timeout explicit and configurable instead of silently opening the
+    # circuit while a valid long-running request is still being processed.
+    request_timeout_seconds: 900
     models:
       - id: glm-5.2
         aliases: [glm-opus]
@@ -53,6 +58,5 @@ chains:
   coding-anthropic:
     - glm-glm-5-turbo
     - ali-qwen3.8-max-preview
-
 
 

@@ -272,6 +272,11 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 配置了可选的 ChatGPT Codex 代理或 GitHub Copilot 后，额外模型会动态加入目录；不要在客户端硬编码版本，直接读取 `/v1/models`。
 
+OpenAI 兼容 Provider 的请求超时默认是 120 秒。需要承载长推理请求时，可在
+`providers.yaml` 的 Provider 节点设置 `request_timeout_seconds`；当前 GLM Provider
+为知识飞轮的长请求设置了 900 秒。这个值只控制 Provider HTTP 客户端的墙钟超时，
+调用方的取消信号仍然优先生效。
+
 ---
 
 ## 环境变量
