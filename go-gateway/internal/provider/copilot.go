@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,9 +20,10 @@ import (
 type CopilotProvider struct {
 	config      *Config
 	client      *http.Client
-	apiURL      string // 从 token 解析的 API 地址
-	token       string // Copilot token（含 proxy-ep 等信息）
-	githubToken string // GitHub OAuth token（用于刷新）
+	mu          sync.RWMutex // 保护 token / apiURL 的并发读写
+	apiURL      string       // 从 token 解析的 API 地址（受 mu 保护）
+	token       string       // Copilot token（含 proxy-ep 等信息，受 mu 保护）
+	githubToken string       // GitHub OAuth token（用于刷新）
 }
 
 func NewCopilotProvider(config *Config, githubToken string) *CopilotProvider {
@@ -60,9 +62,17 @@ func (p *CopilotProvider) extractAPIURL(token string) string {
 	return defaultURL
 }
 
-func (p *CopilotProvider) Name() string    { return p.config.Name }
-func (p *CopilotProvider) URL() string     { return p.apiURL }
-func (p *CopilotProvider) APIKey() string  { return p.token }
+func (p *CopilotProvider) Name() string { return p.config.Name }
+func (p *CopilotProvider) URL() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.apiURL
+}
+func (p *CopilotProvider) APIKey() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.token
+}
 func (p *CopilotProvider) UseBearer() bool { return true }
 
 func (p *CopilotProvider) mapModel(reqModel string) string {
@@ -78,33 +88,47 @@ func (p *CopilotProvider) mapModel(reqModel string) string {
 	}
 }
 
-// ForwardRequest 将 Anthropic 格式请求转为 OpenAI 格式，发出后将响应转回 Anthropic 格式
-func (p *CopilotProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
+// sendRequest 发一次非流式 copilot 请求，返回响应和 body（body 已读完、resp.Body 已关闭）。
+func (p *CopilotProvider) sendRequest(ctx context.Context, req *Request) (*http.Response, []byte, error) {
 	oaiReq := toOpenAIRequest(req)
 	oaiReq.Model = p.mapModel(req.Model)
 
 	body, err := json.Marshal(oaiReq)
 	if err != nil {
-		return nil, fmt.Errorf("marshal copilot request: %w", err)
+		return nil, nil, fmt.Errorf("marshal copilot request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.apiURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, nil, fmt.Errorf("create request: %w", err)
 	}
 	p.setHeaders(httpReq)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
-
 	respBody, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, nil, fmt.Errorf("read response: %w", err)
 	}
+	return resp, respBody, nil
+}
 
+// ForwardRequest 将 Anthropic 格式请求转为 OpenAI 格式，发出后将响应转回 Anthropic 格式。
+// 收到 401 时自动用 GitHub token 刷新 Copilot token 并重试一次。
+func (p *CopilotProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
+	resp, respBody, err := p.sendRequest(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && p.refreshToken() {
+		resp, respBody, err = p.sendRequest(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, NewHTTPError(p.Name(), resp, respBody)
 	}
@@ -117,33 +141,51 @@ func (p *CopilotProvider) ForwardRequest(ctx context.Context, req *Request) (*Re
 	return fromOpenAIResponse(&oaiResp), nil
 }
 
-// ForwardStream 将 Anthropic 格式请求转为 OpenAI 流式请求，把 OpenAI SSE 转为 Anthropic SSE 写入 w
+// sendStreamRequest 发一次流式 copilot 请求，401 时刷新 token 重试一次。成功返回已就绪的 resp。
+func (p *CopilotProvider) sendStreamRequest(ctx context.Context, req *Request) (*http.Response, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		streamReq := toOpenAIRequest(req)
+		streamReq.Model = p.mapModel(req.Model)
+		streamReq.Stream = true
+
+		body, err := json.Marshal(streamReq)
+		if err != nil {
+			return nil, fmt.Errorf("marshal copilot stream request: %w", err)
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.apiURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create stream request: %w", err)
+		}
+		p.setHeaders(httpReq)
+
+		resp, err := p.client.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("send stream request: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 0 && p.refreshToken() {
+			resp.Body.Close()
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, NewHTTPError(p.Name(), resp, b)
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("copilot stream: token refresh failed")
+}
+
+// ForwardStream 将 Anthropic 格式请求转为 OpenAI 流式请求，把 OpenAI SSE 转为 Anthropic SSE 写入 w。
+// 收到 401 时自动刷新 Copilot token 并重试一次。
 func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {
-	streamReq := toOpenAIRequest(req)
-	streamReq.Model = p.mapModel(req.Model)
-	streamReq.Stream = true
-
-	body, err := json.Marshal(streamReq)
+	resp, err := p.sendStreamRequest(ctx, req)
 	if err != nil {
-		return fmt.Errorf("marshal copilot stream request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.apiURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create stream request: %w", err)
-	}
-	p.setHeaders(httpReq)
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("send stream request: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return NewHTTPError(p.Name(), resp, b)
-	}
 
 	msgID := "msg_copilot_" + time.Now().Format("20060102150405")
 
@@ -295,12 +337,32 @@ func (p *CopilotProvider) IsHealthy(ctx context.Context) bool {
 }
 
 func (p *CopilotProvider) setHeaders(req *http.Request) {
+	p.mu.RLock()
+	token := p.token
+	p.mu.RUnlock()
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0")
 	req.Header.Set("Editor-Version", "vscode/1.107.0")
 	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.35.0")
 	req.Header.Set("Copilot-Integration-Id", "vscode-chat")
+}
+
+// refreshToken 用 GitHub token 刷新 Copilot token，成功后更新 token 和 apiURL。
+// 并发安全；无 githubToken 或刷新失败时返回 false。供 401 重试使用。
+func (p *CopilotProvider) refreshToken() bool {
+	if p.githubToken == "" {
+		return false
+	}
+	newToken, _, err := RefreshCopilotToken(p.githubToken)
+	if err != nil || newToken == "" {
+		return false
+	}
+	p.mu.Lock()
+	p.token = newToken
+	p.apiURL = p.extractAPIURL(newToken)
+	p.mu.Unlock()
+	return true
 }
 
 // RefreshCopilotToken 使用 GitHub token 刷新 Copilot token
