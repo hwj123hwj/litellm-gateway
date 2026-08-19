@@ -80,7 +80,9 @@ providers:
         max_output_tokens: 128000
 chains:
   coding:
-    - glm-glm-5-turbo
+    # wiki 代理（openwiki personal）走此链。原 glm-5-turbo 是 GLM 家最弱档，
+    # wiki 输出质量明显弱于卡片编译（glm-opus 链），升级到 5.2 对齐。
+    - glm-glm-5.2
     - ali-qwen3.8-max-preview
 
   coding-anthropic:
@@ -92,4 +94,4 @@ chains:
   glm-opus:
     - ali-qwen3.8-max-preview
     - copilot
-    - glm-glm-5.3
+    - glm-glm-5.2
