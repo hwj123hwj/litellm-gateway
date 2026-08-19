@@ -389,6 +389,22 @@ func (p *OpenAIProvider) setHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", "go-llm-gateway/1.0")
 }
 
+// ─── 始终思考模型处理 ──────────────────────────────────────────────────────────
+
+// alwaysThinkingModels 列出上游强制思考、不接受 thinking:disabled 的模型。
+// 请求带 disabled 转发到这些模型会被上游直接拒绝。
+var alwaysThinkingModels = map[string]bool{
+	"glm-5.3": true,
+}
+
+// thinkingIsDisabled 判断 thinking 字段是否为 {"type":"disabled"}。
+func thinkingIsDisabled(raw json.RawMessage) bool {
+	var t struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(raw, &t) == nil && t.Type == "disabled"
+}
+
 // ─── 格式转换辅助函数 ──────────────────────────────────────────────────────────
 
 func toOpenAIRequest(req *Request) *openAIRequest {
@@ -549,7 +565,11 @@ func toOpenAIRequest(req *Request) *openAIRequest {
 		oaiReq.ToolChoice = v
 	}
 	if v, ok := req.raw["thinking"]; ok {
-		oaiReq.Thinking = append(json.RawMessage(nil), v...)
+		// 始终思考模型（如 glm-5.3）不接受 thinking:disabled——上游报错
+		// 「该模型始终思考，不支持关闭思考」。丢弃 disabled 让其走默认思考档。
+		if !alwaysThinkingModels[req.Model] || !thinkingIsDisabled(v) {
+			oaiReq.Thinking = append(json.RawMessage(nil), v...)
+		}
 	}
 	if v, ok := req.raw["reasoning_effort"]; ok {
 		_ = json.Unmarshal(v, &oaiReq.ReasoningEffort)
