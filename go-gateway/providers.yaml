@@ -19,6 +19,9 @@ providers:
       - id: glm-5.2
         aliases: [glm-opus]
         capabilities: [text, tool_calling, streaming, reasoning]
+      - id: glm-5.3
+        # 始终思考模型：上游不接受 thinking:disabled（网关侧自动丢弃该参数）
+        capabilities: [text, tool_calling, streaming, reasoning]
       - id: glm-5-turbo
         aliases: [glm-sonnet]
         capabilities: [text, tool_calling, streaming, reasoning]
@@ -49,7 +52,32 @@ providers:
         aliases: [ali-opus, qwen3.8-max]
         capabilities: [text, tool_calling, streaming, reasoning]
 
-
+  # ChatGPT Plus/Pro Codex subscription. The provider reads OAuth credentials
+  # from Codex CLI/Pi auth.json; HTTP_PROXY is optional and only controls
+  # network access.
+  - name: chatgpt
+    type: chatgpt
+    url: https://chatgpt.com/backend-api
+    models:
+      - id: gpt-5.6-sol
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
+      - id: gpt-5.6-luna
+        aliases: [gpt-luna]
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
+      - id: gpt-5.6-terra
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
 chains:
   coding:
     - glm-glm-5-turbo
@@ -62,7 +90,6 @@ chains:
   # Knowledge flywheel chain. Keep the stable glm-opus model name for clients
   # while routing failures to the bound Ali model and optional Copilot provider.
   glm-opus:
-    - glm-glm-5.2
     - ali-qwen3.8-max-preview
     - copilot
-
+    - glm-glm-5.3
