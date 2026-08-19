@@ -68,7 +68,7 @@ func TestProvidersConfigKeepsKnowledgeCompileFallbackOrder(t *testing.T) {
 		t.Fatalf("load providers.yaml: %v", err)
 	}
 
-	want := []string{"ali-qwen3.8-max-preview", "copilot", "glm-glm-5.3"}
+	want := []string{"ali-qwen3.8-max-preview", "copilot", "glm-glm-5.2"}
 	if got := config.Chains["glm-opus"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("glm-opus fallback chain = %#v, want %#v", got, want)
 	}
