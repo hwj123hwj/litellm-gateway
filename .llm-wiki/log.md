@@ -2,6 +2,15 @@
 
 > Chronological record of wiki operations.
 
+## [2026-08-24] entity | DeepV provider restored (two DeepSeek models)
+- **Updated entity page**: deepv-provider (removed 2026-07-31 in `6e87f34`, restored with trimmed model set)
+- **Key changes**:
+  - Restored `go-gateway/internal/provider/deepv.go` with: JWT auth fallback (`~/.easycode-user` → `~/.deepv`), GenAI↔Anthropic conversion, streaming, tool calling
+  - Added vision support (`inlineData`/`fileData`) for `deepseek-v4-flash-vision-exp`
+  - Registered two models: `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`
+  - Config: `DEEPV_ENABLED`, `DEEPV_WORK_DIR` in config.go + .env.example
+- **Validation**: go vet + go test pass; live smoke test (text, streaming, vision) confirmed against DeepV API
+
 ## [2026-06-29] synthesis | Mobile app (React Native) — Round 13 CI pipeline fixes
 - **Updated synthesis page**: mobile-app-performance (sections 54–56)
 - **Context**: v1.2.1–v1.2.4 builds failed due to CI pipeline issues; v1.2.5 succeeded

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -540,9 +541,13 @@ func providerToResponsesResponse(resp *provider.Response, model string) *respons
 // ChatGPT 的 Codex API 直接返回 Responses API SSE 格式，不需要 Anthropic 转换
 func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesRequest, rawBody []byte) bool {
 	if !req.Stream {
+		return h.tryChatGPTNonStreamPassthrough(c, req, rawBody)
+	}
+	providerReq, err := responsesToProviderRequest(req)
+	if err != nil {
 		return false
 	}
-	providerChain, err := h.router.RouteForStream(req.Model)
+	providerChain, err := h.router.RouteForStreamRequest(req.Model, providerReq)
 	if err != nil {
 		return false
 	}
@@ -605,6 +610,67 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			}
 			return true
 		}
+	}
+
+	return false
+}
+
+// tryChatGPTNonStreamPassthrough supports clients that use the standard
+// non-streaming Responses request, including provider connection tests. The
+// ChatGPT Codex endpoint is stream-only, so collect its native SSE response
+// before returning a normal JSON Responses object.
+func (h *responsesHandler) tryChatGPTNonStreamPassthrough(c *gin.Context, req *responsesRequest, rawBody []byte) bool {
+	providerReq, err := responsesToProviderRequest(req)
+	if err != nil {
+		return false
+	}
+	providerChain, err := h.router.RouteForRequest(req.Model, providerReq)
+	if err != nil {
+		return false
+	}
+
+	for _, p := range providerChain {
+		chatgptPassthrough, ok := p.(provider.ChatGPTPassthroughMarker)
+		if !ok {
+			continue
+		}
+		if !h.router.AllowProviderRequestFor(req.Model, p) {
+			continue
+		}
+
+		started := time.Now()
+		var upstream bytes.Buffer
+		err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), &upstream)
+		if err == nil {
+			var responseBody []byte
+			var inputTokens, outputTokens int
+			responseBody, inputTokens, outputTokens, err = collectNativeResponsesResponse(upstream.Bytes(), req.Model)
+			if err == nil {
+				recordProviderAttempt(c, p.Name(), started, nil)
+				h.router.RecordProviderSuccessFor(req.Model, p)
+				setUsageMetadata(c, inputTokens, outputTokens)
+				if h.archiver != nil && h.archiver.Enabled() {
+					submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody,
+						responseBody, archive.StatusCompleted, http.StatusOK, "")
+				}
+				c.Data(http.StatusOK, "application/json", responseBody)
+				return true
+			}
+		}
+
+		recordProviderAttempt(c, p.Name(), started, err)
+		h.router.RecordProviderFailureFor(req.Model, p, err)
+		h.logger.Printf("[RESPONSES] ChatGPT non-stream passthrough failed: %v", err)
+		setProviderErrorHeaders(c, err)
+		if h.archiver != nil && h.archiver.Enabled() {
+			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, nil,
+				archive.StatusError, routingErrorStatus(err), archiveErrorReason(err))
+		}
+		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
+			"message": err.Error(),
+			"type":    "server_error",
+		}})
+		return true
 	}
 
 	return false

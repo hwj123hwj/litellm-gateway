@@ -20,7 +20,10 @@ type Config struct {
 	AliAPIKey               string
 	CopilotToken            string // GitHub Copilot token（短期有效，需要定期刷新）
 	CopilotGithubToken      string // GitHub OAuth token（用于刷新 Copilot token）
+	DeepVEnabled            bool   // DeepV Server（EasyCode/DeepVCode）是否启用
+	DeepVWorkDir            string // DeepV 工作目录（用于获取 Git 信息）
 	HTTPProxy               string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
+	ChatGPTAuthFile         string // ChatGPT/Pi OAuth auth.json 路径（可选）
 	Env                     string
 	CircuitFailureThreshold int
 	CircuitRecoverySeconds  int
@@ -41,7 +44,10 @@ func Load() (*Config, error) {
 		AliAPIKey:               getAliAPIKey(),
 		CopilotToken:            getEnv("COPILOT_TOKEN", ""),
 		CopilotGithubToken:      getEnv("COPILOT_GITHUB_TOKEN", ""),
+		DeepVEnabled:            getEnvBool("DEEPV_ENABLED", false),
+		DeepVWorkDir:            getEnv("DEEPV_WORK_DIR", ""),
 		HTTPProxy:               getEnv("HTTP_PROXY", ""),
+		ChatGPTAuthFile:         getEnv("CHATGPT_AUTH_FILE", ""),
 		Env:                     getEnv("ENV", "development"),
 		CircuitFailureThreshold: getEnvInt("CIRCUIT_FAILURE_THRESHOLD", 3),
 		CircuitRecoverySeconds:  getEnvInt("CIRCUIT_RECOVERY_SECONDS", 30),

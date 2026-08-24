@@ -75,8 +75,8 @@ providers:
     url: https://api.example.com/v1/chat/completions
     api_key_env: MY_PROVIDER_API_KEY  # 环境变量名
     models:
-      - id: gpt-5.5
-        aliases: [gpt-5]  # 模型别名
+      - id: my-model
+        aliases: [my-model-alias]  # 模型别名
 ```
 
 然后在 `.env` 中添加 API key：
@@ -110,7 +110,11 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 使用 ChatGPT Plus/Pro 订阅的 OAuth token 直接调用，不需要额外 API key。
 
-配置 `HTTP_PROXY` 且本机存在 Codex OAuth token 后，ChatGPT 模型会动态加入 `/v1/models`；模型版本以运行时目录为准，不在客户端固定清单。
+本机存在 Codex/Pi OAuth token 后，ChatGPT Codex 模型会动态加入 `/v1/models`；代理是可选的，模型版本以运行时目录为准，不在客户端固定清单。
+
+可用凭证来源：先运行 `codex login`，或在 Pi 中执行 `/login openai-codex`。网关自动读取 `~/.codex/auth.json` 和 `~/.pi/agent/auth.json`，也可以用 `CHATGPT_AUTH_FILE` 指定路径。
+
+这些订阅模型通过原生 `/v1/responses` 流式接口调用，适合 Codex/Pi；模型列表以 `/v1/models` 返回结果为准。
 
 ### GitHub Copilot
 
@@ -216,7 +220,8 @@ litellm-gateway/
 | `ALI_API_KEY`（兼容 `ALIYUN_MAAS_API_KEY` / `DASHSCOPE_API_KEY`） | 否 | 阿里 MaaS (qwen3.8-max-preview) API key |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
-| `HTTP_PROXY` | 否 | HTTP 代理地址（如 `http://127.0.0.1:7890`，启用 ChatGPT Codex） |
+| `HTTP_PROXY` | 否 | ChatGPT Codex 的可选 HTTP 代理地址（如 `http://127.0.0.1:7890`） |
+| `CHATGPT_AUTH_FILE` | 否 | ChatGPT/Pi OAuth `auth.json` 路径；默认自动查找两个标准路径 |
 | `ADMIN_TOKEN` | 否 | Dashboard/Admin API 独立 token；未设置时回退到主 token |
 | `PORT` | 否 | 监听端口（默认 4001） |
 | `ARCHIVE_ENABLED` | 否 | 对话归档总开关（默认 false）；启用后供知识库增量导出 |

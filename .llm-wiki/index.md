@@ -15,7 +15,7 @@
 - [[mimo-provider]] — Xiaomi MiMo (fallback 1) (updated 2026-06-21)
 - [[longcat-provider]] — Meituan LongCat (fallback 2, opus only) (updated 2026-06-21)
 - [[openrouter-provider]] — ~~OpenRouter~~ **REMOVED** 2026-06-21
-- [[deepv-provider]] — DeepV Server (internal aggregation) (added 2026-06-26)
+- [[deepv-provider]] — DeepV Server (EasyCode/DeepVCode DeepSeek, 2 models) (updated 2026-08-24)
 - [[chatgpt-codex-provider]] — ChatGPT OAuth (proxy required)
 - [[server-deployment]] — Production server (8.141.97.21:4001)
 

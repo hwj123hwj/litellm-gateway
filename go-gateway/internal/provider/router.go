@@ -218,8 +218,15 @@ func (r *Router) RouteForRequest(modelName string, req *Request) ([]Provider, er
 	required := req.RequiredCapabilities()
 	r.mu.RLock()
 	override, hasOverride := r.modelOverrides[modelName]
+	modelInfo, hasModelInfo := r.models[modelName]
 	r.mu.RUnlock()
 	if hasOverride && !capabilitiesSupportRequired(override.capabilities, required) {
+		return nil, &UnsupportedCapabilityError{Model: modelName, Required: required}
+	}
+	// RegisterChain creates a compatibility-only "router" entry when a model
+	// has no explicit metadata. Keep that legacy path permissive; only an
+	// explicit RegisterModel entry should enforce per-model capabilities.
+	if !hasOverride && hasModelInfo && modelInfo.Provider != "router" && !capabilitiesSupportRequired(modelInfo.Capabilities, required) {
 		return nil, &UnsupportedCapabilityError{Model: modelName, Required: required}
 	}
 	filtered := make([]Provider, 0, len(providers))
