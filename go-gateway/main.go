@@ -105,7 +105,7 @@ func main() {
 		setupDefaultProviders(router, cfg, logger)
 	}
 
-	// ChatGPT Codex（使用 OAuth token，需要代理）
+	// ChatGPT Codex（使用 ChatGPT Plus/Pro OAuth token；代理可选）
 	proxyURL := cfg.HTTPProxy
 	if proxyURL == "" {
 		proxyURL = os.Getenv("HTTPS_PROXY")
@@ -113,15 +113,18 @@ func main() {
 	if proxyURL == "" {
 		proxyURL = os.Getenv("https_proxy")
 	}
-	if proxyURL != "" {
-		setupChatGPTProvider(router, proxyURL, logger)
-	} else {
-		logger.Printf("No HTTP_PROXY set, ChatGPT Codex provider disabled")
+	if !hasProvider(router.ListProviders(), "chatgpt") {
+		setupChatGPTProvider(router, proxyURL, cfg.ChatGPTAuthFile, logger)
 	}
 
 	// GitHub Copilot
 	if cfg.CopilotToken != "" {
 		setupCopilotProviders(router, cfg, logger)
+	}
+
+	// DeepV Server（EasyCode/DeepVCode 聚合服务，读取本地 JWT 登录态）
+	if cfg.DeepVEnabled {
+		setupDeepVProviders(router, cfg, logger)
 	}
 
 	// 创建 Gin 引擎
@@ -374,6 +377,43 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 	}
 }
 
+// setupDeepVProviders 设置 DeepV Server 提供商（EasyCode/DeepVCode 的聚合后端）。
+// 模型名与 dvcode 保持一致：deepseek-v4-flash 与 deepseek-v4-flash-vision-exp。
+func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
+	workDir := cfg.DeepVWorkDir
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
+
+	router.RegisterProvider("deepv-deepseek-flash", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-deepseek-flash",
+		URL:  deepvURL,
+	}, workDir, "deepseek-v4-flash"))
+	router.RegisterProvider("deepv-deepseek-flash-vision", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-deepseek-flash-vision",
+		URL:  deepvURL,
+	}, workDir, "deepseek-v4-flash-vision-exp"))
+
+	router.RegisterChain("deepseek-v4-flash", []string{"deepv-deepseek-flash"})
+	router.RegisterChain("deepseek-v4-flash-vision-exp", []string{"deepv-deepseek-flash-vision"})
+
+	router.RegisterModel(provider.ModelInfo{
+		ID:              "deepseek-v4-flash",
+		Provider:        "deepv-deepseek-flash",
+		Capabilities:    []string{"text", "tool_calling", "streaming", "reasoning"},
+		InputModalities: []string{"text"},
+	})
+	router.RegisterModel(provider.ModelInfo{
+		ID:              "deepseek-v4-flash-vision-exp",
+		Provider:        "deepv-deepseek-flash-vision",
+		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
+		InputModalities: []string{"text", "image"},
+	})
+
+	logger.Printf("DeepV Server enabled, workdir=%s", workDir)
+}
+
 // setupCopilotProviders 设置 GitHub Copilot 提供商
 func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
 	// 可选：刷新 token
@@ -404,20 +444,42 @@ func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *
 	logger.Printf("GitHub Copilot enabled")
 }
 
-// setupChatGPTProvider 设置 ChatGPT Codex 提供商（使用 OAuth token 走代理）
-func setupChatGPTProvider(router *provider.Router, proxyURL string, logger *log.Logger) {
-	chatgptProvider := provider.NewChatGPTProvider(proxyURL)
+// setupChatGPTProvider 设置 ChatGPT Codex 提供商（使用 ChatGPT Plus/Pro OAuth token）。
+func setupChatGPTProvider(router *provider.Router, proxyURL, authPath string, logger *log.Logger) {
+	chatgptProvider := provider.NewChatGPTProviderWithAuthPath(proxyURL, authPath)
+	if !chatgptProvider.IsHealthy(context.Background()) {
+		logger.Printf("ChatGPT Codex provider disabled: no usable OAuth credential (run codex login or Pi /login openai-codex)")
+		return
+	}
 	router.RegisterProvider("chatgpt", chatgptProvider)
 
-	// GPT 模型别名
-	router.RegisterChain("gpt-5.5", []string{"chatgpt"})
-	router.RegisterChain("gpt-5.5-pro", []string{"chatgpt"})
-	router.RegisterChain("gpt-5.4-mini", []string{"chatgpt"})
-	router.RegisterChain("gpt-5.4", []string{"chatgpt"})
-	router.RegisterChain("gpt-5", []string{"chatgpt"})
-	router.RegisterChain("o4-mini", []string{"chatgpt"})
+	for _, model := range provider.ChatGPTModelCatalog() {
+		router.RegisterChain(model.ID, []string{"chatgpt"})
+		router.RegisterModel(provider.ModelInfo{
+			ID:              model.ID,
+			Provider:        "chatgpt",
+			Protocol:        "responses",
+			Capabilities:    model.Capabilities,
+			InputModalities: model.InputModalities,
+			MaxInputTokens:  model.MaxInputTokens,
+			MaxOutputTokens: model.MaxOutputTokens,
+		})
+	}
 
-	logger.Printf("ChatGPT Codex provider enabled (proxy: %s)", proxyURL)
+	connection := "direct"
+	if proxyURL != "" {
+		connection = "proxy"
+	}
+	logger.Printf("ChatGPT Codex provider enabled (auth: %s, connection: %s)", chatgptProvider.AuthPath(), connection)
+}
+
+func hasProvider(names []string, wanted string) bool {
+	for _, name := range names {
+		if name == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // startCleanupTask 启动后台清理任务

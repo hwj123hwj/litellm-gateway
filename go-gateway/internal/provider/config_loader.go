@@ -54,6 +54,7 @@ func NewProviderRegistry() *ProviderRegistry {
 	// 注册默认的提供商工厂
 	r.Register("openai", NewOpenAIProviderFromConfig)
 	r.Register("anthropic", NewAnthropicProviderFromConfig)
+	r.Register("chatgpt", NewChatGPTProviderFromConfig)
 
 	return r
 }
@@ -122,6 +123,24 @@ func NewAnthropicProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 	}), nil
 }
 
+// NewChatGPTProviderFromConfig creates the subscription-backed provider. It
+// intentionally does not use api_key_env: credentials come from Codex CLI or
+// Pi's OAuth auth.json instead of an API key.
+func NewChatGPTProviderFromConfig(_ *ProviderConfig) (Provider, error) {
+	proxyURL := os.Getenv("HTTP_PROXY")
+	if proxyURL == "" {
+		proxyURL = os.Getenv("HTTPS_PROXY")
+	}
+	if proxyURL == "" {
+		proxyURL = os.Getenv("https_proxy")
+	}
+	chatgpt := NewChatGPTProviderWithAuthPath(proxyURL, os.Getenv("CHATGPT_AUTH_FILE"))
+	if !chatgpt.IsHealthy(context.Background()) {
+		return nil, fmt.Errorf("ChatGPT OAuth credential is unavailable")
+	}
+	return chatgpt, nil
+}
+
 func providerAPIKeyFromEnv(envKey string) string {
 	keys := []string{envKey}
 	if envKey == "ALI_API_KEY" {
@@ -151,6 +170,42 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 		baseProvider, err := registry.Create(&pc)
 		if err != nil {
 			logger.Printf("Warning: failed to create provider %s: %v", pc.Name, err)
+			continue
+		}
+
+		// ChatGPT Codex is a native Responses passthrough provider. Register the
+		// shared provider directly so the marker interface is preserved and the
+		// model catalog remains authoritative in providers.yaml.
+		if pc.Type == "chatgpt" {
+			router.RegisterProvider(pc.Name, baseProvider)
+			for _, mc := range pc.Models {
+				capabilities := normalizeModelCapabilities(mc.Capabilities)
+				protocol := mc.Protocol
+				if protocol == "" {
+					protocol = "responses"
+				}
+				registerModel := func(modelName string) {
+					router.RegisterChain(modelName, []string{pc.Name})
+					router.RegisterModel(ModelInfo{
+						ID:              modelName,
+						Provider:        pc.Name,
+						Protocol:        protocol,
+						Capabilities:    capabilities,
+						InputModalities: modelInputModalities(capabilities, mc.InputModalities),
+						MaxInputTokens:  mc.MaxInputTokens,
+						MaxOutputTokens: mc.MaxOutputTokens,
+					})
+					modelToProvider[modelName] = pc.Name
+				}
+				if len(mc.Aliases) > 0 {
+					for _, alias := range mc.Aliases {
+						registerModel(alias)
+					}
+				} else {
+					registerModel(mc.ID)
+				}
+			}
+			logger.Printf("Registered provider: %s (type=%s, url=%s)", pc.Name, pc.Type, pc.URL)
 			continue
 		}
 
