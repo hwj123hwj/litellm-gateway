@@ -12,7 +12,7 @@ tags:
 
 ## 概述
 
-LiteLLM Gateway 部署在 8.141.97.21:4001 服务器上，通过 GitHub Actions CI/CD 自动部署。
+LiteLLM Gateway 部署在 8.141.97.21:4001 服务器上，部署由用户手动执行（2026-09-10 起取消 GitHub Actions 自动部署）。
 
 ## 服务器信息
 
@@ -20,32 +20,11 @@ LiteLLM Gateway 部署在 8.141.97.21:4001 服务器上，通过 GitHub Actions 
 - **服务：** go-gateway (systemd service)
 - **部署目录：** /opt/go-gateway
 
-## CI/CD 配置
+## GitHub Actions
 
-### GitHub Actions
-
-文件：`.github/workflows/deploy.yml`
-
-**触发条件：**
-- Push to main branch
-- Manual workflow_dispatch
-
-**部署目标：**
-1. 远程服务器（8.141.97.21）— 通过 SSH 部署
-2. Mini PC（self-hosted runner）— 本地部署
-
-### Secrets 配置
-
-| Secret | 说明 |
-|--------|------|
-| `DEPLOY_HOST` | 部署主机地址 |
-| `DEPLOY_USER` | 部署用户 |
-| `SSH_PRIVATE_KEY` | SSH 私钥 |
-| `LITELLM_MASTER_KEY` | 主密钥 |
-| `GLM_API_KEY` | GLM API Key |
-| `MIMO_API_KEY` | MiMo API Key |
-| `LONGCAT_API_KEY` | LongCat API Key |
-| `EASYCLAW_API_KEY` | EasyClaw API Key |
+- `.github/workflows/ci.yml`：在 main 推送和 Pull Request 时执行构建校验与测试。
+- `.github/workflows/release.yml`：构建并发布版本下载产物。
+- 已移除服务器和 Mini PC 自动部署工作流；后续更新需要手动部署。
 
 ## CORS 配置
 

@@ -89,7 +89,7 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 ### 服务器部署
 
-通过 GitHub Actions 自动部署，推送到 `main` 分支即可触发。
+部署由用户手动执行。推送到 `main` 或提交 Pull Request 仅运行 CI 检查；版本标签继续触发 Release 构建和发布，不会自动部署到服务器或 Mini PC。
 
 ## 对外接口
 
