@@ -125,8 +125,6 @@ curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/provi
 curl -H "Authorization: Bearer <MASTER_KEY>" http://8.141.97.21:4001/admin/logs
 ```
 
-## Android APK 配置
+## Web Dashboard 配置
 
-在 Android 应用首次启动时配置：
-- **后端地址：** `http://8.141.97.21:4001`
-- **API Key：** LITELLM_MASTER_KEY 的值
+通过浏览器访问 Gateway 的 Dashboard，使用 LITELLM_MASTER_KEY 或 ADMIN_TOKEN 登录。手机 App 已移除。

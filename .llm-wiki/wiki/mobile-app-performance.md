@@ -8,6 +8,8 @@ tags:
   - best-practices
 ---
 
+> 历史记录：2026-09-10 已移除手机 App 及 APK 工作流，下文仅保留过去的排障经验，不代表当前维护范围。
+
 # Mobile App (React Native) — Performance Optimization
 
 ## Summary

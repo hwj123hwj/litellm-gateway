@@ -77,7 +77,6 @@ web/                     # Browser admin dashboard (React + Vite)
 │   ├── store/           # Zustand state management
 │   └── styles/          # Responsive CSS
 └── vite.config.ts       # Dev proxy + build config
-mobile-app/              # Only Android client (React Native + Expo)
 ```
 
 ## Deployment
@@ -90,5 +89,5 @@ See [[server-deployment]] for details.
 - [[provider-config]] — How to add/modify providers
 - [[fallback-chains]] — Auto-fallback routing logic
 - [[model-aliases]] — Haiku/Sonnet/Opus tier naming
-- [[admin-dashboard]] — Browser admin dashboard (React + Vite) and Android client boundary
+- [[admin-dashboard]] — Browser admin dashboard (React + Vite)
 - [[source-codebase-2026-06-21]] — Latest state capture
