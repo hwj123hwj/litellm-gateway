@@ -244,3 +244,7 @@ litellm-gateway/
 ## 展示页
 
 访问 [hwj123hwj.github.io](https://hwj123hwj.github.io) 查看所有项目。
+
+### 管理端支持范围
+
+管理端通过 Web Dashboard 提供，支持桌面和手机浏览器访问。原生手机 App 已移除，不再构建或发布 APK。

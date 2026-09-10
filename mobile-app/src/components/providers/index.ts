@@ -1,1 +1,0 @@
-export { ProviderCard } from './ProviderCard'

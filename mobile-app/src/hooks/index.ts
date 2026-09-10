@@ -1,1 +1,0 @@
-export { usePolling } from './usePolling'

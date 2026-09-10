@@ -42,7 +42,7 @@ LLM Gateway 负责四件事：
 - 兼容 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages；
 - 支持文本、多模态、工具调用、推理和流式请求；
 - 支持模型能力路由、fallback、健康检查和熔断；
-- 提供 Web Dashboard 和唯一的 React Native Android App；
+- 提供 Web Dashboard 管理端；
 - 记录统一指标，并支持个人场景下的完整对话归档；
 - 将网关对话导出到 agent-lessons、hwj-wiki 等知识处理工具；
 - 保持单二进制、跨平台、易安装和易升级。
@@ -52,7 +52,7 @@ LLM Gateway 负责四件事：
 - 不训练或托管模型；
 - 不向上层应用暴露 Provider Key；
 - 不在网关内实现完整 Wiki、向量数据库或知识编译器；
-- 不维护桌面客户端、旧 Capacitor Android 客户端或静态 UI 原型；
+- 不维护手机 App、桌面客户端或静态 UI 原型；
 - 当前不做多租户、计费和复杂组织权限。
 
 ## 5. 典型使用场景
@@ -75,7 +75,7 @@ HwjCode、Claude Code、Codex CLI、Pi 和后续应用只配置网关地址与 K
 
 ### 场景 E：运行管理
 
-用户通过 Web 或 Android 查看 Provider、模型、路由、请求日志和健康状态，并执行启停、健康探测和熔断重置。
+用户通过 Web Dashboard 查看 Provider、模型、路由、请求日志和健康状态，并执行启停、健康探测和熔断重置。
 
 ## 6. 核心需求
 
@@ -177,8 +177,7 @@ Admin API 和管理端至少支持：
 
 正式管理端：
 
-- web/：React + Vite Web Dashboard；
-- mobile-app/：React Native + Expo Android App。
+- web/：React + Vite Web Dashboard。
 
 部署要求：
 
@@ -203,7 +202,6 @@ Admin API 和管理端至少支持：
 | 请求关联与 Provider 尝试记录 | ✅ 已实现 | `X-Request-ID`、最终 Provider、每次 fallback 尝试均进入轻量指标日志 |
 | Admin API | ✅ 已实现 | Provider、模型、路由、日志和统计 |
 | Web Dashboard | ✅ 已实现 | web/ |
-| Android App | ✅ 已实现 | mobile-app/ |
 | 跨平台安装和发布 | ✅ 已实现 | GitHub Actions |
 | 完整对话归档 | ⚠️ 未完成 | 当前没有独立归档模型 |
 | 流式终态归档 | ❌ 未实现 | 需要聚合 SSE |
@@ -223,7 +221,7 @@ Admin API 和管理端至少支持：
 ### 管理和安全
 
 - 未认证访问 Admin API 返回 401；
-- Web 与 Android 使用同一套 Admin API；
+- Web Dashboard 使用统一的 Admin API；
 - Provider Key 不出现在 API 响应、日志和发布产物中；
 - Provider 启停、路由调整、健康检查和熔断重置可生效；
 - 本地和服务器部署均能通过健康检查。
@@ -269,5 +267,5 @@ Admin API 和管理端至少支持：
 2. 数据平面、控制平面、指标日志和知识导出分层。
 3. 完整对话归档是个人部署的可控能力，不与轻量指标表混用。
 4. Provider 和模型以配置及 /v1/models 为准，客户端不硬编码 Provider。
-5. web/ 和 mobile-app/ 是正式管理端，不维护 desktop/、旧 Android 工程或静态 mockup。
+5. web/ 是唯一正式管理端，不维护手机 App、desktop/ 或静态 mockup。
 6. 先完成个人单机闭环，再考虑多用户、分布式和计费。

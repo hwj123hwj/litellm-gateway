@@ -6,9 +6,8 @@ LiteLLM Gateway 管理面板，提供实时监控、模型管理、提供商状�
 
 ## 客户端边界
 
-- 浏览器 Dashboard：`web/`（React + Vite），只负责 Web 访问
-- Android 客户端：`mobile-app/`（React Native + Expo），唯一 Android 发布入口
-- 旧的 Capacitor Android 工程已删除，Android 统一由 `mobile-app/` 构建和发布
+- 唯一管理端：`web/`（React + Vite），支持桌面和手机浏览器访问。
+- 原生手机 App 及 APK 发布工作流已移除。
 
 ## 技术栈
 
@@ -19,9 +18,6 @@ LiteLLM Gateway 管理面板，提供实时监控、模型管理、提供商状�
 | 状态管理 | Zustand | 5.0 |
 | 语言 | TypeScript | 5.6 |
 | CSS | 自定义 CSS（无 Tailwind） | — |
-
-Android 客户端的技术栈和维护说明见 [`mobile-app/`](../../mobile-app/) 及
-[`mobile-app-performance`](./mobile-app-performance.md)。
 
 ## 项目结构
 
@@ -69,9 +65,6 @@ cd web && npm install && npm run dev
 npm run build
 ```
 
-Android APK 由 `.github/workflows/android-apk.yml` 从 `mobile-app/` 构建和发布；不要在
-`web/` 下运行 Android 打包命令。
-
 ## 配置
 
 ### 后端地址
@@ -80,7 +73,6 @@ Android APK 由 `.github/workflows/android-apk.yml` 从 `mobile-app/` 构建和�
 
 - 开发模式：留空使用 Vite proxy（localhost:4001）
 - 浏览器访问远程网关：输入 Gateway 的实际地址（如 `http://192.168.1.100:4001`）
-- Android 模式：在 `mobile-app` 的设置页输入 Gateway 的实际地址
 
 ### API Key
 
@@ -107,5 +99,4 @@ Android APK 由 `.github/workflows/android-apk.yml` 从 `mobile-app/` 构建和�
 
 ## 维护边界
 
-网页 Dashboard 与 Android 客户端分开维护，但只有 `mobile-app/` 可以产生 Android 发布包。
-这样既保留浏览器端的 React + Vite 体验，也避免两套 Android 客户端产生安装包和升级混乱。
+仅维护 Web Dashboard，通过统一的 Admin API 管理网关。

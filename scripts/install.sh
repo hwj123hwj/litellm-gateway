@@ -62,7 +62,8 @@ NEEDS_DOWNLOAD=true
 if [ -f "${BINARY_PATH}" ]; then
     info "发现已安装的 gateway"
     read -rp "$(echo -e ${CYAN}ℹ${NC}  重新安装/升级? [Y/n] )" REPLY < /dev/tty 2>/dev/null || REPLY="y"
-    if [[ "${REPLY,,}" == "n" ]]; then
+    # macOS ships Bash 3.2, which does not support ${var,,}.
+    if [[ "$REPLY" == [nN] ]]; then
         ok "保留现有安装"
         NEEDS_DOWNLOAD=false
     fi

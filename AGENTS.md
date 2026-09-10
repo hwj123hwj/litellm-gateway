@@ -8,7 +8,7 @@ LLM Gateway 是个人 AI 基础设施，不只是 API 转发器。它为 HwjCode
 - OpenAI Chat Completions、Responses、Anthropic Messages 兼容；
 - 模型能力路由、多 Provider fallback、健康检查和熔断；
 - Provider、模型、路由、日志和运行状态管理；
-- Web Dashboard、React Native Android App 和跨平台部署；
+- Web Dashboard 和跨平台部署；
 - 可选的对话归档与知识库导出。
 
 需求范围以 [PRD.md](PRD.md) 为准，API 和部署细节以 [go-gateway/README.md](go-gateway/README.md) 与 [docs/](docs/) 为准。
@@ -19,12 +19,11 @@ LLM Gateway 是个人 AI 基础设施，不只是 API 转发器。它为 HwjCode
 |---|---|
 | go-gateway/ | Go 网关运行时、Provider、路由、认证、指标和 Admin API |
 | web/ | React + Vite Web Dashboard |
-| mobile-app/ | React Native + Expo Android 管理端 |
 | scripts/ | 安装、Codex 配置和回归测试脚本 |
 | docs/ | 详细设计、兼容性和部署文档 |
 | PRD.md | 产品需求和范围边界 |
 
-不要新增或恢复 desktop/、旧 Capacitor Android 工程或静态 mockup 作为正式客户端。
+正式管理端仅维护 web/；不再维护手机 App，不要新增或恢复手机端、desktop/ 或静态 mockup 作为正式客户端。
 
 ## 3. 配置和事实来源
 
@@ -86,10 +85,6 @@ npm run build
 ~~~
 
 Web Dashboard 的视觉和前端交互改动必须先阅读并遵循仓库内的 `.agents/skills/taste-skill/SKILL.md` 与 `.agents/skills/impeccable/SKILL.md`。优先复用现有产品信息架构，使用统一的图标、状态、键盘焦点和响应式规则；改动完成后运行 Impeccable 提供的检测脚本（若当前技能包包含检测器）。
-
-### Android
-
-遵循 [mobile-app/AGENTS.md](mobile-app/AGENTS.md) 和 Expo v56 文档。修改 Android 客户端后至少执行依赖安装、TypeScript 检查和对应的 Expo/Android 构建验证。
 
 ### 脚本和安装器
 
