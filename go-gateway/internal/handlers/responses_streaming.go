@@ -302,13 +302,26 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 					"type":         "response.output_item.added",
 					"output_index": outputIndex,
 					"item": map[string]any{
-						"type":    "function_call",
-						"id":      fmt.Sprintf("fc_%s", evt.Block.ID),
-						"call_id": evt.Block.ID,
-						"name":    evt.Block.Name,
-						"status":  "in_progress",
+						"type":      "function_call",
+						"id":        fmt.Sprintf("fc_%s", evt.Block.ID),
+						"call_id":   evt.Block.ID,
+						"name":      evt.Block.Name,
+						"arguments": "",
+						"status":    "in_progress",
 					},
 				})
+				// 部分上游（如 deepv）在 content_block_start 就携带完整 input，不再发 input_json_delta
+				if evt.Block.Input != nil {
+					if inputJSON, err := json.Marshal(evt.Block.Input); err == nil && string(inputJSON) != "{}" {
+						fullToolArgs.Write(inputJSON)
+						writeResponsesSSE(w, "response.function_call_arguments.delta", map[string]any{
+							"type":         "response.function_call_arguments.delta",
+							"item_id":      fmt.Sprintf("fc_%s", evt.Block.ID),
+							"output_index": outputIndex,
+							"delta":        string(inputJSON),
+						})
+					}
+				}
 			}
 
 		case "content_block_delta":
@@ -335,6 +348,7 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 				fullText.WriteString(evt.Delta.Text)
 				writeResponsesSSE(w, "response.output_text.delta", map[string]any{
 					"type":          "response.output_text.delta",
+					"item_id":       fmt.Sprintf("msg_%d", outputIndex),
 					"output_index":  outputIndex,
 					"content_index": 0,
 					"delta":         evt.Delta.Text,
@@ -353,6 +367,7 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 				fullToolArgs.WriteString(evt.Delta.PartialJSON)
 				writeResponsesSSE(w, "response.function_call_arguments.delta", map[string]any{
 					"type":         "response.function_call_arguments.delta",
+					"item_id":      fmt.Sprintf("fc_%s", toolCallID),
 					"output_index": outputIndex,
 					"delta":        evt.Delta.PartialJSON,
 				})
