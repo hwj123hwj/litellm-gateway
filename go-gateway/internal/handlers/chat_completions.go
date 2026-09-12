@@ -728,6 +728,16 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 				},
 			}
 		}
+		// 部分上游（如 deepv）在 content_block_start 就携带完整 input，不再发 input_json_delta
+		fullArgs := ""
+		if evt.Block.Input != nil {
+			if inputJSON, err := json.Marshal(evt.Block.Input); err == nil && string(inputJSON) != "{}" {
+				fullArgs = string(inputJSON)
+				if pendingToolCalls != nil {
+					pendingToolCalls[evt.Index].Function.Arguments = fullArgs
+				}
+			}
+		}
 		return &openAIStreamChunkResponse{
 			ID:      currentID,
 			Object:  "chat.completion.chunk",
@@ -740,7 +750,8 @@ func anthropicEventToOpenAIChunk(eventType, payload string, created int64, curre
 					ID:    evt.Block.ID,
 					Type:  "function",
 					Function: openAIChatToolFunction{
-						Name: evt.Block.Name,
+						Name:      evt.Block.Name,
+						Arguments: fullArgs,
 					},
 				}}},
 			}},
