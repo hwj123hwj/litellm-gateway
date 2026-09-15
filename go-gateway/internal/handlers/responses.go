@@ -77,14 +77,161 @@ type inputItem struct {
 	Role    string          `json:"role,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
 	// function_call 字段
-	CallID    string `json:"call_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	// function_call_output 字段
-	Output string `json:"output,omitempty"`
+	CallID    string         `json:"call_id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Arguments flexJSONString `json:"arguments,omitempty"`
+	// function_call_output 字段。部分客户端（zcode）的工具结果带图时会把
+	// output 发成块数组而非字符串，必须兼容，否则整个请求解析失败。
+	Output flexOutput `json:"output,omitempty"`
 	// custom_tool_call 字段
-	ID    string `json:"id,omitempty"`
-	Input string `json:"input,omitempty"` // custom tool 的 input 是字符串
+	ID    string         `json:"id,omitempty"`
+	Input flexJSONString `json:"input,omitempty"` // custom tool 的 input（字符串或结构化）
+
+	// reasoning item / 思考模式字段。思考模式下带工具调用的历史轮次必须原样
+	// 回传思维链，否则上游（DeepV/easyrouterio）直接拒绝整个请求。
+	Summary []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"summary,omitempty"`
+	ReasoningText    string `json:"reasoning_text,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+}
+
+// flexJSONString 接受字符串或结构化 JSON（对象/数组/数字等）。部分客户端
+// 会把 arguments/input 发成对象，直接用 string 反序列化会让整个 input
+// 数组解析失败；结构化内容重新序列化为紧凑 JSON 字符串。
+type flexJSONString string
+
+func (f *flexJSONString) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*f = flexJSONString(s)
+		return nil
+	}
+	if string(b) == "null" {
+		*f = ""
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	compact, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	*f = flexJSONString(compact)
+	return nil
+}
+
+// flexOutput 兼容 function_call_output.output 的字符串与结构化形态。
+// zcode 等客户端的工具结果带图时是块数组（output_text / output_image 等），
+// 文本块合并为字符串，图片块保留为 ContentBlock 供多模态 provider 转发。
+type flexOutput struct {
+	Text   string
+	Blocks []provider.ContentBlock
+}
+
+func (f *flexOutput) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		f.Text = s
+		return nil
+	}
+	if string(b) == "null" {
+		return nil
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(b, &parts); err == nil {
+		f.appendBlocks(parts)
+		return nil
+	}
+	// 对象形态：优先取 content 块数组，其次 text 字段。
+	var obj struct {
+		Text    string          `json:"text"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(b, &obj); err == nil {
+		f.Text = obj.Text
+		if len(obj.Content) > 0 {
+			if err := json.Unmarshal(obj.Content, &parts); err == nil {
+				f.appendBlocks(parts)
+			} else if err := json.Unmarshal(obj.Content, &s); err == nil {
+				f.appendText(s)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("unsupported function_call_output.output format")
+}
+
+func (f *flexOutput) appendText(t string) {
+	if t == "" {
+		return
+	}
+	if f.Text != "" {
+		f.Text += "\n"
+	}
+	f.Text += t
+}
+
+func (f *flexOutput) appendBlocks(parts []json.RawMessage) {
+	for _, part := range parts {
+		var meta struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(part, &meta); err != nil {
+			continue
+		}
+		switch meta.Type {
+		case "output_text", "input_text", "text":
+			f.appendText(meta.Text)
+		case "output_image", "input_image", "image_url", "image":
+			if blk := imageBlockFromPart(part); blk != nil {
+				f.Blocks = append(f.Blocks, *blk)
+			}
+		}
+	}
+}
+
+// imageBlockFromPart 把图片块归一化为 provider.ContentBlock。image_url 在
+// Responses 协议里是纯字符串（data: URL 或链接），在 chat.completions 协议
+// 里是 {"url": ...} 对象，统一成 ImageURL 对象供 convertImagePart 消费。
+func imageBlockFromPart(part json.RawMessage) *provider.ContentBlock {
+	var probe struct {
+		ImageURL json.RawMessage `json:"image_url"`
+		Source   json.RawMessage `json:"source"`
+		URL      string          `json:"url"`
+	}
+	if err := json.Unmarshal(part, &probe); err != nil {
+		return nil
+	}
+	blk := &provider.ContentBlock{Type: "image_url", Raw: append([]byte(nil), part...)}
+	switch {
+	case len(probe.ImageURL) > 0:
+		var u string
+		if json.Unmarshal(probe.ImageURL, &u) == nil && u != "" {
+			blk.ImageURL = json.RawMessage(`{"url":` + quoteJSONString(u) + `}`)
+		} else {
+			blk.ImageURL = probe.ImageURL
+		}
+	case len(probe.Source) > 0:
+		blk.Source = probe.Source
+	case probe.URL != "":
+		blk.ImageURL = json.RawMessage(`{"url":` + quoteJSONString(probe.URL) + `}`)
+	default:
+		return nil
+	}
+	return blk
+}
+
+func quoteJSONString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
 }
 
 // responsesTool 表示 Responses API 中的工具定义
@@ -257,50 +404,76 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 				// 可能是简单 message（有 role 无 type）
 				if item.Role != "" {
 					content := parseContentField(item.Content)
+					role := normalizeRole(item.Role)
+					if r := firstNonEmpty(item.ReasoningContent, item.ReasoningText); r != "" && role == "assistant" {
+						content = prependThinkingBlock(content, r)
+					}
 					messages = append(messages, provider.Message{
-						Role:    normalizeRole(item.Role),
+						Role:    role,
 						Content: content,
 					})
 				}
 			case item.Type == "message":
 				content := parseContentField(item.Content)
+				role := normalizeRole(item.Role)
+				if r := firstNonEmpty(item.ReasoningContent, item.ReasoningText); r != "" && role == "assistant" {
+					content = prependThinkingBlock(content, r)
+				}
 				messages = append(messages, provider.Message{
-					Role:    normalizeRole(item.Role),
+					Role:    role,
 					Content: content,
 				})
 			case item.Type == "function_call":
 				// function_call → assistant message with tool_use
 				var inputJSON json.RawMessage
 				if item.Arguments != "" {
-					inputJSON = json.RawMessage(item.Arguments)
+					inputJSON = json.RawMessage(string(item.Arguments))
 				} else {
 					inputJSON = json.RawMessage(`{}`)
 				}
+				blocks := make([]provider.ContentBlock, 0, 2)
+				if r := firstNonEmpty(item.ReasoningContent, item.ReasoningText); r != "" {
+					blocks = append(blocks, provider.ContentBlock{Type: "thinking", Thinking: r})
+				}
+				blocks = append(blocks, provider.ContentBlock{
+					Type:  "tool_use",
+					ID:    item.CallID,
+					Name:  item.Name,
+					Input: inputJSON,
+				})
 				messages = append(messages, provider.Message{
-					Role: "assistant",
-					Content: provider.NewBlocksContent([]provider.ContentBlock{
-						{
-							Type:  "tool_use",
-							ID:    item.CallID,
-							Name:  item.Name,
-							Input: inputJSON,
-						},
-					}),
+					Role:    "assistant",
+					Content: provider.NewBlocksContent(blocks),
 				})
 			case item.Type == "function_call_output":
-				// function_call_output → user message with tool_result
+				// function_call_output → user message with tool_result。
+				// 结构化 output 里的文本并入 ContentStr，图片块挂在
+				// ContentBlocks 上，由支持视觉的 provider 转成 inlineData。
+				toolResult := provider.ContentBlock{
+					Type:       "tool_result",
+					ToolUseID:  item.CallID,
+					ContentStr: item.Output.Text,
+				}
+				if len(item.Output.Blocks) > 0 {
+					toolResult.ContentBlocks = item.Output.Blocks
+				}
 				messages = append(messages, provider.Message{
 					Role: "user",
 					Content: provider.NewBlocksContent([]provider.ContentBlock{
-						{
-							Type:       "tool_result",
-							ToolUseID:  item.CallID,
-							ContentStr: item.Output,
-						},
+						toolResult,
 					}),
 				})
+			case item.Type == "reasoning":
+				if r := reasoningTextFromItem(item); r != "" {
+					messages = append(messages, provider.Message{
+						Role: "assistant",
+						Content: provider.NewBlocksContent([]provider.ContentBlock{
+							{Type: "thinking", Thinking: r},
+						}),
+					})
+				}
 			default:
-				// 其他类型（reasoning 等）暂跳过
+				// 其他类型暂跳过
 			}
 		}
 	}
@@ -383,7 +556,13 @@ func parseContentField(content json.RawMessage) provider.MessageContent {
 			case "input_text", "output_text", "text":
 				blocks = append(blocks, provider.ContentBlock{Type: "text", Text: meta.Text})
 			case "input_image", "image_url":
-				blocks = append(blocks, provider.ContentBlock{Type: "image_url", Raw: append([]byte(nil), part...)})
+				// 归一化 image_url 的字符串/对象两种形态并填充 ImageURL/Source，
+				// 否则只带 Raw 的块会被 DeepV 的 convertImagePart 静默丢弃。
+				if blk := imageBlockFromPart(part); blk != nil {
+					blocks = append(blocks, *blk)
+				} else {
+					blocks = append(blocks, provider.ContentBlock{Type: "image_url", Raw: append([]byte(nil), part...)})
+				}
 			case "input_file", "file", "file_url":
 				blocks = append(blocks, provider.ContentBlock{Type: "file", Raw: append([]byte(nil), part...)})
 			case "input_audio", "audio":
@@ -417,6 +596,61 @@ func normalizeRole(role string) string {
 }
 
 // mergeAssistantMessages 合并连续的 assistant 消息（多个 function_call 场景）
+// prependThinkingBlock 把思维链作为第一个 content block 前置，保证
+// reasoning 排在同一轮其他 block 之前（上游按顺序校验）。
+func prependThinkingBlock(content provider.MessageContent, reasoning string) provider.MessageContent {
+	blocks := make([]provider.ContentBlock, 0, len(content.Blocks())+1)
+	blocks = append(blocks, provider.ContentBlock{Type: "thinking", Thinking: reasoning})
+	blocks = append(blocks, content.Blocks()...)
+	return provider.NewBlocksContent(blocks)
+}
+
+// reasoningTextFromItem 从 Responses reasoning item 中取思维链文本。
+// 字段名各家不一：标准是 summary[].text，DeepSeek 用 reasoning_text，
+// 部分兼容实现直接把文本放在 content 里。
+func reasoningTextFromItem(item inputItem) string {
+	var parts []string
+	for _, s := range item.Summary {
+		if s.Text != "" {
+			parts = append(parts, s.Text)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	if item.ReasoningText != "" {
+		return item.ReasoningText
+	}
+	if item.ReasoningContent != "" {
+		return item.ReasoningContent
+	}
+	if len(item.Content) > 0 {
+		var asString string
+		if err := json.Unmarshal(item.Content, &asString); err == nil && asString != "" {
+			return asString
+		}
+		var blocks []provider.ContentBlock
+		if err := json.Unmarshal(item.Content, &blocks); err == nil {
+			for _, b := range blocks {
+				if (b.Type == "reasoning_text" || b.Type == "text" || b.Type == "summary_text") && b.Text != "" {
+					parts = append(parts, b.Text)
+				}
+			}
+			return strings.Join(parts, "\n")
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func mergeAssistantMessages(msgs []provider.Message) []provider.Message {
 	if len(msgs) <= 1 {
 		return msgs

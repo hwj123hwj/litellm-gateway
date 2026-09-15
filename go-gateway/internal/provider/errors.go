@@ -154,19 +154,28 @@ func extractProviderErrorMessage(body []byte) string {
 		Message string          `json:"message"`
 	}
 	if err := json.Unmarshal(body, &envelope); err == nil {
+		var detail string
 		if len(envelope.Error) > 0 && string(envelope.Error) != "null" {
 			var nested struct {
 				Message string `json:"message"`
 			}
 			if err := json.Unmarshal(envelope.Error, &nested); err == nil && nested.Message != "" {
-				return truncateErrorMessage(nested.Message)
-			}
-			var nestedText string
-			if err := json.Unmarshal(envelope.Error, &nestedText); err == nil && nestedText != "" {
-				return truncateErrorMessage(nestedText)
+				detail = nested.Message
+			} else {
+				var nestedText string
+				if err := json.Unmarshal(envelope.Error, &nestedText); err == nil && nestedText != "" {
+					detail = nestedText
+				}
 			}
 		}
-		if envelope.Message != "" {
+		// 有的上游把通用错误码放在 error、真实原因放在顶层 message（DeepV 就是
+		// 这样）。只取其一会让 "Request Processing Failed" 吞掉具体原因。
+		switch {
+		case detail != "" && envelope.Message != "" && detail != envelope.Message:
+			return truncateErrorMessage(detail + ": " + envelope.Message)
+		case detail != "":
+			return truncateErrorMessage(detail)
+		case envelope.Message != "":
 			return truncateErrorMessage(envelope.Message)
 		}
 	}

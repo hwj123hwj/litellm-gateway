@@ -215,6 +215,7 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 	created := time.Now().Unix()
 	outputIndex := 0
 	textStarted := false
+	thinkingStarted := false
 	toolStarted := false
 	toolCallID := ""
 	toolCallName := ""
@@ -223,6 +224,8 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 
 	// 收集完整文本内容（用于 output_item.done）
 	var fullText strings.Builder
+	// 收集完整思维链（思考模式下客户端必须回传，否则下一轮上游拒绝）
+	var fullReasoning strings.Builder
 	// 收集完整 tool arguments
 	var fullToolArgs strings.Builder
 
@@ -277,6 +280,19 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 			}
 
 			switch evt.Block.Type {
+			case "thinking":
+				thinkingStarted = true
+				fullReasoning.Reset()
+				writeResponsesSSE(w, "response.output_item.added", map[string]any{
+					"type":         "response.output_item.added",
+					"output_index": outputIndex,
+					"item": map[string]any{
+						"type":    "reasoning",
+						"id":      fmt.Sprintf("rs_%d", outputIndex),
+						"status":  "in_progress",
+						"summary": []any{},
+					},
+				})
 			case "text":
 				textStarted = true
 				fullText.Reset()
@@ -354,6 +370,24 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 					"delta":         evt.Delta.Text,
 				})
 
+			case "thinking_delta":
+				var evt struct {
+					Delta struct {
+						Thinking string `json:"thinking"`
+					} `json:"delta"`
+				}
+				if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+					return nil
+				}
+				fullReasoning.WriteString(evt.Delta.Thinking)
+				writeResponsesSSE(w, "response.reasoning_summary_text.delta", map[string]any{
+					"type":          "response.reasoning_summary_text.delta",
+					"item_id":       fmt.Sprintf("rs_%d", outputIndex),
+					"output_index":  outputIndex,
+					"summary_index": 0,
+					"delta":         evt.Delta.Thinking,
+				})
+
 			case "input_json_delta":
 				var evt struct {
 					Index int `json:"index"`
@@ -374,7 +408,23 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 			}
 
 		case "content_block_stop":
-			if textStarted {
+			if thinkingStarted {
+				finalReasoning := fullReasoning.String()
+				writeResponsesSSE(w, "response.output_item.done", map[string]any{
+					"type":         "response.output_item.done",
+					"output_index": outputIndex,
+					"item": map[string]any{
+						"type":   "reasoning",
+						"id":     fmt.Sprintf("rs_%d", outputIndex),
+						"status": "completed",
+						"summary": []any{
+							map[string]any{"type": "summary_text", "text": finalReasoning},
+						},
+					},
+				})
+				thinkingStarted = false
+				outputIndex++
+			} else if textStarted {
 				finalText := fullText.String()
 				// output_item.done — 带完整内容
 				writeResponsesSSE(w, "response.output_item.done", map[string]any{

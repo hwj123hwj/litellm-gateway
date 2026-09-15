@@ -8,20 +8,10 @@ import (
 )
 
 func TestDeepVProviderCapabilities(t *testing.T) {
-	flash := NewDeepVProvider(&Config{Name: "deepv-deepseek-flash", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash")
-	for _, c := range []string{CapabilityText, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning} {
-		if !hasCapability(flash.Capabilities(), c) {
-			t.Errorf("flash missing capability %q", c)
-		}
-	}
-	if hasCapability(flash.Capabilities(), CapabilityVision) {
-		t.Error("flash should not declare vision")
-	}
-
-	vision := NewDeepVProvider(&Config{Name: "deepv-deepseek-flash-vision", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash-vision-exp")
+	p := NewDeepVProvider(&Config{Name: "deepv-deepseek-flash", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-flash")
 	for _, c := range []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning} {
-		if !hasCapability(vision.Capabilities(), c) {
-			t.Errorf("vision missing capability %q", c)
+		if !hasCapability(p.Capabilities(), c) {
+			t.Errorf("missing capability %q", c)
 		}
 	}
 }
@@ -36,10 +26,10 @@ func hasCapability(list []string, want string) bool {
 }
 
 func TestDeepVConvertRequest(t *testing.T) {
-	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash-vision-exp")
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 
 	raw := `{
-		"model": "deepseek-v4-flash-vision-exp",
+		"model": "deepseek-v4.1-flash",
 		"max_tokens": 1024,
 		"temperature": 0.7,
 		"system": [{"type":"text","text":"be brief"}],
@@ -69,7 +59,7 @@ func TestDeepVConvertRequest(t *testing.T) {
 		t.Fatalf("convertRequest: %v", err)
 	}
 
-	if out.Model != "deepseek-v4-flash-vision-exp" {
+	if out.Model != "deepseek-v4.1-flash" {
 		t.Errorf("model = %q", out.Model)
 	}
 	if out.SystemInstruction == nil || len(out.SystemInstruction.Parts) != 1 {
@@ -101,7 +91,11 @@ func TestDeepVConvertRequest(t *testing.T) {
 	}
 
 	model := out.Contents[1]
-	if model.Role != "model" || model.Parts[1].FunctionCall == nil {
+	// 缺思维链的工具调用轮会被注入占位 reasoning part，排在其他 part 之前。
+	if model.Role != "model" || model.Parts[0].Reasoning != placeholderReasoning {
+		t.Fatalf("placeholder reasoning not injected: %+v", model)
+	}
+	if model.Parts[2].FunctionCall == nil {
 		t.Fatalf("assistant tool_use not converted: %+v", model)
 	}
 
@@ -114,11 +108,57 @@ func TestDeepVConvertRequest(t *testing.T) {
 	}
 }
 
-func TestDeepVConvertImageURL(t *testing.T) {
-	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash-vision-exp")
+// TestDeepVToolCallTurnKeepsRealReasoning 验证：带真实思维链的工具调用轮
+// 原样回传，不被占位文本覆盖；纯文本轮不注入占位。
+func TestDeepVToolCallTurnKeepsRealReasoning(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 
 	raw := `{
-		"model": "deepseek-v4-flash-vision-exp",
+		"model": "deepseek-v4.1-flash",
+		"messages": [
+			{"role":"user","content":[{"type":"text","text":"go"}]},
+			{"role":"assistant","content":[
+				{"type":"text","text":"plain answer, no tools"}
+			]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"real chain"},
+				{"type":"tool_use","id":"tu_1","name":"lookup","input":{"q":"x"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"tu_1","content":"found"}
+			]}
+		]
+	}`
+
+	var req Request
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	out, err := p.convertRequest(&req)
+	if err != nil {
+		t.Fatalf("convertRequest: %v", err)
+	}
+	if len(out.Contents) != 4 {
+		t.Fatalf("contents len = %d, want 4", len(out.Contents))
+	}
+
+	plain := out.Contents[1]
+	if plain.Parts[0].Reasoning != "" || plain.Parts[0].Text != "plain answer, no tools" {
+		t.Errorf("plain text turn should not get placeholder: %+v", plain.Parts)
+	}
+
+	withTools := out.Contents[2]
+	if withTools.Parts[0].Reasoning != "real chain" {
+		t.Errorf("real reasoning should be preserved, got %q", withTools.Parts[0].Reasoning)
+	}
+}
+
+func TestDeepVConvertImageURL(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
+
+	raw := `{
+		"model": "deepseek-v4.1-flash",
 		"messages": [{"role":"user","content":[
 			{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,QUJD"}},
 			{"type":"image_url","image_url":{"url":"https://cdn.example.com/pic.png"}}
@@ -145,7 +185,7 @@ func TestDeepVConvertImageURL(t *testing.T) {
 }
 
 func TestDeepVParseResponse(t *testing.T) {
-	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash")
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 
 	body := `{
 		"candidates": [{
@@ -159,7 +199,7 @@ func TestDeepVParseResponse(t *testing.T) {
 		"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 7}
 	}`
 
-	resp, err := p.parseResponse([]byte(body), "deepseek-v4-flash")
+	resp, err := p.parseResponse([]byte(body), "deepseek-v4.1-flash")
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -184,9 +224,9 @@ func TestDeepVParseResponse(t *testing.T) {
 }
 
 func TestDeepVParseResponseImage(t *testing.T) {
-	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash-vision-exp")
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 	body := `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"QUJD"}}]},"finishReason":"STOP"}]}`
-	resp, err := p.parseResponse([]byte(body), "deepseek-v4-flash-vision-exp")
+	resp, err := p.parseResponse([]byte(body), "deepseek-v4.1-flash")
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -208,6 +248,58 @@ func TestDeepVParseResponseImage(t *testing.T) {
 
 func TestDeepVIsHealthyWithoutToken(t *testing.T) {
 	// 默认 HOME 下有文件时可能误判；这里只验证不 panic 且返回 bool。
-	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4-flash")
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 	_ = p.IsHealthy(context.Background())
+}
+
+// TestDeepVToolResultImageForwarding 验证工具结果里的图片块会转成
+// inlineData part 随 functionResponse 一起上送，供多模态模型读图。
+func TestDeepVToolResultImageForwarding(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
+
+	raw := `{
+		"model": "deepseek-v4.1-flash",
+		"messages": [
+			{"role":"user","content":[{"type":"text","text":"read it"}]},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"need the file"},
+				{"type":"tool_use","id":"tu_1","name":"Read","input":{"path":"a.png"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"tu_1","content":[
+					{"type":"text","text":"png file"},
+					{"type":"image_url","image_url":{"url":"data:image/png;base64,QUJD"}}
+				]}
+			]}
+		]
+	}`
+
+	var req Request
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	out, err := p.convertRequest(&req)
+	if err != nil {
+		t.Fatalf("convertRequest: %v", err)
+	}
+
+	toolTurn := out.Contents[2]
+	if toolTurn.Role != "user" {
+		t.Fatalf("tool result turn role = %q", toolTurn.Role)
+	}
+	assistantTurn := out.Contents[1]
+	if assistantTurn.Parts[0].Reasoning != "need the file" {
+		t.Errorf("reasoning before tool_use missing: %+v", assistantTurn.Parts[0])
+	}
+	fr := toolTurn.Parts[0].FunctionResponse
+	if fr == nil || fr.Name != "Read" || fr.Response["result"] != "png file" {
+		t.Fatalf("functionResponse wrong: %+v", fr)
+	}
+	if len(toolTurn.Parts) < 2 || toolTurn.Parts[1].InlineData == nil {
+		t.Fatalf("tool result image not forwarded as inlineData: %+v", toolTurn.Parts)
+	}
+	if toolTurn.Parts[1].InlineData.MimeType != "image/png" || toolTurn.Parts[1].InlineData.Data != "QUJD" {
+		t.Errorf("inlineData = %+v", toolTurn.Parts[1].InlineData)
+	}
 }

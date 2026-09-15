@@ -55,12 +55,19 @@ type deepVContent struct {
 
 // deepVPart GenAI part 格式
 type deepVPart struct {
+	// Reasoning 是思考模式的思维链。上游（easyrouterio Responses API）要求
+	// 带工具调用的历史轮次把 reasoning 原样回传，缺失会让整个请求被拒。
+	Reasoning        string                 `json:"reasoning,omitempty"`
 	Text             string                 `json:"text,omitempty"`
 	InlineData       *deepVInlineData       `json:"inlineData,omitempty"`
 	FileData         *deepVFileData         `json:"fileData,omitempty"`
 	FunctionCall     *deepVFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *deepVFunctionResponse `json:"functionResponse,omitempty"`
 }
+
+// placeholderReasoning 补进"缺思维链的工具调用历史轮"的最小占位文本。
+// 实测非空短文本即可通过上游思考模式校验。
+const placeholderReasoning = "."
 
 type deepVInlineData struct {
 	MimeType string `json:"mimeType"`
@@ -111,6 +118,7 @@ type deepVResponse struct {
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
+				Reasoning    string             `json:"reasoning,omitempty"`
 				Text         string             `json:"text,omitempty"`
 				InlineData   *deepVInlineData   `json:"inlineData,omitempty"`
 				FunctionCall *deepVFunctionCall `json:"functionCall,omitempty"`
@@ -144,13 +152,11 @@ func (p *DeepVProvider) APIKey() string     { return p.config.APIKey }
 func (p *DeepVProvider) UseBearer() bool    { return p.config.UseBearer }
 func (p *DeepVProvider) BoundModel() string { return p.boundModel }
 
-// Capabilities declares model metadata so /v1/models and capability-aware
-// routing can tell text-only from vision-enabled DeepV models.
+// Capabilities declares model metadata for /v1/models and capability-aware
+// routing. The bound DeepV model is natively multimodal, so vision is always
+// advertised -- image requests must never land on a text-only view of it.
 func (p *DeepVProvider) Capabilities() []string {
-	if p.boundModel == "deepseek-v4-flash-vision-exp" {
-		return []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning}
-	}
-	return []string{CapabilityText, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning}
+	return []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning}
 }
 
 // ForwardRequest 转发请求到 DeepV Server（非流式）
@@ -210,15 +216,24 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 		}
 
 		content := deepVContent{Role: role}
+		var reasoningParts []deepVPart
+		hasFunctionCall := false
 
 		for _, block := range msg.Content.Blocks() {
 			switch block.Type {
+			case "thinking", "reasoning":
+				// 思考模式的历史轮次必须回传思维链，且只对 model 轮有意义。
+				if block.Thinking == "" || role != "model" {
+					break
+				}
+				reasoningParts = append(reasoningParts, deepVPart{Reasoning: block.Thinking})
 			case "text":
 				if block.Text == "" {
 					continue
 				}
 				content.Parts = append(content.Parts, deepVPart{Text: block.Text})
 			case "tool_use":
+				hasFunctionCall = true
 				toolUseIDToName[block.ID] = block.Name
 				var args map[string]interface{}
 				if len(block.Input) > 0 {
@@ -236,10 +251,18 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 					toolName = block.ToolUseID
 				}
 				resultStr := block.ContentStr
-				if resultStr == "" && len(block.ContentBlocks) > 0 {
+				var toolImageParts []deepVPart
+				if resultStr == "" || len(block.ContentBlocks) > 0 {
 					for _, cb := range block.ContentBlocks {
-						if cb.Type == "text" {
+						switch cb.Type {
+						case "text":
 							resultStr += cb.Text
+						case "image", "image_url", "input_image", "output_image":
+							// 工具结果带图（zcode Read 图片文件）时把图片随
+							// functionResponse 一起上送，多模态模型才能真正看到。
+							if part := p.convertImagePart(cb); part != nil {
+								toolImageParts = append(toolImageParts, *part)
+							}
 						}
 					}
 				}
@@ -250,11 +273,24 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 						Response: map[string]interface{}{"result": resultStr},
 					},
 				})
-			case "image", "image_url", "input_image":
+				content.Parts = append(content.Parts, toolImageParts...)
+			case "image", "image_url", "input_image", "output_image":
 				if part := p.convertImagePart(block); part != nil {
 					content.Parts = append(content.Parts, *part)
 				}
 			}
+		}
+
+		// 上游思考模式要求带工具调用的 model 轮必须带 reasoning part，缺失
+		// 会让整个请求被拒。部分客户端（如 zcode 走 Responses 协议回传历史）
+		// 不回传思维链，此时注入最小占位文本，上游校验的是存在性。
+		if role == "model" && hasFunctionCall && len(reasoningParts) == 0 {
+			reasoningParts = append(reasoningParts, deepVPart{Reasoning: placeholderReasoning})
+		}
+
+		// 上游要求 reasoning 排在同一轮其他 part 之前。
+		if len(reasoningParts) > 0 {
+			content.Parts = append(reasoningParts, content.Parts...)
 		}
 
 		// DeepV Server 要求每个 content 必须有 parts
@@ -406,6 +442,8 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 	for _, candidate := range genaiResp.Candidates {
 		for _, part := range candidate.Content.Parts {
 			switch {
+			case part.Reasoning != "":
+				result.Content = append(result.Content, ContentBlock{Type: "thinking", Thinking: part.Reasoning})
 			case part.Text != "":
 				result.Content = append(result.Content, ContentBlock{Type: "text", Text: part.Text})
 			case part.FunctionCall != nil:
@@ -617,14 +655,32 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 	})
 
 	blockIndex := -1
-	openTextBlock := false
+	openTextIndex := -1
+	openThinkingIndex := -1
 	stopReason := "end_turn"
 	var outputTokens int
 
+	openBlock := func(block map[string]interface{}) int {
+		blockIndex++
+		p.writeAnthropicEvent(writer, "content_block_start", map[string]interface{}{
+			"index":         blockIndex,
+			"content_block": block,
+		})
+		return blockIndex
+	}
+	closeBlock := func(index int) {
+		p.writeAnthropicEvent(writer, "content_block_stop", map[string]interface{}{"index": index})
+	}
 	flushTextBlock := func() {
-		if openTextBlock {
-			p.writeAnthropicEvent(writer, "content_block_stop", map[string]interface{}{"index": 0})
-			openTextBlock = false
+		if openTextIndex >= 0 {
+			closeBlock(openTextIndex)
+			openTextIndex = -1
+		}
+	}
+	flushThinkingBlock := func() {
+		if openThinkingIndex >= 0 {
+			closeBlock(openThinkingIndex)
+			openThinkingIndex = -1
 		}
 	}
 
@@ -654,53 +710,51 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 			}
 			for _, part := range candidate.Content.Parts {
 				switch {
-				case part.Text != "":
-					if !openTextBlock {
-						p.writeAnthropicEvent(writer, "content_block_start", map[string]interface{}{
-							"index":         0,
-							"content_block": map[string]interface{}{"type": "text", "text": ""},
-						})
-						openTextBlock = true
+				case part.Reasoning != "":
+					if openThinkingIndex < 0 {
+						openThinkingIndex = openBlock(map[string]interface{}{"type": "thinking", "thinking": ""})
 					}
 					p.writeAnthropicEvent(writer, "content_block_delta", map[string]interface{}{
-						"index": 0,
+						"index": openThinkingIndex,
+						"delta": map[string]interface{}{"type": "thinking_delta", "thinking": part.Reasoning},
+					})
+				case part.Text != "":
+					flushThinkingBlock()
+					if openTextIndex < 0 {
+						openTextIndex = openBlock(map[string]interface{}{"type": "text", "text": ""})
+					}
+					p.writeAnthropicEvent(writer, "content_block_delta", map[string]interface{}{
+						"index": openTextIndex,
 						"delta": map[string]interface{}{"type": "text_delta", "text": part.Text},
 					})
 				case part.FunctionCall != nil:
 					flushTextBlock()
-					blockIndex++
+					flushThinkingBlock()
 					inputJSON, _ := json.Marshal(part.FunctionCall.Args)
-					p.writeAnthropicEvent(writer, "content_block_start", map[string]interface{}{
-						"index": blockIndex,
-						"content_block": map[string]interface{}{
-							"type":  "tool_use",
-							"id":    part.FunctionCall.ID,
-							"name":  part.FunctionCall.Name,
-							"input": json.RawMessage(inputJSON),
-						},
-					})
-					p.writeAnthropicEvent(writer, "content_block_stop", map[string]interface{}{"index": blockIndex})
+					closeBlock(openBlock(map[string]interface{}{
+						"type":  "tool_use",
+						"id":    part.FunctionCall.ID,
+						"name":  part.FunctionCall.Name,
+						"input": json.RawMessage(inputJSON),
+					}))
 				case part.InlineData != nil:
 					flushTextBlock()
-					blockIndex++
+					flushThinkingBlock()
 					source, _ := json.Marshal(map[string]interface{}{
 						"type":       "base64",
 						"media_type": part.InlineData.MimeType,
 						"data":       part.InlineData.Data,
 					})
-					p.writeAnthropicEvent(writer, "content_block_start", map[string]interface{}{
-						"index": blockIndex,
-						"content_block": map[string]interface{}{
-							"type":   "image",
-							"source": json.RawMessage(source),
-						},
-					})
-					p.writeAnthropicEvent(writer, "content_block_stop", map[string]interface{}{"index": blockIndex})
+					closeBlock(openBlock(map[string]interface{}{
+						"type":   "image",
+						"source": json.RawMessage(source),
+					}))
 				}
 			}
 		}
 	}
 	flushTextBlock()
+	flushThinkingBlock()
 
 	p.writeAnthropicEvent(writer, "message_delta", map[string]interface{}{
 		"delta": map[string]interface{}{"stop_reason": stopReason, "stop_sequence": nil},
