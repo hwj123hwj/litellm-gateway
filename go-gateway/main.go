@@ -378,7 +378,8 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 }
 
 // setupDeepVProviders 设置 DeepV Server 提供商（EasyCode/DeepVCode 的聚合后端）。
-// 上游模型名与 dvcode 云端一致：deepseek-flash，即 DeepSeek-V4.1-Flash（原生多模态）。
+// 上游模型名与 dvcode 云端一致：deepseek-flash（DeepSeek-V4.1-Flash）与
+// glm-5.3-flash（GLM-5.3-Flash），两者都是原生多模态模型。
 func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
 	workDir := cfg.DeepVWorkDir
 	if workDir == "" {
@@ -390,12 +391,23 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 		Name: "deepv-deepseek-flash",
 		URL:  deepvURL,
 	}, workDir, "deepseek-flash"))
+	router.RegisterProvider("deepv-glm-flash", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-glm-flash",
+		URL:  deepvURL,
+	}, workDir, "glm-5.3-flash"))
 
 	router.RegisterChain("deepseek-v4.1-flash", []string{"deepv-deepseek-flash"})
+	router.RegisterChain("glm-5.3-flash", []string{"deepv-glm-flash"})
 
 	router.RegisterModel(provider.ModelInfo{
 		ID:              "deepseek-v4.1-flash",
 		Provider:        "deepv-deepseek-flash",
+		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
+		InputModalities: []string{"text", "image"},
+	})
+	router.RegisterModel(provider.ModelInfo{
+		ID:              "glm-5.3-flash",
+		Provider:        "deepv-glm-flash",
 		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
 		InputModalities: []string{"text", "image"},
 	})

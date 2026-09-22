@@ -197,6 +197,57 @@ func (p *DeepVProvider) ForwardRequest(ctx context.Context, req *Request) (*Resp
 	return p.parseResponse(respBody, req.Model)
 }
 
+// normalizeToolResultTurns 把"整轮只含 tool_result"的连续 user 消息合成一轮。
+// 上游 GenAI 格式要求同一 model 轮的并行工具调用、其结果必须落在同一个 user 轮里；
+// 三种客户端协议都可能把 N 个结果发成 N 个独立轮次（Responses 的多个
+// function_call_output、OpenAI 的多个 role=tool、Anthropic 的多个 tool_result
+// user 轮），原样透传会被上游判成 "Duplicate tool output for call_id" 并整单拒绝。
+// 只聚合纯 tool_result 轮，遇到普通 user 轮立即停止，避免吞掉后续用户输入。
+func normalizeToolResultTurns(msgs []Message) []Message {
+	if len(msgs) <= 1 {
+		return msgs
+	}
+	isToolResultOnly := func(m Message) bool {
+		if m.Role != "user" {
+			return false
+		}
+		blocks := m.Content.Blocks()
+		if len(blocks) == 0 {
+			return false
+		}
+		for _, b := range blocks {
+			if b.Type != "tool_result" {
+				return false
+			}
+		}
+		return true
+	}
+
+	var result []Message
+	i := 0
+	for i < len(msgs) {
+		if isToolResultOnly(msgs[i]) {
+			j := i
+			var merged []ContentBlock
+			for j < len(msgs) && isToolResultOnly(msgs[j]) {
+				merged = append(merged, msgs[j].Content.Blocks()...)
+				j++
+			}
+			if j-i > 1 {
+				result = append(result, Message{
+					Role:    "user",
+					Content: NewBlocksContent(merged),
+				})
+				i = j
+				continue
+			}
+		}
+		result = append(result, msgs[i])
+		i++
+	}
+	return result
+}
+
 // convertRequest 将 Anthropic 格式转换为 GenAI 格式
 func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 	model := p.boundModel
@@ -209,7 +260,7 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 	// 记录 tool_use id 到 name 的映射，用于 tool_result
 	toolUseIDToName := make(map[string]string)
 
-	for _, msg := range req.Messages {
+	for _, msg := range normalizeToolResultTurns(req.Messages) {
 		role := msg.Role
 		if role == "assistant" {
 			role = "model"
@@ -418,6 +469,23 @@ func guessImageMime(url string) string {
 	}
 }
 
+// deepVToolCallID 返回回给客户端的 tool_use id。优先用上游自带 id；缺失时
+// 本地生成，并用 seen/seq 保证同一响应内多个并行调用不会重号。
+func deepVToolCallID(call *deepVFunctionCall, seen map[string]bool, seq *int) string {
+	if call.ID != "" && !seen[call.ID] {
+		seen[call.ID] = true
+		return call.ID
+	}
+	for {
+		*seq++
+		candidate := fmt.Sprintf("%s-%d", call.Name, *seq)
+		if !seen[candidate] {
+			seen[candidate] = true
+			return candidate
+		}
+	}
+}
+
 // parseResponse 将 GenAI 响应转换为 Anthropic 格式
 func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, error) {
 	var genaiResp deepVResponse
@@ -439,6 +507,12 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 		result.Usage.OutputTokens = genaiResp.UsageMetadata.CandidatesTokenCount
 	}
 
+	// 上游的 functionCall 自带唯一 id，必须原样保留：同一轮并行调用如果回给
+	// 客户端两个相同 id，客户端后续的 tool_result 就无法区分是哪一个的结果。
+	// 个别响应不带 id 时才本地生成，并保证同一响应内不重号。
+	seenToolCallIDs := make(map[string]bool)
+	toolCallSeq := 0
+
 	for _, candidate := range genaiResp.Candidates {
 		for _, part := range candidate.Content.Parts {
 			switch {
@@ -450,7 +524,7 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 				inputJSON, _ := json.Marshal(part.FunctionCall.Args)
 				result.Content = append(result.Content, ContentBlock{
 					Type:  "tool_use",
-					ID:    part.FunctionCall.Name + "-" + time.Now().Format("20060102150405"),
+					ID:    deepVToolCallID(part.FunctionCall, seenToolCallIDs, &toolCallSeq),
 					Name:  part.FunctionCall.Name,
 					Input: inputJSON,
 				})
