@@ -303,3 +303,153 @@ func TestDeepVToolResultImageForwarding(t *testing.T) {
 		t.Errorf("inlineData = %+v", toolTurn.Parts[1].InlineData)
 	}
 }
+
+// TestDeepVNormalizeToolResultTurns 验证并行工具调用的多个 tool_result 轮会被
+// 合并成一个 user 轮。上游 GenAI 格式要求同一 model 轮的工具结果同轮返回，
+// 否则报 "Duplicate tool output for call_id" 并拒绝整个请求。
+func TestDeepVNormalizeToolResultTurns(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
+
+	raw := `{
+		"model": "deepseek-v4.1-flash",
+		"messages": [
+			{"role":"user","content":[{"type":"text","text":"run two commands"}]},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"call_A","name":"Bash","input":{"command":"echo A"}},
+				{"type":"tool_use","id":"call_B","name":"Bash","input":{"command":"echo B"}}
+			]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_A","content":"A"}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_B","content":"B"}]},
+			{"role":"user","content":[{"type":"text","text":"now summarize"}]}
+		]
+	}`
+
+	var req Request
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	out, err := p.convertRequest(&req)
+	if err != nil {
+		t.Fatalf("convertRequest: %v", err)
+	}
+
+	// 两个并行 functionCall 仍在同一个 model 轮。
+	modelTurn := out.Contents[1]
+	if modelTurn.Role != "model" {
+		t.Fatalf("turn 1 role = %q", modelTurn.Role)
+	}
+	calls := 0
+	for _, part := range modelTurn.Parts {
+		if part.FunctionCall != nil {
+			calls++
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("parallel function calls = %d, want 2", calls)
+	}
+
+	// 两个 functionResponse 必须落在同一个 user 轮。
+	toolTurn := out.Contents[2]
+	if toolTurn.Role != "user" {
+		t.Fatalf("tool result turn role = %q", toolTurn.Role)
+	}
+	responses := 0
+	for _, part := range toolTurn.Parts {
+		if part.FunctionResponse != nil {
+			responses++
+		}
+	}
+	if responses != 2 {
+		t.Fatalf("function responses in one turn = %d, want 2", responses)
+	}
+	if toolTurn.Parts[0].FunctionResponse.ID != "call_A" || toolTurn.Parts[1].FunctionResponse.ID != "call_B" {
+		t.Fatalf("function response order wrong: %+v", toolTurn.Parts)
+	}
+
+	// 后续普通 user 轮不能被吞掉或并进工具结果轮。
+	if len(out.Contents) != 4 {
+		t.Fatalf("contents = %d, want 4", len(out.Contents))
+	}
+	last := out.Contents[3]
+	if last.Role != "user" || len(last.Parts) != 1 || last.Parts[0].Text != "now summarize" {
+		t.Fatalf("trailing user turn lost: %+v", last)
+	}
+}
+
+// TestDeepVParseResponseParallelToolCallIDs 验证同一轮并行工具调用返回给客户端
+// 的 tool_use id 互不相同。上游 functionCall 自带唯一 id，必须原样保留；早期实现
+// 用"工具名+秒级时间戳"重新生成，同轮并行调用会撞成同一个 id。
+func TestDeepVParseResponseParallelToolCallIDs(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-flash")
+
+	body := `{
+		"candidates": [{
+			"content": {
+				"parts": [
+					{"functionCall": {"id": "call_00_abc", "name": "get_time", "args": {"city": "Beijing"}}},
+					{"functionCall": {"id": "call_01_def", "name": "get_time", "args": {"city": "Tokyo"}}}
+				],
+				"role": "model"
+			},
+			"finishReason": "FUNCTION_CALL"
+		}]
+	}`
+
+	resp, err := p.parseResponse([]byte(body), "deepseek-v4.1-flash")
+	if err != nil {
+		t.Fatalf("parseResponse: %v", err)
+	}
+
+	var ids []string
+	for _, block := range resp.Content {
+		if block.Type == "tool_use" {
+			ids = append(ids, block.ID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("tool_use blocks = %d, want 2", len(ids))
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("parallel tool_use ids collide: %q", ids[0])
+	}
+	if ids[0] != "call_00_abc" || ids[1] != "call_01_def" {
+		t.Fatalf("upstream ids not preserved: %v", ids)
+	}
+}
+
+// TestDeepVParseResponseMissingToolCallIDs 验证上游没给 id 时本地生成的 id 也不重号。
+func TestDeepVParseResponseMissingToolCallIDs(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-flash")
+
+	body := `{
+		"candidates": [{
+			"content": {
+				"parts": [
+					{"functionCall": {"name": "Bash", "args": {"command": "echo A"}}},
+					{"functionCall": {"name": "Bash", "args": {"command": "echo B"}}}
+				],
+				"role": "model"
+			},
+			"finishReason": "FUNCTION_CALL"
+		}]
+	}`
+
+	resp, err := p.parseResponse([]byte(body), "deepseek-v4.1-flash")
+	if err != nil {
+		t.Fatalf("parseResponse: %v", err)
+	}
+
+	var ids []string
+	for _, block := range resp.Content {
+		if block.Type == "tool_use" {
+			ids = append(ids, block.ID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("tool_use blocks = %d, want 2", len(ids))
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("generated tool_use ids collide: %q", ids[0])
+	}
+}

@@ -274,8 +274,8 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 | 模型名 | 上游绑定 | 能力 |
 |--------|---------|------|
-| `deepseek-v4-flash` | DeepV `deepseek-v4-flash` | 文本、工具调用、推理、流式 |
-| `deepseek-v4-flash-vision-exp` | DeepV `deepseek-v4-flash-vision-exp` | 文本、图片、工具调用、推理、流式 |
+| `deepseek-v4.1-flash` | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
+| `glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
 
 配置了 ChatGPT Codex OAuth 凭证或 GitHub Copilot 后，额外模型会动态加入目录；ChatGPT 的代理是可选的。不要在客户端硬编码版本，直接读取 `/v1/models`。
 
@@ -295,7 +295,7 @@ OpenAI 兼容 Provider 的请求超时默认是 120 秒。需要承载长推理�
 | `ALI_API_KEY` | 否 | — | 阿里 MaaS API key（也兼容 `ALIYUN_MAAS_API_KEY`、`DASHSCOPE_API_KEY`） |
 | `COPILOT_TOKEN` | 否 | — | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | — | GitHub OAuth token（用于自动刷新 Copilot token） |
-| `DEEPV_ENABLED` | 否 | `false` | 启用 DeepV Server（EasyCode/DeepVCode，deepseek-v4-flash 系列） |
+| `DEEPV_ENABLED` | 否 | `false` | 启用 DeepV Server（EasyCode/DeepVCode，deepseek / glm-5.3-flash 系列） |
 | `DEEPV_WORK_DIR` | 否 | 启动目录 | DeepV 请求附带的 Git 信息头来源目录 |
 | `HTTP_PROXY` | 否 | — | ChatGPT Codex 的可选 HTTP 代理地址（如 `http://127.0.0.1:7890`） |
 | `CHATGPT_AUTH_FILE` | 否 | 自动查找 | ChatGPT/Pi OAuth `auth.json` 路径 |
