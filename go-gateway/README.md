@@ -277,6 +277,8 @@ curl -N -X POST http://localhost:4001/v1/messages \
 | `deepseek-v4.1-flash` | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
 | `glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
 
+DeepV 上游按单请求 token 总量（输入 + `max_output_tokens`）不超过 200000 校验，两个模型的目录条目声明 `max_input_tokens: 160000`、`max_output_tokens: 32000`。超过该限制的请求会被上游以配额错误拒绝，网关识别后转换为 400 并附处置说明，避免客户端把参数问题当成欠费（402 Payment Required）。
+
 配置了 ChatGPT Codex OAuth 凭证或 GitHub Copilot 后，额外模型会动态加入目录；ChatGPT 的代理是可选的。不要在客户端硬编码版本，直接读取 `/v1/models`。
 
 OpenAI 兼容 Provider 的请求超时默认是 120 秒。需要承载长推理请求时，可在
