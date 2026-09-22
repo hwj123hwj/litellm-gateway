@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -451,5 +452,43 @@ func TestDeepVParseResponseMissingToolCallIDs(t *testing.T) {
 	}
 	if ids[0] == ids[1] {
 		t.Fatalf("generated tool_use ids collide: %q", ids[0])
+	}
+}
+
+// TestDeepVRewriteQuotaError 验证"单请求 token 总量超限"的 402 被改写成 400
+// 并附处置建议；真实欠费等其他 402 与非 402 错误保持原样。
+func TestDeepVRewriteQuotaError(t *testing.T) {
+	quota := &ProviderError{
+		Provider:   "deepv-deepseek-flash",
+		StatusCode: http.StatusPaymentRequired,
+		Message:    "Quota limit exceeded: Request exceeds maximum tokens per request limit (200000)",
+		RequestID:  "req-1",
+	}
+	got := rewriteDeepVQuotaError(quota)
+	if got.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", got.StatusCode)
+	}
+	if got.Message == quota.Message {
+		t.Fatalf("message not rewritten: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "max_output_tokens") {
+		t.Fatalf("message missing guidance: %q", got.Message)
+	}
+	if got.Provider != "deepv-deepseek-flash" || got.RequestID != "req-1" {
+		t.Fatalf("provider metadata lost: %+v", got)
+	}
+
+	billing := &ProviderError{Provider: "deepv", StatusCode: http.StatusPaymentRequired, Message: "Insufficient balance"}
+	if got := rewriteDeepVQuotaError(billing); got.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("billing 402 rewritten to %d", got.StatusCode)
+	}
+
+	serverErr := &ProviderError{Provider: "deepv", StatusCode: http.StatusInternalServerError, Message: "maximum tokens per request limit (200000)"}
+	if got := rewriteDeepVQuotaError(serverErr); got.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("500 rewritten to %d", got.StatusCode)
+	}
+
+	if got := rewriteDeepVQuotaError(nil); got != nil {
+		t.Fatalf("nil error rewritten: %+v", got)
 	}
 }

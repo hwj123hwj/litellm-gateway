@@ -399,17 +399,25 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 	router.RegisterChain("deepseek-v4.1-flash", []string{"deepv-deepseek-flash"})
 	router.RegisterChain("glm-5.3-flash", []string{"deepv-glm-flash"})
 
+	// DeepV 上游按 单请求总量（输入 + max_output_tokens）≤ 200000 校验。
+	// 目录里声明合计留有余量的上限，客户端读到后不会再发出超出配额的
+	// 输出预算（此前 ZCode 默认发 max_output_tokens=384000，新会话也会
+	// 被上游以 402 拒绝）。
 	router.RegisterModel(provider.ModelInfo{
 		ID:              "deepseek-v4.1-flash",
 		Provider:        "deepv-deepseek-flash",
 		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
 		InputModalities: []string{"text", "image"},
+		MaxInputTokens:  160000,
+		MaxOutputTokens: 32000,
 	})
 	router.RegisterModel(provider.ModelInfo{
 		ID:              "glm-5.3-flash",
 		Provider:        "deepv-glm-flash",
 		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
 		InputModalities: []string{"text", "image"},
+		MaxInputTokens:  160000,
+		MaxOutputTokens: 32000,
 	})
 
 	logger.Printf("DeepV Server enabled, workdir=%s", workDir)

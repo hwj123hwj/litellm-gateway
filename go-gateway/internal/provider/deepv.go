@@ -191,10 +191,29 @@ func (p *DeepVProvider) ForwardRequest(ctx context.Context, req *Request) (*Resp
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, NewHTTPError(p.Name(), resp, respBody)
+		return nil, rewriteDeepVQuotaError(NewHTTPError(p.Name(), resp, respBody))
 	}
 
 	return p.parseResponse(respBody, req.Model)
+}
+
+// rewriteDeepVQuotaError 把"单请求 token 总量超限"的上游 402 改写成 400。
+// DeepV 上游对这类参数问题也返回 Payment Required，字面会引导用户去查账户
+// 余额；识别消息特征后改写状态码并附上可执行的处置建议。其余 402（如真实
+// 欠费）与非 402 错误保持原样。
+func rewriteDeepVQuotaError(err *ProviderError) *ProviderError {
+	if err == nil || err.StatusCode != http.StatusPaymentRequired {
+		return err
+	}
+	if !strings.Contains(err.Message, "maximum tokens per request limit") {
+		return err
+	}
+	rewritten := *err
+	rewritten.StatusCode = http.StatusBadRequest
+	rewritten.Message = fmt.Sprintf(
+		"%s；该上限按 输入 + max_output_tokens 合计计算，请调小客户端的最大输出 Token 配置（如 32000）或压缩会话上下文",
+		err.Message)
+	return &rewritten
 }
 
 // normalizeToolResultTurns 把"整轮只含 tool_result"的连续 user 消息合成一轮。
@@ -698,7 +717,7 @@ func (p *DeepVProvider) ForwardStream(ctx context.Context, req *Request, w io.Wr
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return NewHTTPError(p.Name(), resp, b)
+		return rewriteDeepVQuotaError(NewHTTPError(p.Name(), resp, b))
 	}
 
 	return p.convertStream(resp.Body, w, req.Model)
