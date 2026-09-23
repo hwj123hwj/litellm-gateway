@@ -62,13 +62,16 @@ func TestExtractAccountIDFromJWTRejectsInvalidToken(t *testing.T) {
 
 func TestChatGPTModelCatalog(t *testing.T) {
 	models := ChatGPTModelCatalog()
-	if len(models) != 3 {
-		t.Fatalf("catalog has %d models, want the three current GPT subscription models", len(models))
+	if len(models) != 6 {
+		t.Fatalf("catalog has %d models, want the six current GPT subscription models", len(models))
 	}
 	want := map[string]bool{
+		"gpt-6-sol":     true,
+		"gpt-6-luna":    true,
+		"gpt-6-astra":   true,
 		"gpt-5.6-sol":   true,
 		"gpt-5.6-terra": true,
-		"gpt-luna":      true,
+		"gpt-5.6-luna":  true,
 	}
 	for _, model := range models {
 		if !want[model.ID] {
@@ -77,8 +80,8 @@ func TestChatGPTModelCatalog(t *testing.T) {
 		if len(model.InputModalities) != 2 || model.InputModalities[1] != "image" {
 			t.Fatalf("%s input modalities = %v, want [text image]", model.ID, model.InputModalities)
 		}
-		if model.ID == "gpt-luna" && model.UpstreamID != "gpt-5.6-luna" {
-			t.Fatalf("Luna upstream model = %q, want gpt-5.6-luna", model.UpstreamID)
+		if model.UpstreamID != "" {
+			t.Fatalf("%s sets UpstreamID = %q, want the upstream name to be the model ID", model.ID, model.UpstreamID)
 		}
 		delete(want, model.ID)
 	}
@@ -103,7 +106,7 @@ func TestSetupProvidersFromConfigRegistersChatGPTModels(t *testing.T) {
     url: https://chatgpt.com/backend-api
     models:
       - id: gpt-5.6-luna
-        aliases: [gpt-luna]
+        aliases: [legacy-luna]
         protocol: responses
         capabilities: [text, vision, tool_calling, streaming, reasoning]
         input_modalities: [text, image]
@@ -125,10 +128,10 @@ chains: {}
 	if got := router.ListProviders(); len(got) != 1 || got[0] != "chatgpt" {
 		t.Fatalf("providers = %v, want [chatgpt]", got)
 	}
-	if _, err := router.Route("gpt-luna"); err != nil {
-		t.Fatalf("Route(gpt-luna) error = %v", err)
+	if _, err := router.Route("legacy-luna"); err != nil {
+		t.Fatalf("Route(legacy-luna) error = %v", err)
 	}
-	// 上游模型 ID 是对外主名，别名 gpt-luna 作为兼容入口同时可用。
+	// 上游模型 ID 是对外主名，别名 legacy-luna 作为兼容入口同时可用。
 	if _, err := router.Route("gpt-5.6-luna"); err != nil {
 		t.Fatalf("Route(gpt-5.6-luna) error = %v", err)
 	}
@@ -140,19 +143,19 @@ chains: {}
 		}
 		seen[info.ID] = true
 	}
-	for _, modelName := range []string{"gpt-5.6-luna", "gpt-luna"} {
+	for _, modelName := range []string{"gpt-5.6-luna", "legacy-luna"} {
 		if !seen[modelName] {
 			t.Fatalf("model infos = %+v, want %s registered", infos, modelName)
 		}
 	}
 }
 
-func TestChatGPTModelAliasMapsToUpstreamID(t *testing.T) {
-	if got := chatGPTUpstreamModel("gpt-luna"); got != "gpt-5.6-luna" {
-		t.Fatalf("chatGPTUpstreamModel(gpt-luna) = %q, want gpt-5.6-luna", got)
-	}
-	if got := chatGPTUpstreamModel("gpt-5.6-sol"); got != "gpt-5.6-sol" {
-		t.Fatalf("chatGPTUpstreamModel(gpt-5.6-sol) = %q, want unchanged", got)
+func TestChatGPTUpstreamModelIsIdentity(t *testing.T) {
+	// 目录不再维护旧别名映射，ID 就是打给上游的名字。
+	for _, model := range ChatGPTModelCatalog() {
+		if got := chatGPTUpstreamModel(model.ID); got != model.ID {
+			t.Fatalf("chatGPTUpstreamModel(%s) = %q, want unchanged", model.ID, got)
+		}
 	}
 }
 

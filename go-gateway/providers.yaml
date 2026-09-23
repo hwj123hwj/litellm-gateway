@@ -31,6 +31,27 @@ providers:
     type: chatgpt
     url: https://chatgpt.com/backend-api
     models:
+      # GPT-6 家族（账号当前主线）。gpt-6-terra 不存在、gpt-6-pro 与各 -wm
+      # 变体在 Codex 订阅端点会被拒（HTTP 400 "not supported"），故不登记。
+      - id: gpt-6-sol
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
+      - id: gpt-6-luna
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
+      - id: gpt-6-astra
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
+      # GPT-5.6 家族：上游仍在服务，且部分客户端配置仍引用这些名字。
       - id: gpt-5.6-sol
         protocol: responses
         capabilities: [text, vision, tool_calling, streaming, reasoning]

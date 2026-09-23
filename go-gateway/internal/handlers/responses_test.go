@@ -86,11 +86,11 @@ func TestResponsesHandlerSupportsNonStreamChatGPTPassthrough(t *testing.T) {
 		"",
 	}, "\n")}
 	router.RegisterProvider("chatgpt", stub)
-	router.RegisterChain("gpt-luna", []string{"chatgpt"})
+	router.RegisterChain("gpt-5.6-luna", []string{"chatgpt"})
 
 	engine := gin.New()
 	engine.POST("/v1/responses", NewResponsesHandler(router, logger).Handle)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-luna","input":"connection test","stream":false}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-luna","input":"connection test","stream":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

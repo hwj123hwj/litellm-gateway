@@ -40,6 +40,33 @@ type ChatGPTModel struct {
 }
 
 var chatGPTModelCatalog = []ChatGPTModel{
+	// GPT-6 家族。Codex 订阅端点只接受 sol/luna/astra：gpt-6-terra 不存在，
+	// gpt-6-pro 与各 -wm 变体返回 400 not supported。
+	{
+		ID:              "gpt-6-sol",
+		Name:            "GPT-6 Sol",
+		Capabilities:    []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning},
+		InputModalities: []string{"text", "image"},
+		MaxInputTokens:  272000,
+		MaxOutputTokens: 128000,
+	},
+	{
+		ID:              "gpt-6-luna",
+		Name:            "GPT-6 Luna",
+		Capabilities:    []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning},
+		InputModalities: []string{"text", "image"},
+		MaxInputTokens:  272000,
+		MaxOutputTokens: 128000,
+	},
+	{
+		ID:              "gpt-6-astra",
+		Name:            "GPT-6 Astra",
+		Capabilities:    []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning},
+		InputModalities: []string{"text", "image"},
+		MaxInputTokens:  272000,
+		MaxOutputTokens: 128000,
+	},
+	// GPT-5.6 家族仍在上游服务，保留以兼容既有客户端配置。
 	{
 		ID:              "gpt-5.6-sol",
 		Name:            "GPT-5.6 Sol",
@@ -57,8 +84,7 @@ var chatGPTModelCatalog = []ChatGPTModel{
 		MaxOutputTokens: 128000,
 	},
 	{
-		ID:              "gpt-luna",
-		UpstreamID:      "gpt-5.6-luna",
+		ID:              "gpt-5.6-luna",
 		Name:            "GPT-5.6 Luna",
 		Capabilities:    []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning},
 		InputModalities: []string{"text", "image"},
