@@ -177,6 +177,8 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 - 智谱只提供 `glm-5.3` 与 `glm-5.3-flash` 两个模型，其余型号（含视觉专用的 `glm-5v-turbo`）已从网关删除；
 - `glm-5.3` 是纯文本模型，不支持图片（上游会以 `1210 messages.content.type 参数非法` 拒绝）；
 - `glm-5.3-flash` 兼有图片能力，`coding` 链上的图片请求会跳过 `glm-5.3` 落到它；
+- Antigravity（Google 账号 OAuth）经本机 CLIProxyAPI 反代为 OpenAI 兼容上游，
+  `gemini-3.1-pro-low` 实测支持图片输入；OAuth 凭据与 token 续期都在 CLIProxyAPI 侧维护；
 - 图片请求使用 OpenAI `image_url` content block，网关会保留原始块和 `extra_body`/`thinking` 等扩展字段。
 
 配置新模型时建议显式声明能力：
@@ -278,9 +280,10 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 | 模型名 | 默认上游 | 能力 |
 |--------|---------|------|
-| `coding` | `glm-5.3` → `glm-5.3-flash` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过 `glm-5.3` |
+| `coding` | `glm-5.3` → `glm-5.3-flash` → `gemini-3.1-pro-low` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过 `glm-5.3` |
 | `glm-5.3` | 智谱 `glm-5.3` | 文本、工具调用、推理、流式（不支持图片） |
 | `glm-5.3-flash` | 智谱 `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
+| `gemini-3.1-pro-low` | Antigravity `gemini-3.1-pro-low`（本机 CLIProxyAPI 反代） | 文本、图片、工具调用、推理、流式 |
 
 **命名规则：模型名就是上游模型 ID，不设别名。** 客户端要调哪个模型就写哪个名字，
 网关不再维护 `glm-opus` / `glm-haiku` / `ali-opus` 这类第二套代号。
@@ -307,8 +310,8 @@ DeepV 上游按单请求 token 总量（输入 + `max_output_tokens`）不超过
 配置了 ChatGPT Codex OAuth 凭证或 GitHub Copilot 后，额外模型会动态加入目录；ChatGPT 的代理是可选的。不要在客户端硬编码版本，直接读取 `/v1/models`。
 
 OpenAI 兼容 Provider 的请求超时默认是 120 秒。需要承载长推理请求时，可在
-`providers.yaml` 的 Provider 节点设置 `request_timeout_seconds`；当前 GLM Provider
-为知识飞轮的长请求设置了 900 秒。这个值只控制 Provider HTTP 客户端的墙钟超时，
+`providers.yaml` 的 Provider 节点设置 `request_timeout_seconds`；当前 GLM 与
+Antigravity Provider 为知识飞轮的长请求设置了 900 秒。这个值只控制 Provider HTTP 客户端的墙钟超时，
 调用方的取消信号仍然优先生效。
 
 ---
@@ -319,7 +322,7 @@ OpenAI 兼容 Provider 的请求超时默认是 120 秒。需要承载长推理�
 |------|------|--------|------|
 | `LITELLM_MASTER_KEY` | 是 | — | 网关认证 token |
 | `GLM_API_KEY` | 否 | — | 智谱 API key |
-| `ALI_API_KEY` | 否 | — | 阿里 MaaS API key（也兼容 `ALIYUN_MAAS_API_KEY`、`DASHSCOPE_API_KEY`） |
+| `CLIPROXY_API_KEY` | 否 | — | 本机 CLIProxyAPI（Antigravity 反代）的静态 api-key |
 | `COPILOT_TOKEN` | 否 | — | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | — | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `DEEPV_ENABLED` | 否 | `false` | 启用 DeepV Server（EasyCode/DeepVCode，deepseek / glm-5.3-flash 系列） |

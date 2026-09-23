@@ -126,13 +126,16 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 | 模型名 | 提供商 | 说明 |
 |--------|--------|------|
-| `coding` | 智谱 GLM → DeepV | **推荐**，唯一的持续降级链，OpenAI 风格 |
+| `coding` | 智谱 GLM → Antigravity → DeepV | **推荐**，唯一的持续降级链，OpenAI 风格 |
 | `glm-5.3` | 智谱 GLM coding 端点 | 最强文本模型，不支持图片 |
 | `glm-5.3-flash` | 智谱 GLM coding 端点 | 快速文本模型，兼有图片能力 |
+| `gemini-3.1-pro-low` | Antigravity（本机 CLIProxyAPI 反代） | Google Gemini 3.1 Pro，兼有图片能力 |
 
 模型名即上游模型 ID，不设别名。智谱侧只保留 `glm-5.3` 与 `glm-5.3-flash`
-两个模型；`coding` 链为 `glm-5.3` → `glm-5.3-flash` → `deepv-glm-5.3-flash`
-→ `deepseek-flash`，任一档失败自动降级到下一档。完整的模型与链定义见
+两个模型；`coding` 链为 `glm-5.3` → `glm-5.3-flash` → `gemini-3.1-pro-low`
+→ `deepv-glm-5.3-flash` → `deepseek-flash`，任一档失败自动降级到下一档。
+Antigravity 由本机 8317 端口的 CLIProxyAPI 服务反代（LaunchAgent `local.cliproxy`），
+Google 账号 OAuth 凭据在 CLIProxyAPI 侧维护。完整的模型与链定义见
 `go-gateway/README.md`。
 
 ## 配置 Claude Code
@@ -207,6 +210,7 @@ litellm-gateway/
 |------|------|------|
 | `LITELLM_MASTER_KEY` | 是 | 网关认证 token |
 | `GLM_API_KEY` | 否 | 智谱 API key |
+| `CLIPROXY_API_KEY` | 否 | 本机 CLIProxyAPI（Antigravity 反代）的静态 api-key |
 | `COPILOT_TOKEN` | 否 | GitHub Copilot token（短期有效，约 30 分钟） |
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | ChatGPT Codex 的可选 HTTP 代理地址（如 `http://127.0.0.1:7890`） |
