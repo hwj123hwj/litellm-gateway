@@ -74,14 +74,15 @@ providers:
   # Antigravity（Google 账号 OAuth，由本机 8317 端口的 CLIProxyAPI 反代）。
   # 凭据/token 续期都在 CLIProxyAPI 侧维护，网关只当普通 OpenAI 兼容上游用；
   # CLIPROXY_API_KEY 是 CLIProxyAPI config.yaml 里的静态 api-key。
-  # 实测 gemini-3.1-pro-low 接受 image_url（ vision 落在这一档）。
+  # gemini-3.8-flash 是当前 Gemini 系列主力（-high 为思考档后缀，属上游真名），
+  # 实测接受 image_url（vision 落在这一档）。
   - name: antigravity
     type: openai
     url: http://127.0.0.1:8317/v1/chat/completions
     api_key_env: CLIPROXY_API_KEY
     request_timeout_seconds: 900
     models:
-      - id: gemini-3.1-pro-low
+      - id: gemini-3.8-flash-high
         capabilities: [text, vision, tool_calling, streaming, reasoning]
         input_modalities: [text, image]
 
@@ -91,6 +92,6 @@ chains:
   coding:
     - glm-5.3
     - glm-5.3-flash
-    - gemini-3.1-pro-low
+    - gemini-3.8-flash-high
     - deepv-glm-5.3-flash
     - deepseek-flash

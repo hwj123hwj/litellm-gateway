@@ -129,10 +129,10 @@ MY_PROVIDER_API_KEY=sk-xxx
 | `coding` | 智谱 GLM → Antigravity → DeepV | **推荐**，唯一的持续降级链，OpenAI 风格 |
 | `glm-5.3` | 智谱 GLM coding 端点 | 最强文本模型，不支持图片 |
 | `glm-5.3-flash` | 智谱 GLM coding 端点 | 快速文本模型，兼有图片能力 |
-| `gemini-3.1-pro-low` | Antigravity（本机 CLIProxyAPI 反代） | Google Gemini 3.1 Pro，兼有图片能力 |
+| `gemini-3.8-flash-high` | Antigravity（本机 CLIProxyAPI 反代） | Google Gemini 3.8 Flash（当前主力），兼有图片能力 |
 
 模型名即上游模型 ID，不设别名。智谱侧只保留 `glm-5.3` 与 `glm-5.3-flash`
-两个模型；`coding` 链为 `glm-5.3` → `glm-5.3-flash` → `gemini-3.1-pro-low`
+两个模型；`coding` 链为 `glm-5.3` → `glm-5.3-flash` → `gemini-3.8-flash-high`
 → `deepv-glm-5.3-flash` → `deepseek-flash`，任一档失败自动降级到下一档。
 Antigravity 由本机 8317 端口的 CLIProxyAPI 服务反代（LaunchAgent `local.cliproxy`），
 Google 账号 OAuth 凭据在 CLIProxyAPI 侧维护。完整的模型与链定义见

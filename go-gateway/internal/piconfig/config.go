@@ -103,7 +103,7 @@ func gatewayProvider(endpoint, tokenCommand string) map[string]any {
 			{"id": "coding", "name": "LLM Gateway Coding"},
 			{"id": "glm-5.3", "name": "GLM-5.3"},
 			{"id": "glm-5.3-flash", "name": "GLM-5.3 Flash"},
-			{"id": "gemini-3.1-pro-low", "name": "Gemini 3.1 Pro"},
+			{"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash"},
 			{"id": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash"},
 		},
 	}

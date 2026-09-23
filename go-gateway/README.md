@@ -178,7 +178,7 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 - `glm-5.3` 是纯文本模型，不支持图片（上游会以 `1210 messages.content.type 参数非法` 拒绝）；
 - `glm-5.3-flash` 兼有图片能力，`coding` 链上的图片请求会跳过 `glm-5.3` 落到它；
 - Antigravity（Google 账号 OAuth）经本机 CLIProxyAPI 反代为 OpenAI 兼容上游，
-  `gemini-3.1-pro-low` 实测支持图片输入；OAuth 凭据与 token 续期都在 CLIProxyAPI 侧维护；
+  `gemini-3.8-flash-high`（当前 Gemini 系列主力）实测支持图片输入；OAuth 凭据与 token 续期都在 CLIProxyAPI 侧维护；
 - 图片请求使用 OpenAI `image_url` content block，网关会保留原始块和 `extra_body`/`thinking` 等扩展字段。
 
 配置新模型时建议显式声明能力：
@@ -280,10 +280,10 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 | 模型名 | 默认上游 | 能力 |
 |--------|---------|------|
-| `coding` | `glm-5.3` → `glm-5.3-flash` → `gemini-3.1-pro-low` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过 `glm-5.3` |
+| `coding` | `glm-5.3` → `glm-5.3-flash` → `gemini-3.8-flash-high` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过 `glm-5.3` |
 | `glm-5.3` | 智谱 `glm-5.3` | 文本、工具调用、推理、流式（不支持图片） |
 | `glm-5.3-flash` | 智谱 `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
-| `gemini-3.1-pro-low` | Antigravity `gemini-3.1-pro-low`（本机 CLIProxyAPI 反代） | 文本、图片、工具调用、推理、流式 |
+| `gemini-3.8-flash-high` | Antigravity `gemini-3.8-flash-high`（本机 CLIProxyAPI 反代，`-high` 为思考档后缀） | 文本、图片、工具调用、推理、流式 |
 
 **命名规则：模型名就是上游模型 ID，不设别名。** 客户端要调哪个模型就写哪个名字，
 网关不再维护 `glm-opus` / `glm-haiku` / `ali-opus` 这类第二套代号。
