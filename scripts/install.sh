@@ -169,24 +169,19 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     echo ""
     echo -e "${BOLD}  ── 配置 LLM Gateway ──${NC}"
     echo ""
-    echo -e "  选择要启用的提供商（可多选，用空格分隔）:"
-    echo -e "  ${CYAN}1${NC}) 智谱 GLM"
-    echo -e "  ${CYAN}2${NC}) 阿里 MaaS (ali-opus)"
-    echo -e "  ${CYAN}3${NC}) 跳过，稍后配置"
+    echo -e "  选择要启用的提供商:"
+    echo -e "  ${CYAN}1${NC}) 智谱 GLM（glm-5.3 / glm-5.3-flash）"
+    echo -e "  ${CYAN}2${NC}) 跳过，稍后配置"
     echo ""
-    read -rp "$(echo -e ${CYAN}ℹ${NC}  选择 [1 2 / 3]: )" CHOICES < /dev/tty 2>/dev/null || CHOICES="3"
+    read -rp "$(echo -e ${CYAN}ℹ${NC}  选择 [1 / 2]: )" CHOICES < /dev/tty 2>/dev/null || CHOICES="2"
 
     GLM_KEY=""
-    ALI_KEY=""
 
-    if [[ "$CHOICES" != *"3"* ]]; then
+    if [[ "$CHOICES" != *"2"* ]]; then
         for choice in $CHOICES; do
             case "$choice" in
                 1)
                     read -rp "$(echo -e ${CYAN}ℹ${NC}  智谱 GLM API Key: )" GLM_KEY < /dev/tty 2>/dev/null || GLM_KEY=""
-                    ;;
-                2)
-                    read -rp "$(echo -e ${CYAN}ℹ${NC}  阿里 MaaS API Key: )" ALI_KEY < /dev/tty 2>/dev/null || ALI_KEY=""
                     ;;
             esac
         done
@@ -199,7 +194,7 @@ LITELLM_MASTER_KEY=${MASTER_KEY}
 
 # 提供商 API Key（按需填写）
 GLM_API_KEY=${GLM_KEY}
-ALI_API_KEY=${ALI_KEY}
+
 
 # 网关端口
 PORT=4001

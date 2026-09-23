@@ -17,7 +17,6 @@ type Config struct {
 	MasterKey               string
 	AdminToken              string // 独立的管理端点 token（可选）
 	GLMAPIKey               string
-	AliAPIKey               string
 	CopilotToken            string // GitHub Copilot token（短期有效，需要定期刷新）
 	CopilotGithubToken      string // GitHub OAuth token（用于刷新 Copilot token）
 	DeepVEnabled            bool   // DeepV Server（EasyCode/DeepVCode）是否启用
@@ -41,7 +40,6 @@ func Load() (*Config, error) {
 		MasterKey:               getEnv("LITELLM_MASTER_KEY", ""),
 		AdminToken:              getEnv("ADMIN_TOKEN", ""),
 		GLMAPIKey:               getEnv("GLM_API_KEY", ""),
-		AliAPIKey:               getAliAPIKey(),
 		CopilotToken:            getEnv("COPILOT_TOKEN", ""),
 		CopilotGithubToken:      getEnv("COPILOT_GITHUB_TOKEN", ""),
 		DeepVEnabled:            getEnvBool("DEEPV_ENABLED", false),
@@ -67,23 +65,6 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
-}
-
-// getAliAPIKey keeps the documented ALI_API_KEY name authoritative while
-// accepting names used by older local gateway installations. The provider
-// config loader uses the same fallback so providers.yaml and the default
-// registration path behave consistently.
-func getAliAPIKey() string {
-	for _, key := range []string{
-		"ALI_API_KEY",
-		"ALIYUN_MAAS_API_KEY",
-		"DASHSCOPE_API_KEY",
-	} {
-		if value := os.Getenv(key); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func getEnvInt(key string, defaultValue int) int {

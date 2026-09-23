@@ -201,13 +201,13 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 					})
 					modelToProvider[modelName] = pc.Name
 				}
-					// 与下面的分支保持一致：上游模型 ID 对外主名，别名作为兼容入口。
-					registerModel(mc.ID)
-					modelToProvider[mc.ID] = pc.Name
-					for _, alias := range mc.Aliases {
-						registerModel(alias)
-						modelToProvider[alias] = pc.Name
-					}
+				// 与下面的分支保持一致：上游模型 ID 对外主名，别名作为兼容入口。
+				registerModel(mc.ID)
+				modelToProvider[mc.ID] = pc.Name
+				for _, alias := range mc.Aliases {
+					registerModel(alias)
+					modelToProvider[alias] = pc.Name
+				}
 			}
 			logger.Printf("Registered provider: %s (type=%s, url=%s)", pc.Name, pc.Type, pc.URL)
 			continue
