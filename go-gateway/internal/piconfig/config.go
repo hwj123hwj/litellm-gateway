@@ -86,6 +86,20 @@ func MasterKey(gatewayHome string) (string, error) {
 	return key, nil
 }
 
+// DesiredModels 是 Pi 模型选择器里 llm-gateway 组的精选清单。
+// setup pi 子命令与 /admin/pi 端点都以它为唯一数据源。
+func DesiredModels() []map[string]any {
+	return []map[string]any{
+		// 只暴露真实模型名，不再维护第二套别名；coding 是网关内唯一的降级链入口。
+		// 智谱侧只保留 glm-5.3 与 glm-5.3-flash（后者兼有图片能力）。
+		{"id": "coding", "name": "LLM Gateway Coding"},
+		{"id": "glm-5.3", "name": "GLM-5.3"},
+		{"id": "glm-5.3-flash", "name": "GLM-5.3 Flash"},
+		{"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash"},
+		{"id": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash"},
+	}
+}
+
 func gatewayProvider(endpoint, tokenCommand string) map[string]any {
 	return map[string]any{
 		"baseUrl":    endpoint,
@@ -97,15 +111,7 @@ func gatewayProvider(endpoint, tokenCommand string) map[string]any {
 			"supportsReasoningEffort":  false,
 			"supportsUsageInStreaming": false,
 		},
-		"models": []map[string]any{
-			// 只暴露真实模型名，不再维护第二套别名；coding 是网关内唯一的降级链入口。
-			// 智谱侧只保留 glm-5.3 与 glm-5.3-flash（后者兼有图片能力）。
-			{"id": "coding", "name": "LLM Gateway Coding"},
-			{"id": "glm-5.3", "name": "GLM-5.3"},
-			{"id": "glm-5.3-flash", "name": "GLM-5.3 Flash"},
-			{"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash"},
-			{"id": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash"},
-		},
+		"models": DesiredModels(),
 	}
 }
 

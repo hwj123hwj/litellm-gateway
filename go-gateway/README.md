@@ -109,6 +109,8 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/admin/routes` | GET | 查看模型的故障转移顺序 |
 | `/admin/routes/:model` | PUT | 用 `{"providers":[...]}` 调整同一链路的优先级 |
 | `/admin/models/:model` | PUT | 调整模型 `capabilities` 和 `input_modalities` |
+| `/admin/pi` | GET | 查看 Pi 模型清单同步状态（期望清单、当前清单、差异） |
+| `/admin/pi/sync` | POST | 把精选模型清单同步到 `~/.pi/agent/models.json`（写入前自动备份），等价于 `llm-gateway setup pi`，也可在控制面板「设置 → Pi 集成」一键操作 |
 | `/admin/archives` | GET | 分页查询对话归档（`limit`/`offset`） |
 | `/admin/archives/export` | GET | 增量导出归档为 JSONL（`since`/`limit`，响应头返回下一游标） |
 | `/admin/archives` | DELETE | 按时间清理归档（`before_days` 或 `before`） |

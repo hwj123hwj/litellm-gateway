@@ -5,6 +5,7 @@ import type {
   LogsResponse,
   HealthResponse,
   RoutesResponse,
+  PiConfigResponse,
 } from './types'
 
 // 获取后端地址（支持运行时配置）
@@ -101,4 +102,12 @@ export function updateModel(
     method: 'PUT',
     body: JSON.stringify({ capabilities, input_modalities: inputModalities }),
   })
+}
+
+export function getPiConfig(): Promise<PiConfigResponse> {
+  return fetchJSON('/pi')
+}
+
+export function syncPiConfig(): Promise<PiConfigResponse> {
+  return fetchJSON('/pi/sync', { method: 'POST' })
 }

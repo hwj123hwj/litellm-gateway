@@ -158,6 +158,7 @@ func main() {
 	modelHandler := handlers.NewModelHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
+	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger)
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 	dashboardHandler := dashboard.NewHandler()
 
@@ -197,6 +198,8 @@ func main() {
 		admin.GET("/logs", adminHandler.HandleLogs)
 		admin.GET("/health", adminHandler.HandleHealth)
 		admin.GET("/config", adminHandler.HandleConfig)
+		admin.GET("/pi", piConfigHandler.HandleStatus)
+		admin.POST("/pi/sync", piConfigHandler.HandleSync)
 		admin.GET("/stats", adminHandler.HandleStats)
 		admin.GET("/archives", archiveHandler.HandleList)
 		admin.GET("/archives/export", archiveHandler.HandleExport)

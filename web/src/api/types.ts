@@ -115,3 +115,21 @@ export interface HealthResponse {
   providers_total: number
   providers: { provider: string; status: string }[]
 }
+
+export interface PiModelEntry {
+  id: string
+  name: string
+}
+
+export interface PiConfigResponse {
+  path: string
+  file_exists: boolean
+  in_sync: boolean
+  desired: PiModelEntry[]
+  desired_ids: string[]
+  current_ids: string[]
+  missing_ids: string[]
+  stale_ids: string[]
+  synced?: boolean
+  error?: string
+}
