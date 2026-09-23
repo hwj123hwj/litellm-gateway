@@ -56,17 +56,23 @@ func (e *ProviderError) HTTPStatus() int {
 }
 
 // Retryable reports whether trying another configured provider is reasonable.
-// Client/auth/model errors must not be hidden by a fallback provider.
+//
+// 判定原则：只要上游明确表示「这个 provider 服务不了本次请求」，就应该让链上的
+// 下一个 provider 接手，否则降级链形同虚设。
+//   - 429 / 5xx / 网络类：上游暂时不可用，等下一档。
+//   - 401/402/403/404：凭据失效、额度用尽、账号对该模型无权限、模型不存在，
+//     都是该 provider 的固有限制，换 provider 才可能成功。
+// 只有 400/422 这类「请求本身不合法」才终止降级——换个 provider 也还是同样的
+// 请求错误，继续重试只会掩盖问题。
 func (e *ProviderError) Retryable() bool {
 	if e == nil {
 		return false
 	}
 	switch e.StatusCode {
-	case http.StatusRequestTimeout, http.StatusConflict, 425, http.StatusTooManyRequests:
-		return true
-	default:
-		return e.StatusCode >= 500
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return false
 	}
+	return true
 }
 
 // NewHTTPError converts an upstream HTTP response into a typed error. Only a

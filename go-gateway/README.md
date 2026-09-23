@@ -174,16 +174,16 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 
 当前配置中：
 
-- `glm-sonnet` 绑定文本模型 `glm-5-turbo`，不是视觉模型；
-- `glm-vision` 绑定 `glm-5v-turbo`，用于文本+图片/视频/文件请求；
+- `glm-5.3` / `glm-5.3-flash`（智谱 coding 端点）是纯文本模型，不支持图片；
+- `glm-5v-turbo` 用于文本+图片/视频/文件请求；
 - 图片请求使用 OpenAI `image_url` content block，网关会保留原始块和 `extra_body`/`thinking` 等扩展字段。
+- `coding` 链上前两档不具备视觉能力，图片请求会被自动跳过并落到 DeepV 的模型。
 
 配置新模型时建议显式声明能力：
 
 ```yaml
 models:
   - id: glm-5v-turbo
-    aliases: [glm-vision]
     capabilities: [text, vision, video, file, tool_calling, streaming, reasoning]
     input_modalities: [text, image, video, file]
 ```
@@ -250,7 +250,7 @@ curl -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "coding-anthropic",
+    "model": "coding",
     "max_tokens": 100,
     "messages": [{"role": "user", "content": "你好"}]
   }'
@@ -263,7 +263,7 @@ curl -N -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "coding-anthropic",
+    "model": "coding",
     "max_tokens": 100,
     "stream": true,
     "messages": [{"role": "user", "content": "你好"}]
@@ -278,28 +278,30 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 | 模型名 | 默认上游 | 能力 |
 |--------|---------|------|
-| `coding` | `glm-5-turbo` → `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
-| `coding-anthropic` | `glm-5-turbo` → `qwen3.8-max-preview` | `/v1/messages` 兼容链 |
-| `glm-opus` | `qwen3.8-max-preview` → `copilot` → `glm-5.2` | 知识编译专用 fallback 链；文本、工具调用、推理、流式 |
-| `glm-5.2` | GLM `glm-5.2` | 文本、工具调用、推理、流式 |
-| `glm-sonnet` | GLM `glm-5-turbo` | 文本、工具调用、推理、流式 |
-| `glm-haiku` | GLM `glm-4.7` | 文本、工具调用、推理、流式 |
-| `glm-4.7-flash` | GLM `glm-4.7-flash` | 文本、工具调用、流式 |
-| `glm-vision` | GLM Vision `glm-5v-turbo` | 文本、图片、视频、文件、工具调用、推理、流式 |
-| `ali-opus`, `qwen3.8-max` | 阿里 `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
+| `coding` | `glm-5.3` → `glm-5.3-flash` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过前两档 |
+| `glm-5.3` | 智谱 `glm-5.3` | 文本、工具调用、推理、流式（不支持图片） |
+| `glm-5.3-flash` | 智谱 `glm-5.3-flash` | 文本、工具调用、推理、流式（不支持图片） |
+| `glm-5v-turbo` | 智谱 `glm-5v-turbo` | 文本、图片、视频、文件、工具调用、推理、流式 |
 
-命名规则：**对外模型名与上游模型 ID 一致**（`glm-5.2`、`qwen3.8-max-preview`），
-别名（`glm-opus`、`glm-haiku`、`ali-opus` 等）是给旧客户端的历史代号，两者同时可用，
-调用哪个名都会落到同一个上游模型。provider 实例名同样直接用上游模型 ID，
-不会再出现 `glm-glm-4.7` 这类供应商名与模型名重复的双写；只有当两个供应商声明了
-同名模型时，才退回 `供应商-模型` 的限定形式以保证唯一。
+**命名规则：模型名就是上游模型 ID，不设别名。** 客户端要调哪个模型就写哪个名字，
+网关不再维护 `glm-opus` / `glm-haiku` / `ali-opus` 这类第二套代号。
+provider 实例名同样用上游模型 ID；只有不同供应商提供同名模型时（智谱与 DeepV
+都有 `glm-5.3-flash`）才加供应商前缀区分。
+
+**`coding` 是唯一的对外入口，也是唯一的降级链。** 链上按能力从强到弱排列，
+任一档失败都会自动降级到下一档，客户端始终只调用 `coding` 一个名字：
+
+- 上游限流（429）、5xx、网络错误 → 换下一档重试
+- 账号无该模型权限（403）、凭据失效（401）、欠费（402）、模型不存在（404）→ 换下一档重试
+- 请求本身不合法（400/422）→ **不**降级，直接返回（换个 provider 也是同样的错误）
+- 请求带图片时，不具备视觉能力的档位会被自动跳过
 
 启用 `DEEPV_ENABLED=true`（EasyCode/DeepVCode 聚合服务，自动读本地 JWT 登录态）后，额外提供：
 
 | 模型名 | 上游绑定 | 能力 |
 |--------|---------|------|
-| `deepseek-flash`（别名 `deepseek-v4.1-flash`） | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
-| `glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
+| `deepseek-flash`（兼容名 `deepseek-v4.1-flash`） | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
+| `deepv-glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
 
 DeepV 上游按单请求 token 总量（输入 + `max_output_tokens`）不超过 200000 校验，两个模型的目录条目声明 `max_input_tokens: 160000`、`max_output_tokens: 32000`。超过该限制的请求会被上游以配额错误拒绝，网关识别后转换为 400 并附处置说明，避免客户端把参数问题当成欠费（402 Payment Required）。
 
@@ -516,7 +518,7 @@ curl -X POST http://localhost:4001/v1/chat/completions \
 curl -X POST http://localhost:4001/v1/messages \
   -H "Authorization: Bearer sk-local-gateway-xxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"coding-anthropic","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"coding","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 ### 配置 Claude Code（远程）

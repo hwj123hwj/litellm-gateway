@@ -71,24 +71,14 @@ func TestRouterReturnsErrorWhenAllProvidersUnavailable(t *testing.T) {
 	}
 }
 
-func TestRouterMapModelName(t *testing.T) {
+// 别名已移除：模型名原样传递，实际模型改写由 BoundModelProvider 负责。
+func TestRouterMapModelNameIsIdentityWithoutAliases(t *testing.T) {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	router := NewRouter(logger)
 
-	tests := []struct {
-		modelName    string
-		providerName string
-		expected     string
-	}{
-		{"glm-sonnet", "glm", "glm-5-turbo"},
-		{"glm-opus", "glm", "glm-5.2"},
-		{"glm-haiku", "glm", "glm-4.7"},
-	}
-
-	for _, tt := range tests {
-		result := router.mapModelName(tt.modelName, tt.providerName)
-		if result != tt.expected {
-			t.Errorf("mapModelName(%q, %q) = %q, want %q", tt.modelName, tt.providerName, result, tt.expected)
+	for _, modelName := range []string{"glm-5.3", "glm-5.3-flash", "coding", "deepseek-flash"} {
+		if got := router.mapModelName(modelName, "glm"); got != modelName {
+			t.Errorf("mapModelName(%q) = %q, want unchanged", modelName, got)
 		}
 	}
 }

@@ -75,14 +75,13 @@ func (p *CopilotProvider) APIKey() string {
 }
 func (p *CopilotProvider) UseBearer() bool { return true }
 
+// mapModel 把请求模型名映射到 Copilot 支持的模型。
+// 别名已移除，非 Copilot 自己的模型名一律回落到 Copilot 默认模型，
+// 因为它只服务 GPT 系列。
 func (p *CopilotProvider) mapModel(reqModel string) string {
 	switch reqModel {
-	case "gpt-4o-mini", "copilot-haiku":
+	case "gpt-4o-mini":
 		return "gpt-4o-mini"
-	case "glm-opus":
-		// glm-opus is also the stable logical name used by the knowledge
-		// compilation fallback chain. Copilot receives its own supported model.
-		return "gpt-4o"
 	default:
 		return "gpt-4o"
 	}

@@ -38,7 +38,9 @@ func TestResponsesToProviderRequestPreservesMaxOutputTokens(t *testing.T) {
 	}
 }
 
-func TestResponsesHandlerPreservesProviderStatusWhenAllStreamsFail(t *testing.T) {
+// 链上第一个 provider 返回 403（账号无该模型权限）时必须继续降级，
+// 而不是把 403 直接抛给客户端——这正是「持续降级」的核心。
+func TestResponsesHandlerFallsBackWhenProviderRejectsModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logger := log.New(io.Discard, "", 0)
 	router := provider.NewRouter(logger)
@@ -62,8 +64,12 @@ func TestResponsesHandlerPreservesProviderStatusWhenAllStreamsFail(t *testing.T)
 
 	engine.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected upstream 403 without fallback, got %d: %s", w.Code, w.Body.String())
+	// 两个 provider 最终都失败，但关键是第一个的 403 没有短路整条链。
+	if second.streamCalls == 0 {
+		t.Fatal("second provider was never tried: 403 did not fall through")
+	}
+	if w.Code == http.StatusForbidden {
+		t.Fatalf("403 from the first provider must not be surfaced to the client, got %d", w.Code)
 	}
 }
 

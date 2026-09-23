@@ -49,18 +49,37 @@ func TestProviderHTTPErrorExtractsStatusAndRetryMetadata(t *testing.T) {
 	}
 }
 
-func TestShouldFallbackStopsOnClientErrors(t *testing.T) {
-	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity} {
-		if ShouldFallback(&ProviderError{StatusCode: status}) {
-			t.Fatalf("status %d should not fallback", status)
+// 降级链要能「持续降级」：provider 自身服务不了本次请求时（凭据失效、无该模型
+// 权限、欠费、模型不存在、限流、上游 5xx）都应交给下一个 provider。
+// 只有请求本身不合法（400/422）才终止——换 provider 也还是同样的请求错误。
+func TestShouldFallbackContinuesOnProviderScopedFailures(t *testing.T) {
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+	} {
+		if !ShouldFallback(&ProviderError{StatusCode: status}) {
+			t.Errorf("status %d should be fallback eligible (provider-scoped failure)", status)
 		}
 	}
 	if !ShouldFallback(errors.New("network unavailable")) {
-		t.Fatal("untyped provider/network errors should remain fallback eligible")
+		t.Error("untyped provider/network errors should remain fallback eligible")
 	}
 }
 
-func TestRouterDoesNotFallbackOnProviderClientError(t *testing.T) {
+func TestShouldFallbackStopsOnRequestErrors(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnprocessableEntity} {
+		if ShouldFallback(&ProviderError{StatusCode: status}) {
+			t.Errorf("status %d should not fallback (request-scoped error repeats on every provider)", status)
+		}
+	}
+}
+
+func TestRouterFallsBackOnProviderAuthError(t *testing.T) {
 	logger := log.New(io.Discard, "", 0)
 	router := NewRouter(logger)
 	first := &errorPolicyProvider{
@@ -72,12 +91,12 @@ func TestRouterDoesNotFallbackOnProviderClientError(t *testing.T) {
 	router.RegisterProvider(second.name, second)
 	router.RegisterChain("coding", []string{first.name, second.name})
 
-	_, err := router.Forward(context.Background(), "coding", &Request{Model: "coding"})
-	if err == nil {
-		t.Fatal("expected the provider error to be returned")
+	resp, err := router.Forward(context.Background(), "coding", &Request{Model: "coding"})
+	if err != nil || resp == nil || resp.Model != "fallback" {
+		t.Fatalf("expected fallback response, got resp=%#v err=%v", resp, err)
 	}
-	if second.calls != 0 {
-		t.Fatal("must not fallback on provider authentication errors")
+	if second.calls != 1 {
+		t.Fatalf("expected fallback provider to be called once, got %d", second.calls)
 	}
 }
 
@@ -126,6 +145,16 @@ func TestRouterFallbackFaultMatrix(t *testing.T) {
 		{
 			name:         "authentication failure",
 			err:          &ProviderError{Provider: "first", StatusCode: http.StatusUnauthorized, Message: "invalid key"},
+			wantFallback: true,
+		},
+		{
+			name:         "model access denied",
+			err:          &ProviderError{Provider: "first", StatusCode: http.StatusForbidden, Message: "access denied"},
+			wantFallback: true,
+		},
+		{
+			name:         "invalid request",
+			err:          &ProviderError{Provider: "first", StatusCode: http.StatusBadRequest, Message: "bad request"},
 			wantFallback: false,
 		},
 	}

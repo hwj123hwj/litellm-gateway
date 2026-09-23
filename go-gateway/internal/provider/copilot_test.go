@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+// Copilot 只服务 GPT 系列：除 gpt-4o-mini 外，任何模型名都回落到 gpt-4o。
+// 网关里的别名已移除（copilot-*、auto、glm-opus 不再存在）。
 func TestCopilotMapModel(t *testing.T) {
 	p := &CopilotProvider{}
 
@@ -12,13 +14,8 @@ func TestCopilotMapModel(t *testing.T) {
 		expected string
 	}{
 		{"copilot", "gpt-4o"},
-		{"auto", "gpt-4o"},
-		{"copilot-auto", "gpt-4o"},
-		{"copilot-opus", "gpt-4o"},
-		{"copilot-sonnet", "gpt-4o"},
-		{"copilot-haiku", "gpt-4o-mini"},
-		{"glm-opus", "gpt-4o"},
 		{"gpt-4o-mini", "gpt-4o-mini"},
+		{"coding", "gpt-4o"},
 		{"unknown-model", "gpt-4o"},
 	}
 

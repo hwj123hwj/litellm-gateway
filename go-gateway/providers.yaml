@@ -1,57 +1,35 @@
 # 模型提供商配置
 # 命名规则：
-#   - provider 实例名与对外模型名一致，都用上游的模型 ID（不写供应商前缀，
-#     避免 glm-glm-4.7 这种重复）
-#   - aliases 是兼容旧客户端的历史代号（glm-opus 等），与主名同时可用
-#   - chain 中引用 provider 实例名，即上游模型 ID
+#   - provider 实例名与对外模型名都用上游模型 ID，不设置别名
+#   - 不同供应商提供同名模型时（如智谱与 DeepV 都有 glm-5.3-flash），
+#     后注册的那个用 供应商-模型 限定，保证实例名唯一
+#   - 客户端只调用 chains 里定义的链，链内按顺序持续降级
 
 providers:
-  # 智谱 GLM（核心供应商，保留 haiku/sonnet/opus 别名）
+  # 智谱 GLM
   - name: glm
     type: openai
     url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     api_key_env: GLM_API_KEY
-    # GLM-5.2 reasoning requests used by the knowledge flywheel can exceed
-    # the normal 120-second provider deadline. Keep this provider-level
-    # timeout explicit and configurable instead of silently opening the
-    # circuit while a valid long-running request is still being processed.
+    # GLM-5.3 reasoning 请求可能超过常规 120 秒上游期限，显式放宽，
+    # 避免长请求仍在处理时被本地超时中断并计入熔断。
     request_timeout_seconds: 900
     models:
-      - id: glm-5.2
-        aliases: [glm-opus]
-        capabilities: [text, tool_calling, streaming, reasoning]
       - id: glm-5.3
         # 始终思考模型：上游不接受 thinking:disabled（网关侧自动丢弃该参数）
         capabilities: [text, tool_calling, streaming, reasoning]
-      - id: glm-5-turbo
-        aliases: [glm-sonnet]
+      - id: glm-5.3-flash
         capabilities: [text, tool_calling, streaming, reasoning]
-      - id: glm-4.7
-        aliases: [glm-haiku]
-        capabilities: [text, tool_calling, streaming, reasoning]
-      - id: glm-4.7-flash
-        capabilities: [text, tool_calling, streaming]
 
-  # GLM 视觉模型：不要复用 glm-sonnet（它绑定的是文本 GLM-5-Turbo）。
+  # GLM 视觉模型。视觉能力只有这一条来源，不复用文本模型名。
   - name: glm-vision
     type: openai
     url: https://open.bigmodel.cn/api/paas/v4/chat/completions
     api_key_env: GLM_API_KEY
     models:
       - id: glm-5v-turbo
-        aliases: [glm-vision]
         capabilities: [text, vision, video, file, tool_calling, streaming, reasoning]
         input_modalities: [text, image, video, file]
-
-  # 阿里 MaaS（Qwen 3.8 Max）
-  - name: ali
-    type: openai
-    url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
-    api_key_env: ALI_API_KEY
-    models:
-      - id: qwen3.8-max-preview
-        aliases: [ali-opus, qwen3.8-max]
-        capabilities: [text, tool_calling, streaming, reasoning]
 
   # ChatGPT Plus/Pro Codex subscription. The provider reads OAuth credentials
   # from Codex CLI/Pi auth.json; HTTP_PROXY is optional and only controls
@@ -67,7 +45,6 @@ providers:
         max_input_tokens: 272000
         max_output_tokens: 128000
       - id: gpt-5.6-luna
-        aliases: [gpt-luna]
         protocol: responses
         capabilities: [text, vision, tool_calling, streaming, reasoning]
         input_modalities: [text, image]
@@ -79,20 +56,12 @@ providers:
         input_modalities: [text, image]
         max_input_tokens: 272000
         max_output_tokens: 128000
+
 chains:
+  # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
+  # 上游 5xx）都自动降级到下一档，客户端始终只调用这个名字。
   coding:
-    # wiki 代理（openwiki personal）走此链。原 glm-5-turbo 是 GLM 家最弱档，
-    # wiki 输出质量明显弱于卡片编译（glm-opus 链），升级到 5.2 对齐。
-    - glm-5.2
-    - qwen3.8-max-preview
-
-  coding-anthropic:
-    - glm-5-turbo
-    - qwen3.8-max-preview
-
-  # Knowledge flywheel chain. Keep the stable glm-opus model name for clients
-  # while routing failures to the bound Ali model and optional Copilot provider.
-  glm-opus:
-    - qwen3.8-max-preview
-    - copilot
-    - glm-5.2
+    - glm-5.3
+    - glm-5.3-flash
+    - deepv-glm-5.3-flash
+    - deepseek-flash

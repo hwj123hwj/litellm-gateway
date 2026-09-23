@@ -303,78 +303,32 @@ func defaultPiHome() string {
 	return filepath.Join(userHome, ".pi")
 }
 
-// setupDefaultProviders 设置默认提供商（当 providers.yaml 不存在时使用）
+// setupDefaultProviders 设置默认提供商（当 providers.yaml 不存在时使用）。
+// 与 providers.yaml 保持同一套命名规则：provider 实例名即上游模型 ID，不设别名，
+// 对外只暴露 coding 一条持续降级的链。
 func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
+	var codingProviders []string
+
 	if cfg.GLMAPIKey != "" {
-		router.RegisterProvider("glm-anthropic", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "glm-anthropic",
-			URL:       "https://open.bigmodel.cn/api/anthropic/v1/messages",
-			APIKey:    cfg.GLMAPIKey,
-			UseBearer: false,
-		}))
-		router.RegisterProvider("glm", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "glm",
+		glmConfig := &provider.Config{
 			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
 			APIKey: cfg.GLMAPIKey,
-		}))
-		router.RegisterProvider("glm-free", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "glm-free",
-			URL:    "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
-			APIKey: cfg.GLMAPIKey,
-		}))
+		}
+		for _, modelID := range []string{"glm-5.3", "glm-5.3-flash"} {
+			glmConfig.Name = modelID
+			// 每个模型绑定自己的上游模型名，避免共用 provider 时发错模型。
+			router.RegisterProvider(modelID, provider.NewBoundModelProviderWrapper(
+				provider.NewOpenAIProvider(glmConfig), modelID))
+			router.RegisterChain(modelID, []string{modelID})
+			codingProviders = append(codingProviders, modelID)
+		}
 	}
-	if cfg.AliAPIKey != "" {
-		router.RegisterProvider("ali-anthropic", provider.NewAnthropicProvider(&provider.Config{
-			Name:      "ali-anthropic",
-			URL:       "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages",
-			APIKey:    cfg.AliAPIKey,
-			UseBearer: true,
-		}))
-		router.RegisterProvider("ali", provider.NewOpenAIProvider(&provider.Config{
-			Name:   "ali",
-			URL:    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
-			APIKey: cfg.AliAPIKey,
-		}))
-	}
-	// 注册 fallback 链（与 providers.yaml 别名规则一致）
-	codingProviders := []string{}
-	if cfg.GLMAPIKey != "" {
-		codingProviders = append(codingProviders, "glm")
-	}
-	if cfg.AliAPIKey != "" {
-		codingProviders = append(codingProviders, "ali")
-	}
+
 	if len(codingProviders) == 0 {
-		codingProviders = []string{"glm"}
+		logger.Printf("Warning: no GLM API key configured; coding chain has no providers")
+		return
 	}
 	router.RegisterChain("coding", codingProviders)
-
-	codingAnthropicProviders := []string{}
-	if cfg.GLMAPIKey != "" {
-		codingAnthropicProviders = append(codingAnthropicProviders, "glm-anthropic")
-	}
-	if cfg.AliAPIKey != "" {
-		codingAnthropicProviders = append(codingAnthropicProviders, "ali-anthropic")
-	}
-	if len(codingAnthropicProviders) == 0 {
-		codingAnthropicProviders = []string{"glm-anthropic"}
-	}
-	router.RegisterChain("coding-anthropic", codingAnthropicProviders)
-
-	// GLM 核心别名
-	if cfg.GLMAPIKey != "" {
-		router.RegisterChain("glm-sonnet", []string{"glm"})
-		router.RegisterChain("glm-haiku", []string{"glm"})
-		router.RegisterChain("glm-opus", []string{"glm"})
-		router.RegisterChain("glm-4.7-flash", []string{"glm-free"})
-		// Keep the historical alias for existing local clients when providers.yaml
-		// is absent; new configuration should use the explicit model ID above.
-		router.RegisterChain("glm-flash", []string{"glm-free"})
-	}
-	// Ali 核心别名
-	if cfg.AliAPIKey != "" {
-		router.RegisterChain("ali-opus", []string{"ali"})
-	}
 }
 
 // setupDeepVProviders 设置 DeepV Server 提供商（EasyCode/DeepVCode 的聚合后端）。
@@ -387,14 +341,14 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 	}
 	deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
 
-	// provider 实例名用上游模型 ID，与 providers.yaml 的命名规则一致，
-	// 面板和路由里显示的就是实际上游请求的模型名。
+	// provider 实例名用上游模型 ID。注意智谱同样提供 glm-5.3-flash，两家实例名
+	// 会撞车并互相覆盖，因此 DeepV 这几个统一加 deepv- 前缀区分。
 	router.RegisterProvider("deepseek-flash", provider.NewDeepVProvider(&provider.Config{
 		Name: "deepseek-flash",
 		URL:  deepvURL,
 	}, workDir, "deepseek-flash"))
-	router.RegisterProvider("glm-5.3-flash", provider.NewDeepVProvider(&provider.Config{
-		Name: "glm-5.3-flash",
+	router.RegisterProvider("deepv-glm-5.3-flash", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepv-glm-5.3-flash",
 		URL:  deepvURL,
 	}, workDir, "glm-5.3-flash"))
 
@@ -402,7 +356,9 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 	// DeepV 上游模型名是 deepseek-flash，历史客户端用的是 deepseek-v4.1-flash。
 	// 主名对齐上游，同时保留旧名作为兼容入口。
 	router.RegisterChain("deepseek-v4.1-flash", []string{"deepseek-flash"})
-	router.RegisterChain("glm-5.3-flash", []string{"glm-5.3-flash"})
+	// DeepV 的 glm-5.3-flash 独立成一个链名，避免与智谱同名实例混淆；
+	// 客户端主要经 coding 链间接用到它。
+	router.RegisterChain("deepv-glm-5.3-flash", []string{"deepv-glm-5.3-flash"})
 
 	// DeepV 上游按 单请求总量（输入 + max_output_tokens）≤ 200000 校验。
 	// 目录里声明合计留有余量的上限，客户端读到后不会再发出超出配额的
@@ -452,11 +408,6 @@ func setupCopilotProviders(router *provider.Router, cfg *config.Config, logger *
 
 	router.RegisterProvider("copilot", provider.NewCopilotProvider(copilotConfig, cfg.CopilotGithubToken))
 	router.RegisterChain("copilot", []string{"copilot"})
-	router.RegisterChain("copilot-auto", []string{"copilot"})
-	router.RegisterChain("auto", []string{"copilot"})
-	router.RegisterChain("copilot-opus", []string{"copilot"})
-	router.RegisterChain("copilot-sonnet", []string{"copilot"})
-	router.RegisterChain("copilot-haiku", []string{"copilot"})
 
 	logger.Printf("GitHub Copilot enabled")
 }

@@ -72,7 +72,8 @@ func TestOpenAIProviderUsesSafeDefaultRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestProvidersConfigKeepsKnowledgeCompileFallbackOrder(t *testing.T) {
+// 对外只暴露一条 coding 链，按能力从强到弱排列，任一档失败都降级到下一档。
+func TestProvidersConfigExposesSingleCodingChain(t *testing.T) {
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
@@ -83,9 +84,33 @@ func TestProvidersConfigKeepsKnowledgeCompileFallbackOrder(t *testing.T) {
 		t.Fatalf("load providers.yaml: %v", err)
 	}
 
-	want := []string{"qwen3.8-max-preview", "copilot", "glm-5.2"}
-	if got := config.Chains["glm-opus"]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("glm-opus fallback chain = %#v, want %#v", got, want)
+	want := []string{"glm-5.3", "glm-5.3-flash", "deepv-glm-5.3-flash", "deepseek-flash"}
+	if got := config.Chains["coding"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("coding chain = %#v, want %#v", got, want)
+	}
+	if len(config.Chains) != 1 {
+		t.Fatalf("chains = %#v, want coding as the only entry point", config.Chains)
+	}
+}
+
+// 别名已全部移除：模型只暴露上游真名，客户端不再有第二套代号。
+func TestProvidersConfigDeclaresNoAliases(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	configPath := filepath.Join(filepath.Dir(sourceFile), "..", "..", "providers.yaml")
+	config, err := LoadProvidersConfig(configPath)
+	if err != nil {
+		t.Fatalf("load providers.yaml: %v", err)
+	}
+
+	for _, providerConfig := range config.Providers {
+		for _, model := range providerConfig.Models {
+			if len(model.Aliases) > 0 {
+				t.Errorf("model %s still declares aliases %v", model.ID, model.Aliases)
+			}
+		}
 	}
 }
 

@@ -363,25 +363,12 @@ func boundedErrorSummary(err error) string {
 	return value
 }
 
-// mapModelName 将通用模型名映射到具体提供商的实际模型名（对齐 providers.yaml）
-// 仅在默认 setup 路径（无 providers.yaml）下使用
+// mapModelName 把对外模型名映射到某个 provider 实际接受的上游模型名。
+//
+// 对外只暴露上游真名（providers.yaml 不再设别名），且模型绑定由
+// BoundModelProvider 完成，因此这里恒等返回请求里的模型名。保留该函数是为了
+// 现有调用点（handler 侧改写 req.Model）不变。
 func (r *Router) mapModelName(modelName, providerName string) string {
-	mappings := map[string]map[string]string{
-		// GLM 核心：保留 haiku/sonnet/opus 别名
-		"glm-opus":   {"glm": "glm-5.2"},
-		"glm-sonnet": {"glm": "glm-5-turbo"},
-		"glm-haiku":  {"glm": "glm-4.7"},
-		// GitHub Copilot（免费教育套餐，仅支持 GPT 系列模型）
-		"copilot-opus":   {"copilot": "gpt-4.1"},
-		"copilot-sonnet": {"copilot": "gpt-4o-2024-11-20"},
-		"copilot-haiku":  {"copilot": "gpt-4o-mini"},
-	}
-
-	if mapping, ok := mappings[modelName]; ok {
-		if actualModel, ok := mapping[providerName]; ok {
-			return actualModel
-		}
-	}
 	return modelName
 }
 
