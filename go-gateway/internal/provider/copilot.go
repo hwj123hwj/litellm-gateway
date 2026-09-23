@@ -331,9 +331,18 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 	return nil
 }
 
+// IsHealthy 只反映本地 token 是否非空，不验证上游可用性；上游可用性请用 Probe。
 func (p *CopilotProvider) IsHealthy(ctx context.Context) bool {
-	// Copilot token 过期时间短，这里简单检查 token 是否非空
 	return p.token != ""
+}
+
+// Probe 发一个最小请求验证 token 与账号配额。Copilot 的 token 过期很快，
+// 本地非空并不代表上游仍接受，必须真实调用一次。
+func (p *CopilotProvider) Probe(ctx context.Context) ProbeResult {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	// 走非流式转发路径：ForwardRequest 内部已处理 401 后的 token 刷新。
+	return probeVia(ctx, p.mapModel(""), 0, p.ForwardRequest)
 }
 
 func (p *CopilotProvider) setHeaders(req *http.Request) {

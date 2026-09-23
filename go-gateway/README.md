@@ -151,6 +151,23 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后允许一次半开探测；可通过 `CIRCUIT_FAILURE_THRESHOLD`、`CIRCUIT_RECOVERY_SECONDS` 和 `CIRCUIT_SUCCESS_THRESHOLD` 调整。管理接口只返回脱敏的运行状态，API key 始终来自环境变量。
 
+### Provider 探测
+
+`POST /admin/providers/:name/health-check` 会**真实发一次最小请求到上游**，用来验证「鉴权 + 模型可用」，而不是只看本地配置。结论分四类：
+
+| 结论 | 含义 | 触发条件 |
+|------|------|---------|
+| `online` | 上游可用 | 上游返回 2xx |
+| `degraded` | 上游可达但当前受限，通常可自愈 | 429、5xx、网络错误 |
+| `offline` | 需要改配置才能恢复 | 401/402/403/404（凭据失效、无模型权限、欠费、模型不存在） |
+| `unknown` | 无法得出结论 | provider 未实现探测能力 |
+
+响应里带 `probe_status`、`detail`、`status_code`、`latency_ms`，并同时返回该 provider 的完整运行状态。只有 `online`/`degraded`/`offline` 会写入熔断器；`unknown` 不写结果，避免一次「测不了」被当成成功而清掉真实的连续失败计数。
+
+管理面板的「在线」状态以**最近一次探测结论**为准，优先于「历史上请求成功过」——否则一个已被上游限流的 provider 会因为早先成功过而长期显示在线。从未探测过的 provider 显示「未知」，面板会注明状态来自请求历史。
+
+`Provider.IsHealthy` 只反映本地配置（凭据是否存在），不再作为上游可用性的判断依据。
+
 ### 模型能力与多模态
 
 `GET /v1/models` 除了标准模型字段，还会返回 `capabilities`、`input_modalities`、`protocol` 和可选的 token 上限。网关会在转发前按这些能力筛选路由：如果请求包含图片而目标模型没有 `vision`，返回明确的 `400`，不会把图片静默降成文本或错误 fallback 到文本模型。
@@ -261,20 +278,27 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 | 模型名 | 默认上游 | 能力 |
 |--------|---------|------|
-| `coding` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
-| `coding-anthropic` | `glm-glm-5-turbo` → `ali-qwen3.8-max-preview` | `/v1/messages` 兼容链 |
-| `glm-opus` | GLM `glm-5.2` → Ali `qwen3.8-max-preview` → Copilot `gpt-4o` | 知识编译专用 fallback 链；文本、工具调用、推理、流式 |
+| `coding` | `glm-5-turbo` → `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
+| `coding-anthropic` | `glm-5-turbo` → `qwen3.8-max-preview` | `/v1/messages` 兼容链 |
+| `glm-opus` | `qwen3.8-max-preview` → `copilot` → `glm-5.2` | 知识编译专用 fallback 链；文本、工具调用、推理、流式 |
+| `glm-5.2` | GLM `glm-5.2` | 文本、工具调用、推理、流式 |
 | `glm-sonnet` | GLM `glm-5-turbo` | 文本、工具调用、推理、流式 |
 | `glm-haiku` | GLM `glm-4.7` | 文本、工具调用、推理、流式 |
 | `glm-4.7-flash` | GLM `glm-4.7-flash` | 文本、工具调用、流式 |
 | `glm-vision` | GLM Vision `glm-5v-turbo` | 文本、图片、视频、文件、工具调用、推理、流式 |
 | `ali-opus`, `qwen3.8-max` | 阿里 `qwen3.8-max-preview` | 文本、工具调用、推理、流式 |
 
+命名规则：**对外模型名与上游模型 ID 一致**（`glm-5.2`、`qwen3.8-max-preview`），
+别名（`glm-opus`、`glm-haiku`、`ali-opus` 等）是给旧客户端的历史代号，两者同时可用，
+调用哪个名都会落到同一个上游模型。provider 实例名同样直接用上游模型 ID，
+不会再出现 `glm-glm-4.7` 这类供应商名与模型名重复的双写；只有当两个供应商声明了
+同名模型时，才退回 `供应商-模型` 的限定形式以保证唯一。
+
 启用 `DEEPV_ENABLED=true`（EasyCode/DeepVCode 聚合服务，自动读本地 JWT 登录态）后，额外提供：
 
 | 模型名 | 上游绑定 | 能力 |
 |--------|---------|------|
-| `deepseek-v4.1-flash` | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
+| `deepseek-flash`（别名 `deepseek-v4.1-flash`） | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
 | `glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
 
 DeepV 上游按单请求 token 总量（输入 + `max_output_tokens`）不超过 200000 校验，两个模型的目录条目声明 `max_input_tokens: 160000`、`max_output_tokens: 32000`。超过该限制的请求会被上游以配额错误拒绝，网关识别后转换为 400 并附处置说明，避免客户端把参数问题当成欠费（402 Payment Required）。

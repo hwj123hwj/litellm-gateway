@@ -259,16 +259,25 @@ func (h *AdminHandler) HandleResetProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, providerStatusPayload(status))
 }
 
-// HandleCheckProvider POST /admin/providers/:name/health-check runs the
-// provider's built-in lightweight health probe on demand.
+// HandleCheckProvider POST /admin/providers/:name/health-check runs a real
+// upstream probe on demand. It reports the classified outcome (online /
+// degraded / offline / unknown) together with the upstream evidence.
 func (h *AdminHandler) HandleCheckProvider(c *gin.Context) {
-	healthy, err := h.router.CheckProviderHealth(c.Request.Context(), c.Param("name"))
-	if err != nil {
-		h.writeControlError(c, err)
-		return
+	result := h.router.CheckProviderHealth(c.Request.Context(), c.Param("name"))
+	payload := gin.H{
+		"healthy":      result.Status == provider.ProbeOnline,
+		"probe_status": string(result.Status),
+		"detail":       result.Detail,
+	}
+	if result.StatusCode > 0 {
+		payload["status_code"] = result.StatusCode
+	}
+	if result.Latency > 0 {
+		payload["latency_ms"] = float64(result.Latency.Microseconds()) / 1000
 	}
 	status, _ := h.router.ProviderStatus(c.Param("name"))
-	c.JSON(http.StatusOK, gin.H{"healthy": healthy, "provider": providerStatusPayload(status)})
+	payload["provider"] = providerStatusPayload(status)
+	c.JSON(http.StatusOK, payload)
 }
 
 type routeUpdateRequest struct {
@@ -405,6 +414,17 @@ func providerStatusPayload(status provider.RuntimeProviderStatus) gin.H {
 	}
 	if !status.LastSuccessAt.IsZero() {
 		entry["last_success_at"] = status.LastSuccessAt.Format(time.RFC3339Nano)
+	}
+	// 探测结论单独暴露：面板据此区分「探测过且在线」和「只是没失败过」。
+	if status.HasProbe {
+		entry["has_probe"] = true
+		entry["probe_status"] = string(status.ProbeStatus)
+		if status.ProbeDetail != "" {
+			entry["probe_detail"] = status.ProbeDetail
+		}
+		if !status.LastProbeAt.IsZero() {
+			entry["last_probe_at"] = status.LastProbeAt.Format(time.RFC3339Nano)
+		}
 	}
 	if !status.OpenedAt.IsZero() {
 		entry["opened_at"] = status.OpenedAt.Format(time.RFC3339Nano)

@@ -15,6 +15,12 @@ export interface ProviderInfo {
   total_failures?: number
   total_successes?: number
   next_retry_at?: string
+  // 最近一次上游探测的结论。has_probe 为 false 表示从未探测过，
+  // 此时的 status 只反映熔断器，不代表上游可用性。
+  has_probe?: boolean
+  probe_status?: 'online' | 'degraded' | 'offline' | 'unknown'
+  probe_detail?: string
+  last_probe_at?: string
   requests: number
   successes?: number
   errors?: number

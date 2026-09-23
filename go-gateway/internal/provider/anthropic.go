@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 // AnthropicProvider 实现 Anthropic API 兼容的提供商
@@ -18,9 +17,17 @@ type AnthropicProvider struct {
 
 // NewAnthropicProvider 创建新的提供商实例
 func NewAnthropicProvider(config *Config) *AnthropicProvider {
+	// 不用 http.Client.Timeout：它会把整个流式 body 透传计入总时长，长生成会被
+	// 砍断。改为 ResponseHeaderTimeout 限制首字节，流式停滞由看门狗中止
+	requestTimeout := config.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = defaultRequestTimeout
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = requestTimeout
 	return &AnthropicProvider{
 		config: config,
-		client: &http.Client{Timeout: 120 * time.Second},
+		client: &http.Client{Transport: transport},
 	}
 }
 
@@ -39,7 +46,11 @@ func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w i
 		return fmt.Errorf("marshal stream request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.URL, bytes.NewReader(reqBody))
+	// 派生可取消 context：空闲看门狗超时触发 cancel，中止停滞的上游流
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, p.config.URL, bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("create stream request: %w", err)
 	}
@@ -56,7 +67,17 @@ func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w i
 		return NewHTTPError(p.Name(), resp, respBody)
 	}
 
-	_, err = io.Copy(w, resp.Body)
+	idleTimeout := p.config.RequestTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultRequestTimeout
+	}
+	kick, idleTripped := startStreamIdleWatchdog(streamCtx, idleTimeout, cancel)
+
+	// 透传没有行循环，包装 reader 在每次 Read 时喂看门狗
+	_, err = io.Copy(w, kickingReader{R: resp.Body, Kick: kick})
+	if err != nil && idleTripped() {
+		return fmt.Errorf("upstream stream idle over %v: no data received", idleTimeout)
+	}
 	return err
 }
 
@@ -95,23 +116,21 @@ func (p *AnthropicProvider) ForwardRequest(ctx context.Context, req *Request) (*
 	return &response, nil
 }
 
-// IsHealthy 检查提供商是否健康
+// IsHealthy 只反映本地配置，不代表上游可用；上游可用性请用 Probe。
 func (p *AnthropicProvider) IsHealthy(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	return true
+}
+
+// Probe 发一个最小请求验证鉴权与模型可用性。
+func (p *AnthropicProvider) Probe(ctx context.Context) ProbeResult {
+	return p.ProbeModel(ctx, p.config.Name)
+}
+
+// ProbeModel 用指定模型探测。Anthropic 协议要求 max_tokens 必填，给一个最小值。
+func (p *AnthropicProvider) ProbeModel(ctx context.Context, model string) ProbeResult {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, p.config.URL, nil)
-	if err != nil {
-		return false
-	}
-	p.setHeaders(req)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	return probeVia(ctx, model, 16, p.ForwardRequest)
 }
 
 // setHeaders 设置公共请求头

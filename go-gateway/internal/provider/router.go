@@ -29,6 +29,12 @@ type Router struct {
 type providerRuntime struct {
 	enabled bool
 	breaker *CircuitBreaker
+	// lastProbe 保存最近一次上游探测的结论。它与熔断器分开：熔断只反映连续
+	// 请求失败，探测结论是「人工验证过上游可用性」的证据，面板据此区分
+	// 「在线」和「只是没失败过」。
+	lastProbe    ProbeResult
+	lastProbeAt  time.Time
+	hasProbe     bool
 }
 
 type modelCapabilityOverride struct {
@@ -51,6 +57,12 @@ type RuntimeProviderStatus struct {
 	LastSuccessAt       time.Time
 	OpenedAt            time.Time
 	NextRetryAt         time.Time
+	// 最近一次上游探测的结论。HasProbe 为 false 表示从未探测过，此时 Status
+	// 只反映熔断器，不代表上游可用性。
+	HasProbe     bool
+	ProbeStatus  ProbeStatus
+	ProbeDetail  string
+	LastProbeAt  time.Time
 }
 
 type RouteProviderStatus struct {
@@ -520,6 +532,8 @@ func (r *Router) SetProviderEnabled(name string, enabled bool) error {
 }
 
 // ResetProvider closes a provider circuit without changing its enabled state.
+// 同时清掉上一次探测结论：重置的语义是「忘掉历史判断」，留着一个旧的
+// offline 结论会让面板继续显示已修好的 provider 为离线。
 func (r *Router) ResetProvider(name string) error {
 	r.mu.RLock()
 	runtime, ok := r.runtime[name]
@@ -528,29 +542,57 @@ func (r *Router) ResetProvider(name string) error {
 		return fmt.Errorf("%w: %s", ErrUnknownProvider, name)
 	}
 	runtime.breaker.Reset()
+	r.mu.Lock()
+	runtime.hasProbe = false
+	runtime.lastProbe = ProbeResult{}
+	runtime.lastProbeAt = time.Time{}
+	r.mu.Unlock()
 	return nil
 }
 
-// CheckProviderHealth runs the provider's explicit health probe and records
-// the result in the same circuit used by normal requests.
-func (r *Router) CheckProviderHealth(ctx context.Context, name string) (bool, error) {
+// CheckProviderHealth runs a real upstream probe and records the outcome in the
+// same circuit used by normal requests.
+//
+// 探测走真实请求，所以「探测通过」才真正代表上游可用。只有明确的上游结论
+// （online/degraded/offline）才会改动熔断器；unknown（provider 不支持探测）
+// 不写结果，避免用「没有结论」冒充成功而清掉真实的失败计数。
+func (r *Router) CheckProviderHealth(ctx context.Context, name string) ProbeResult {
 	r.mu.RLock()
 	p, ok := r.providers[name]
 	runtime := r.runtime[name]
 	r.mu.RUnlock()
 	if !ok || runtime == nil {
-		return false, fmt.Errorf("%w: %s", ErrUnknownProvider, name)
+		return ProbeResult{Status: ProbeUnknown, Detail: fmt.Sprintf("%v: %s", ErrUnknownProvider, name)}
 	}
 	if !runtime.enabled {
-		return false, fmt.Errorf("provider %s is disabled", name)
+		return ProbeResult{Status: ProbeOffline, Detail: fmt.Sprintf("provider %s is disabled", name)}
 	}
-	healthy := p.IsHealthy(ctx)
-	if healthy {
+
+	result := probeProvider(ctx, p)
+	r.mu.Lock()
+	runtime.lastProbe = result
+	runtime.lastProbeAt = time.Now()
+	runtime.hasProbe = true
+	r.mu.Unlock()
+	switch result.Status {
+	case ProbeOnline:
 		runtime.breaker.RecordSuccess()
-	} else {
+	case ProbeDegraded, ProbeOffline:
 		runtime.breaker.RecordFailure()
+	case ProbeUnknown:
+		// 无结论：保持熔断器现状。
 	}
-	return healthy, nil
+	r.logger.Printf("Probe %s: %s (status=%d, latency=%v) %s", name, result.Status, result.StatusCode, result.Latency, result.Detail)
+	return result
+}
+
+// probeProvider 用 Prober 接口探测；未实现该接口的 provider 返回 unknown
+// 而不是冒充在线。
+func probeProvider(ctx context.Context, p Provider) ProbeResult {
+	if prober, ok := p.(Prober); ok {
+		return prober.Probe(ctx)
+	}
+	return ProbeResult{Status: ProbeUnknown, Detail: "provider 不支持上游探测，健康状态未知"}
 }
 
 func (r *Router) ProviderStatus(name string) (RuntimeProviderStatus, bool) {
@@ -579,6 +621,19 @@ func runtimeStatus(name string, runtime *providerRuntime) RuntimeProviderStatus 
 	status := "unknown"
 	if !runtime.enabled || snapshot.State == CircuitOpen {
 		status = "offline"
+	} else if runtime.hasProbe {
+		// 探测是最新的、针对上游可用性的直接证据，优先于「历史请求成功过」。
+		// 否则一个已被上游限流的 provider 会因为早先成功过而长期显示在线。
+		switch runtime.lastProbe.Status {
+		case ProbeOnline:
+			status = "online"
+		case ProbeDegraded:
+			status = "degraded"
+		case ProbeOffline:
+			status = "offline"
+		default:
+			status = "unknown"
+		}
 	} else if snapshot.State == CircuitHalfOpen || (snapshot.HasResult && snapshot.ConsecutiveFailures > 0) {
 		status = "degraded"
 	} else if snapshot.State == CircuitClosed && snapshot.HasResult {
@@ -597,6 +652,10 @@ func runtimeStatus(name string, runtime *providerRuntime) RuntimeProviderStatus 
 		LastSuccessAt:       snapshot.LastSuccessAt,
 		OpenedAt:            snapshot.OpenedAt,
 		NextRetryAt:         snapshot.NextRetryAt,
+		HasProbe:            runtime.hasProbe,
+		ProbeStatus:         runtime.lastProbe.Status,
+		ProbeDetail:         runtime.lastProbe.Detail,
+		LastProbeAt:         runtime.lastProbeAt,
 	}
 }
 

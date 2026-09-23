@@ -33,6 +33,8 @@ type openAIMessage struct {
 	Content    any              `json:"content,omitempty"`
 	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"` // for tool result messages
+	// 推理内容（deepseek 系兼容上游在非流式响应中返回）
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // chatTemplateKwargs 用于 skyclaw 等模型的 chat_template_kwargs 字段
@@ -123,9 +125,12 @@ type openAIStreamToolCall struct {
 }
 
 type openAIStreamDelta struct {
-	Role      string                 `json:"role,omitempty"`
-	Content   string                 `json:"content,omitempty"`
-	ToolCalls []openAIStreamToolCall `json:"tool_calls,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+	// 推理内容：deepseek 系用 reasoning_content，OpenRouter 用 reasoning
+	ReasoningContent string                 `json:"reasoning_content,omitempty"`
+	Reasoning        string                 `json:"reasoning,omitempty"`
+	ToolCalls        []openAIStreamToolCall `json:"tool_calls,omitempty"`
 }
 
 type openAIStreamChoice struct {
@@ -161,16 +166,29 @@ type OpenAIProvider struct {
 	client *http.Client
 }
 
-const defaultOpenAIRequestTimeout = 120 * time.Second
+const defaultRequestTimeout = 120 * time.Second
+
+// requestTimeout 返回该 provider 的超时配置（RequestTimeout 未配置时用默认值）。
+// 语义：限制响应首字节时间（TTFB，含上游排队；非流式请求等价于总时长）；
+// 流式 body 的总时长不受限，由 ForwardStream 的空闲看门狗兜底。
+func (p *OpenAIProvider) requestTimeout() time.Duration {
+	if p.config.RequestTimeout > 0 {
+		return p.config.RequestTimeout
+	}
+	return defaultRequestTimeout
+}
 
 func NewOpenAIProvider(config *Config) *OpenAIProvider {
-	requestTimeout := config.RequestTimeout
-	if requestTimeout <= 0 {
-		requestTimeout = defaultOpenAIRequestTimeout
+	// 不用 http.Client.Timeout：它把整个流式 body 读取计入总时长，长生成会被
+	// 整体砍断。改为 ResponseHeaderTimeout 限制首字节，流式停滞由看门狗中止
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = config.RequestTimeout
+	if config.RequestTimeout <= 0 {
+		transport.ResponseHeaderTimeout = defaultRequestTimeout
 	}
 	return &OpenAIProvider{
 		config: config,
-		client: &http.Client{Timeout: requestTimeout},
+		client: &http.Client{Transport: transport},
 	}
 }
 
@@ -227,7 +245,11 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		return fmt.Errorf("marshal openai stream request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.URL, bytes.NewReader(body))
+	// 派生可取消 context：空闲看门狗超时触发 cancel，中止停滞的上游流
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, p.config.URL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create stream request: %w", err)
 	}
@@ -246,14 +268,16 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 
 	msgID := "msg_oai_" + time.Now().Format("20060102150405")
 
-	// 跟踪工具调用的 Anthropic block index 及发送状态
+	// 统一分配 Anthropic content block 序号：thinking/text/tool_use 按首次出现顺序，
+	// 不透传上游 index（1-based 网关会留空洞）
 	type toolCallState struct {
 		blockIdx int
 		started  bool
 	}
 	toolStates := map[int]*toolCallState{}
-	nextToolBlockIdx := 0
-	textBlockStarted := false
+	nextBlockIdx := 0
+	thinkingBlockIdx := -1
+	textBlockIdx := -1
 
 	writeSSE(w, "message_start", fmt.Sprintf(
 		`{"type":"message_start","message":{"id":%q,"type":"message","role":"assistant","model":%q,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}`,
@@ -265,11 +289,15 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	// 增大 scanner buffer，防止超长行截断
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
 
+	idleTimeout := p.requestTimeout()
+	kick, idleTripped := startStreamIdleWatchdog(streamCtx, idleTimeout, cancel)
+
 	finishReason := ""
 	var streamUsage *openAIStreamUsage
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		kick()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -293,18 +321,39 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		choice := chunk.Choices[0]
 		delta := choice.Delta
 
-		// --- 文本内容 ---
-		if delta.Content != "" {
-			if !textBlockStarted {
-				textBlockStarted = true
-				if nextToolBlockIdx == 0 {
-					nextToolBlockIdx = 1
-				}
-				writeSSE(w, "content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+		// --- 推理内容（deepseek 系 reasoning_content / OpenRouter reasoning → Anthropic thinking）---
+		reasoning := delta.ReasoningContent
+		if reasoning == "" {
+			reasoning = delta.Reasoning
+		}
+		if reasoning != "" {
+			if thinkingBlockIdx < 0 {
+				thinkingBlockIdx = nextBlockIdx
+				nextBlockIdx++
+				writeSSE(w, "content_block_start", fmt.Sprintf(
+					`{"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`,
+					thinkingBlockIdx,
+				))
 			}
 			writeSSE(w, "content_block_delta", fmt.Sprintf(
-				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%s}}`,
-				jsonString(delta.Content),
+				`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":%s}}`,
+				thinkingBlockIdx, jsonString(reasoning),
+			))
+		}
+
+		// --- 文本内容 ---
+		if delta.Content != "" {
+			if textBlockIdx < 0 {
+				textBlockIdx = nextBlockIdx
+				nextBlockIdx++
+				writeSSE(w, "content_block_start", fmt.Sprintf(
+					`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`,
+					textBlockIdx,
+				))
+			}
+			writeSSE(w, "content_block_delta", fmt.Sprintf(
+				`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":%s}}`,
+				textBlockIdx, jsonString(delta.Content),
 			))
 		}
 
@@ -313,8 +362,8 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 			idx := tc.Index
 			state, ok := toolStates[idx]
 			if !ok {
-				bIdx := nextToolBlockIdx
-				nextToolBlockIdx++
+				bIdx := nextBlockIdx
+				nextBlockIdx++
 				state = &toolCallState{blockIdx: bIdx, started: false}
 				toolStates[idx] = state
 			}
@@ -342,12 +391,18 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	}
 
 	if err := scanner.Err(); err != nil {
+		if idleTripped() {
+			return fmt.Errorf("upstream stream idle over %v: no data received", idleTimeout)
+		}
 		return err
 	}
 
-	// 关闭文本 block
-	if textBlockStarted {
-		writeSSE(w, "content_block_stop", `{"type":"content_block_stop","index":0}`)
+	// 关闭 thinking / 文本 block
+	if thinkingBlockIdx >= 0 {
+		writeSSE(w, "content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, thinkingBlockIdx))
+	}
+	if textBlockIdx >= 0 {
+		writeSSE(w, "content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, textBlockIdx))
 	}
 
 	// 关闭工具调用 blocks
@@ -379,8 +434,23 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	return nil
 }
 
+// IsHealthy 只反映本地配置：OpenAI 兼容 provider 无法在不发请求的情况下判断
+// 上游可用性，因此恒为 true。上游可用性请用 Probe。
 func (p *OpenAIProvider) IsHealthy(ctx context.Context) bool {
 	return true
+}
+
+// Probe 发一个最小请求验证鉴权与模型可用性。
+// max_tokens 留空：上游默认值最安全，避免过小的上限让模型报参数错误。
+func (p *OpenAIProvider) Probe(ctx context.Context) ProbeResult {
+	return p.ProbeModel(ctx, p.config.Name)
+}
+
+// ProbeModel 用指定模型探测。绑定模型名的包装器借此传入真实上游模型名。
+func (p *OpenAIProvider) ProbeModel(ctx context.Context, model string) ProbeResult {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	return probeVia(ctx, model, 0, p.ForwardRequest)
 }
 
 func (p *OpenAIProvider) setHeaders(req *http.Request) {
@@ -713,6 +783,11 @@ func fromOpenAIResponse(oai *openAIResponse) *Response {
 	if len(oai.Choices) > 0 {
 		choice := oai.Choices[0]
 		stopReason = mapFinishReason(choice.FinishReason)
+
+		// 推理内容（deepseek 系）→ Anthropic thinking 块，置于 text 之前
+		if reasoning := choice.Message.ReasoningContent; reasoning != "" {
+			blocks = append(blocks, ContentBlock{Type: "thinking", Thinking: reasoning})
+		}
 
 		// 文本内容
 		if content := openAIResponseContentText(choice.Message.Content); content != "" {

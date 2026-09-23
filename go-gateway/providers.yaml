@@ -1,8 +1,9 @@
 # 模型提供商配置
 # 命名规则：
-#   - GLM 核心供应商保留分级别名 (haiku/sonnet/opus)
-#   - 其他供应商统一用 供应商-模型名 格式，不占用通用别名
-#   - chain 中引用 model-bound provider（格式：供应商名-模型ID）
+#   - provider 实例名与对外模型名一致，都用上游的模型 ID（不写供应商前缀，
+#     避免 glm-glm-4.7 这种重复）
+#   - aliases 是兼容旧客户端的历史代号（glm-opus 等），与主名同时可用
+#   - chain 中引用 provider 实例名，即上游模型 ID
 
 providers:
   # 智谱 GLM（核心供应商，保留 haiku/sonnet/opus 别名）
@@ -82,16 +83,16 @@ chains:
   coding:
     # wiki 代理（openwiki personal）走此链。原 glm-5-turbo 是 GLM 家最弱档，
     # wiki 输出质量明显弱于卡片编译（glm-opus 链），升级到 5.2 对齐。
-    - glm-glm-5.2
-    - ali-qwen3.8-max-preview
+    - glm-5.2
+    - qwen3.8-max-preview
 
   coding-anthropic:
-    - glm-glm-5-turbo
-    - ali-qwen3.8-max-preview
+    - glm-5-turbo
+    - qwen3.8-max-preview
 
   # Knowledge flywheel chain. Keep the stable glm-opus model name for clients
   # while routing failures to the bound Ali model and optional Copilot provider.
   glm-opus:
-    - ali-qwen3.8-max-preview
+    - qwen3.8-max-preview
     - copilot
-    - glm-glm-5.2
+    - glm-5.2

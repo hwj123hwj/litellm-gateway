@@ -317,6 +317,11 @@ a { color: inherit; }
 .provider-indicator.degraded, .route-provider-status.degraded { color: var(--amber); }
 .provider-indicator.unknown, .route-provider-status.unknown { color: var(--text-muted); }
 .provider-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; min-height: 31px; margin-top: 9px; color: var(--text-muted); font-size: 10px; }
+/* 探测结论单独一行：它的含义和「熔断状态」不同，不能混在一起读。 */
+.provider-probe { margin-top: 8px; font-size: 10px; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.provider-probe.online { color: var(--success, #16a34a); }
+.provider-probe.degraded { color: var(--warning, #d97706); }
+.provider-probe.offline { color: var(--danger, #dc2626); }
 .provider-traffic { display: flex; align-items: center; gap: 5px; margin-top: 10px; color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; }
 .provider-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .provider-actions .button { flex: 1; min-width: 0; padding: 0 7px; font-size: 10px; }

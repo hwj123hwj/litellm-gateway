@@ -678,13 +678,22 @@ func (p *DeepVProvider) getGitBranch(dir string) string {
 	return strings.TrimSpace(string(output))
 }
 
-// IsHealthy 检查提供商是否健康（token 是否存在且未过期）
+// IsHealthy 只反映本地登录态（JWT 是否存在），不验证上游可用性。
+// 上游可用性请用 Probe。
 func (p *DeepVProvider) IsHealthy(ctx context.Context) bool {
 	token, err := p.getAccessToken()
 	if err != nil || token == "" {
 		return false
 	}
 	return true
+}
+
+// Probe 发一个最小请求验证登录态与上游模型可用性。
+// 本地 token 存在但已失效或被上游拒绝时，只有真实请求才能发现。
+func (p *DeepVProvider) Probe(ctx context.Context) ProbeResult {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	return probeVia(ctx, p.boundModel, 1, p.ForwardRequest)
 }
 
 // ForwardStream 实现流式请求（StreamProvider 接口），把 GenAI SSE 转成 Anthropic SSE。

@@ -85,6 +85,15 @@ export default function Providers() {
     return '未知'
   }
 
+  // 探测结论与熔断状态是两套信息：熔断看的是连续请求失败，
+  // 探测看的是「真实打一次上游」的结果。
+  const probeLabel = (status?: string) => {
+    if (status === 'online') return '上游可用'
+    if (status === 'degraded') return '上游受限'
+    if (status === 'offline') return '上游不可用'
+    return '无结论'
+  }
+
   const StatusIcon = ({ status, state }: { status: string; state?: string }) => {
     if (status === 'online') return <CheckCircle size={13} weight="fill" aria-hidden="true" />
     if (status === 'degraded' || state === 'half_open') return <Warning size={13} weight="fill" aria-hidden="true" />
@@ -113,6 +122,15 @@ export default function Providers() {
               <span>熔断 {p.state === 'open' ? '开启' : p.state === 'half_open' ? '半开探测' : '关闭'}</span>
               {p.consecutive_failures ? <span>连续失败 {p.consecutive_failures}</span> : null}
             </div>
+            {p.has_probe ? (
+              <div className={`provider-probe ${p.probe_status ?? 'unknown'}`} title={p.probe_detail || undefined}>
+                探测：{probeLabel(p.probe_status)}
+                {p.probe_detail ? ` · ${p.probe_detail}` : ''}
+              </div>
+            ) : (
+              // 没有探测结论时明确说明状态来源，避免把「没失败过」误读成「上游可用」。
+              <div className="provider-probe unknown">未探测，状态来自请求历史</div>
+            )}
             {p.requests > 0 && (
               <div className="provider-traffic">
                 <Pulse size={13} weight="duotone" aria-hidden="true" />

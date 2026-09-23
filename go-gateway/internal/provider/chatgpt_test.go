@@ -128,9 +128,22 @@ chains: {}
 	if _, err := router.Route("gpt-luna"); err != nil {
 		t.Fatalf("Route(gpt-luna) error = %v", err)
 	}
+	// 上游模型 ID 是对外主名，别名 gpt-luna 作为兼容入口同时可用。
+	if _, err := router.Route("gpt-5.6-luna"); err != nil {
+		t.Fatalf("Route(gpt-5.6-luna) error = %v", err)
+	}
 	infos := router.ListModelInfos()
-	if len(infos) != 1 || infos[0].Protocol != "responses" || infos[0].Provider != "chatgpt" {
-		t.Fatalf("model infos = %+v, want one ChatGPT Responses model", infos)
+	seen := make(map[string]bool, len(infos))
+	for _, info := range infos {
+		if info.Protocol != "responses" || info.Provider != "chatgpt" {
+			t.Fatalf("model info = %+v, want ChatGPT Responses model", info)
+		}
+		seen[info.ID] = true
+	}
+	for _, modelName := range []string{"gpt-5.6-luna", "gpt-luna"} {
+		if !seen[modelName] {
+			t.Fatalf("model infos = %+v, want %s registered", infos, modelName)
+		}
 	}
 }
 

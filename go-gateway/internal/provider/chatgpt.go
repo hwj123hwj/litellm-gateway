@@ -547,11 +547,74 @@ func (p *ChatGPTProvider) ForwardRequest(context.Context, *Request) (*Response, 
 	return nil, fmt.Errorf("ChatGPT provider only supports streaming via Responses API passthrough")
 }
 
-// IsHealthy checks whether a usable OAuth credential is loaded.
+// IsHealthy checks whether a usable OAuth credential is loaded. It does not
+// verify that ChatGPT still accepts it; use Probe for upstream availability.
 func (p *ChatGPTProvider) IsHealthy(context.Context) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.auth != nil && p.auth.AccessToken != "" && p.auth.AccountID != ""
+}
+
+// Probe sends a minimal Responses request and reports whether ChatGPT accepts
+// the credential. A locally present token can still be revoked or rate limited,
+// so only a real request distinguishes "configured" from "usable".
+func (p *ChatGPTProvider) Probe(ctx context.Context) ProbeResult {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	accessToken := p.getAccessToken()
+	accountID := p.getAccountID()
+	if accessToken == "" || accountID == "" {
+		if err := p.loadAuth(); err != nil {
+			return ProbeResult{Status: ProbeOffline, Detail: "无可用的 ChatGPT OAuth 凭据"}
+		}
+		accessToken = p.getAccessToken()
+		accountID = p.getAccountID()
+	}
+	if accessToken == "" || accountID == "" {
+		return ProbeResult{Status: ProbeOffline, Detail: "ChatGPT 凭据缺少 account id"}
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"model":        chatgptProbeModel(),
+		"instructions": "You are a helpful assistant.",
+		"input":        []map[string]any{{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": probePrompt}}}},
+		"stream":       true,
+		"store":        false,
+	})
+	if err != nil {
+		return ProbeResult{Status: ProbeUnknown, Detail: "无法构造探测请求"}
+	}
+
+	start := time.Now()
+	resp, err := p.doResponsesRequest(ctx, body, accessToken, accountID)
+	latency := time.Since(start)
+	if err != nil {
+		return ProbeResult{Status: ProbeDegraded, Detail: boundedErrorSummary(err), Latency: latency}
+	}
+	defer resp.Body.Close()
+	// 只读状态码：探测不消费 SSE 正文，避免为一次健康检查生成完整回答。
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return ProbeResult{Status: ProbeOnline, Detail: "上游返回 2xx", Latency: latency}
+	}
+	return ProbeResult{
+		Status:     classifyProbeStatus(resp.StatusCode),
+		StatusCode: resp.StatusCode,
+		Detail:     fmt.Sprintf("ChatGPT 返回 HTTP %d", resp.StatusCode),
+		Latency:    latency,
+	}
+}
+
+// chatgptProbeModel 选择目录里第一个模型作为探测目标。
+func chatgptProbeModel() string {
+	for _, model := range chatGPTModelCatalog {
+		if id := chatGPTUpstreamModel(model.ID); id != "" {
+			return id
+		}
+	}
+	return "gpt-5.6-sol"
 }
 
 // ForwardRawResponsesStream forwards a native Responses request to ChatGPT.

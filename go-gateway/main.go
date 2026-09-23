@@ -387,33 +387,41 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 	}
 	deepvURL := "https://api-code.deepvlab.ai/v1/chat/messages"
 
-	router.RegisterProvider("deepv-deepseek-flash", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-deepseek-flash",
+	// provider 实例名用上游模型 ID，与 providers.yaml 的命名规则一致，
+	// 面板和路由里显示的就是实际上游请求的模型名。
+	router.RegisterProvider("deepseek-flash", provider.NewDeepVProvider(&provider.Config{
+		Name: "deepseek-flash",
 		URL:  deepvURL,
 	}, workDir, "deepseek-flash"))
-	router.RegisterProvider("deepv-glm-flash", provider.NewDeepVProvider(&provider.Config{
-		Name: "deepv-glm-flash",
+	router.RegisterProvider("glm-5.3-flash", provider.NewDeepVProvider(&provider.Config{
+		Name: "glm-5.3-flash",
 		URL:  deepvURL,
 	}, workDir, "glm-5.3-flash"))
 
-	router.RegisterChain("deepseek-v4.1-flash", []string{"deepv-deepseek-flash"})
-	router.RegisterChain("glm-5.3-flash", []string{"deepv-glm-flash"})
+	router.RegisterChain("deepseek-flash", []string{"deepseek-flash"})
+	// DeepV 上游模型名是 deepseek-flash，历史客户端用的是 deepseek-v4.1-flash。
+	// 主名对齐上游，同时保留旧名作为兼容入口。
+	router.RegisterChain("deepseek-v4.1-flash", []string{"deepseek-flash"})
+	router.RegisterChain("glm-5.3-flash", []string{"glm-5.3-flash"})
 
 	// DeepV 上游按 单请求总量（输入 + max_output_tokens）≤ 200000 校验。
 	// 目录里声明合计留有余量的上限，客户端读到后不会再发出超出配额的
 	// 输出预算（此前 ZCode 默认发 max_output_tokens=384000，新会话也会
 	// 被上游以 402 拒绝）。
-	router.RegisterModel(provider.ModelInfo{
-		ID:              "deepseek-v4.1-flash",
-		Provider:        "deepv-deepseek-flash",
-		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
-		InputModalities: []string{"text", "image"},
-		MaxInputTokens:  160000,
-		MaxOutputTokens: 32000,
-	})
+	// 两个对外模型名（上游名 + 兼容旧名）共用同一份元数据。
+	for _, modelID := range []string{"deepseek-flash", "deepseek-v4.1-flash"} {
+		router.RegisterModel(provider.ModelInfo{
+			ID:              modelID,
+			Provider:        "deepseek-flash",
+			Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
+			InputModalities: []string{"text", "image"},
+			MaxInputTokens:  160000,
+			MaxOutputTokens: 32000,
+		})
+	}
 	router.RegisterModel(provider.ModelInfo{
 		ID:              "glm-5.3-flash",
-		Provider:        "deepv-glm-flash",
+		Provider:        "glm-5.3-flash",
 		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
 		InputModalities: []string{"text", "image"},
 		MaxInputTokens:  160000,
