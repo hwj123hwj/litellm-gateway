@@ -118,32 +118,22 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 ### GitHub Copilot
 
-| 模型别名 | 实际转发模型 | 说明 |
+| 模型名 | 实际转发模型 | 说明 |
 |----------|--------------|------|
-| `copilot` / `auto` / `copilot-auto` | `auto` | GitHub Copilot Chat (自动选择模型) |
-| `copilot-opus` / `copilot-sonnet` / `copilot-haiku` | `auto` | 兼容旧别名，统一转发至 `auto` |
-
-### 阿里 MaaS (Qwen 3.8 Max)
-
-- OpenAI 端点: `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions`
-- Anthropic 端点: `https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages`
-
-| 模型别名 | 实际模型 | 说明 |
-|----------|----------|------|
-| `ali-opus` / `qwen3.8-max-preview` | `qwen3.8-max-preview` | 阿里 MaaS 旗舰大模型 |
+| `copilot` | `auto` | GitHub Copilot Chat (自动选择模型) |
 
 ### 外部提供商
 
 | 模型名 | 提供商 | 说明 |
 |--------|--------|------|
-| `coding` | 智谱 GLM / 阿里 MaaS | **推荐**，OpenAI 风格，自动 fallback |
-| `coding-anthropic` | 智谱 GLM / 阿里 MaaS | Anthropic 风格，自动 fallback |
-| `glm-haiku` | 智谱 GLM | 轻量模型 |
-| `glm-4.7-flash` | 智谱 GLM | 快速模型 |
-| `glm-sonnet` | 智谱 GLM coding plan | 主力模型 |
-| `glm-vision` | 智谱 GLM-5V-Turbo | 文本+图片/视频/文件识别 |
-| `glm-opus` | 智谱 GLM → 阿里 MaaS → GitHub Copilot | 旗舰模型及知识编译 fallback 链 |
-| `ali-opus` | 阿里 MaaS | Qwen 3.8 Max 旗舰模型 |
+| `coding` | 智谱 GLM → DeepV | **推荐**，唯一的持续降级链，OpenAI 风格 |
+| `glm-5.3` | 智谱 GLM coding 端点 | 最强文本模型，不支持图片 |
+| `glm-5.3-flash` | 智谱 GLM coding 端点 | 快速文本模型，兼有图片能力 |
+
+模型名即上游模型 ID，不设别名。智谱侧只保留 `glm-5.3` 与 `glm-5.3-flash`
+两个模型；`coding` 链为 `glm-5.3` → `glm-5.3-flash` → `deepv-glm-5.3-flash`
+→ `deepseek-flash`，任一档失败自动降级到下一档。完整的模型与链定义见
+`go-gateway/README.md`。
 
 ## 配置 Claude Code
 

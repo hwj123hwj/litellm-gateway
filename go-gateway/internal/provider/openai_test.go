@@ -63,7 +63,7 @@ func TestToOpenAIRequestPreservesToolChoice(t *testing.T) {
 func TestToOpenAIRequestPreservesMultimodalAndThinkingFields(t *testing.T) {
 	imageBlock := json.RawMessage(`{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}`)
 	req := &Request{
-		Model: "glm-vision",
+		Model: "glm-5.3-flash",
 		Messages: []Message{{
 			Role: "user",
 			Content: NewBlocksContent([]ContentBlock{

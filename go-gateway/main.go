@@ -375,9 +375,11 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 			MaxOutputTokens: 32000,
 		})
 	}
+	// DeepV 的 glm-5.3-flash 用限定名登记，避免覆盖智谱同名模型的目录条目
+	// （智谱那一档由 providers.yaml 负责声明）。
 	router.RegisterModel(provider.ModelInfo{
-		ID:              "glm-5.3-flash",
-		Provider:        "glm-5.3-flash",
+		ID:              "deepv-glm-5.3-flash",
+		Provider:        "deepv-glm-5.3-flash",
 		Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
 		InputModalities: []string{"text", "image"},
 		MaxInputTokens:  160000,

@@ -97,14 +97,14 @@ func gatewayProvider(endpoint, tokenCommand string) map[string]any {
 			"supportsReasoningEffort":  false,
 			"supportsUsageInStreaming": false,
 		},
-		"models": []map[string]any{
-			// 只暴露真实模型名，不再维护第二套别名；coding 是网关内唯一的降级链入口。
-			{"id": "coding", "name": "LLM Gateway Coding"},
-			{"id": "glm-5.3", "name": "GLM-5.3"},
-			{"id": "glm-5.3-flash", "name": "GLM-5.3 Flash"},
-			{"id": "glm-5v-turbo", "name": "GLM-5V Turbo (Vision)"},
-			{"id": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash"},
-		},
+			"models": []map[string]any{
+				// 只暴露真实模型名，不再维护第二套别名；coding 是网关内唯一的降级链入口。
+				// 智谱侧只保留 glm-5.3 与 glm-5.3-flash（后者兼有图片能力）。
+				{"id": "coding", "name": "LLM Gateway Coding"},
+				{"id": "glm-5.3", "name": "GLM-5.3"},
+				{"id": "glm-5.3-flash", "name": "GLM-5.3 Flash"},
+				{"id": "deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash"},
+			},
 	}
 }
 

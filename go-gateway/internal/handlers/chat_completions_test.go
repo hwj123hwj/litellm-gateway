@@ -229,18 +229,18 @@ func TestChatCompletionsHandlerPreservesImageContent(t *testing.T) {
 			ID:         "msg_vision",
 			Type:       "message",
 			Role:       "assistant",
-			Model:      "glm-5v-turbo",
+			Model:      "glm-5.3-flash",
 			StopReason: "end_turn",
 			Content:    []provider.ContentBlock{{Type: "text", Text: "cat"}},
 		},
 	}
 	router.RegisterProvider("vision", stub)
-	router.RegisterChain("glm-vision", []string{"vision"})
+	router.RegisterChain("glm-5.3-flash", []string{"vision"})
 
 	handler := NewChatCompletionsHandler(router, logger)
 	engine := gin.New()
 	engine.POST("/v1/chat/completions", handler.Handle)
-	body := `{"model":"glm-vision","messages":[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]}]}`
+	body := `{"model":"glm-5.3-flash","messages":[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

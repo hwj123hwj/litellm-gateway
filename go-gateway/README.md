@@ -174,18 +174,18 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 
 当前配置中：
 
-- `glm-5.3` / `glm-5.3-flash`（智谱 coding 端点）是纯文本模型，不支持图片；
-- `glm-5v-turbo` 用于文本+图片/视频/文件请求；
+- 智谱只提供 `glm-5.3` 与 `glm-5.3-flash` 两个模型，其余型号（含视觉专用的 `glm-5v-turbo`）已从网关删除；
+- `glm-5.3` 是纯文本模型，不支持图片（上游会以 `1210 messages.content.type 参数非法` 拒绝）；
+- `glm-5.3-flash` 兼有图片能力，`coding` 链上的图片请求会跳过 `glm-5.3` 落到它；
 - 图片请求使用 OpenAI `image_url` content block，网关会保留原始块和 `extra_body`/`thinking` 等扩展字段。
-- `coding` 链上前两档不具备视觉能力，图片请求会被自动跳过并落到 DeepV 的模型。
 
 配置新模型时建议显式声明能力：
 
 ```yaml
 models:
-  - id: glm-5v-turbo
-    capabilities: [text, vision, video, file, tool_calling, streaming, reasoning]
-    input_modalities: [text, image, video, file]
+  - id: glm-5.3-flash
+    capabilities: [text, vision, tool_calling, streaming, reasoning]
+    input_modalities: [text, image]
 ```
 
 ### 日志查看
@@ -278,10 +278,9 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 | 模型名 | 默认上游 | 能力 |
 |--------|---------|------|
-| `coding` | `glm-5.3` → `glm-5.3-flash` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过前两档 |
+| `coding` | `glm-5.3` → `glm-5.3-flash` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过 `glm-5.3` |
 | `glm-5.3` | 智谱 `glm-5.3` | 文本、工具调用、推理、流式（不支持图片） |
-| `glm-5.3-flash` | 智谱 `glm-5.3-flash` | 文本、工具调用、推理、流式（不支持图片） |
-| `glm-5v-turbo` | 智谱 `glm-5v-turbo` | 文本、图片、视频、文件、工具调用、推理、流式 |
+| `glm-5.3-flash` | 智谱 `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
 
 **命名规则：模型名就是上游模型 ID，不设别名。** 客户端要调哪个模型就写哪个名字，
 网关不再维护 `glm-opus` / `glm-haiku` / `ali-opus` 这类第二套代号。

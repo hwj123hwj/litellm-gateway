@@ -63,7 +63,7 @@ HwjCode、Claude Code、Codex CLI、Pi 和后续应用只配置网关地址与 K
 
 ### 场景 B：模型能力选择
 
-文本请求使用文本模型；图片、视频或文件请求自动选择声明了对应能力的模型，例如 glm-vision，而不是错误地落到 glm-sonnet。
+文本请求使用文本模型；图片请求自动选择声明了视觉能力的模型（如 `glm-5.3-flash`），而不是错误地落到纯文本的 `glm-5.3`。
 
 ### 场景 C：Provider 故障恢复
 
@@ -197,7 +197,7 @@ Admin API 和管理端至少支持：
 | Provider 配置与模型链 | ✅ 已实现 | providers.yaml + 环境变量 |
 | fallback、健康和熔断 | ✅ 已实现 | 支持运行时控制 |
 | 能力感知模型目录 | ✅ 已实现 | /v1/models 返回能力和输入模态 |
-| 多模态路由 | ✅ 已实现 | 文本模型与 glm-vision 区分 |
+| 多模态路由 | ✅ 已实现 | 纯文本 `glm-5.3` 与具备视觉能力的 `glm-5.3-flash` 区分 |
 | SQLite 指标 | ✅ 已实现 | request_logs、daily_stats |
 | 请求关联与 Provider 尝试记录 | ✅ 已实现 | `X-Request-ID`、最终 Provider、每次 fallback 尝试均进入轻量指标日志 |
 | Admin API | ✅ 已实现 | Provider、模型、路由、日志和统计 |

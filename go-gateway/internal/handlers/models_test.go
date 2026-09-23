@@ -17,8 +17,8 @@ func TestModelHandlerExposesCapabilityMetadata(t *testing.T) {
 	logger := log.New(io.Discard, "", 0)
 	router := provider.NewRouter(logger)
 	router.RegisterModel(provider.ModelInfo{
-		ID:              "glm-vision",
-		Provider:        "glm-vision",
+		ID:              "glm-5.3-flash",
+		Provider:        "glm-5.3-flash",
 		Protocol:        "openai",
 		Capabilities:    []string{provider.CapabilityText, provider.CapabilityVision, provider.CapabilityStreaming},
 		InputModalities: []string{"text", "image"},
@@ -48,7 +48,7 @@ func TestModelHandlerExposesCapabilityMetadata(t *testing.T) {
 		t.Fatalf("unexpected model list: %#v", response)
 	}
 	model := response.Data[0]
-	if model["id"] != "glm-vision" || model["provider"] != "glm-vision" || model["protocol"] != "openai" {
+	if model["id"] != "glm-5.3-flash" || model["provider"] != "glm-5.3-flash" || model["protocol"] != "openai" {
 		t.Fatalf("unexpected model identity: %#v", model)
 	}
 	capabilities, ok := model["capabilities"].([]any)
