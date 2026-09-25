@@ -156,6 +156,7 @@ func main() {
 	responsesHandler := handlers.NewResponsesHandler(router, logger)
 	responsesHandler.SetArchiver(archiver)
 	modelHandler := handlers.NewModelHandler(router, logger)
+	passthroughHandler := handlers.NewPassthroughHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
 	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger)
@@ -165,6 +166,8 @@ func main() {
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.POST("/v1/chat/completions", chatHandler.Handle)
 	engine.POST("/v1/responses", responsesHandler.Handle)
+	engine.POST("/v1/embeddings", passthroughHandler.HandleEmbeddings)
+	engine.POST("/v1/audio/transcriptions", passthroughHandler.HandleTranscriptions)
 	engine.GET("/v1/models", modelHandler.Handle)
 	engine.GET("/health", healthHandler.Handle)
 	engine.GET("/readyz", healthHandler.HandleReady)
@@ -180,6 +183,8 @@ func main() {
 	engine.POST("/messages", msgHandler.Handle)
 	engine.POST("/chat/completions", chatHandler.Handle)
 	engine.POST("/responses", responsesHandler.Handle)
+	engine.POST("/embeddings", passthroughHandler.HandleEmbeddings)
+	engine.POST("/audio/transcriptions", passthroughHandler.HandleTranscriptions)
 	engine.GET("/models", modelHandler.Handle)
 
 	// 管理面板 API

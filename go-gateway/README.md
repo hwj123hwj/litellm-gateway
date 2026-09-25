@@ -97,6 +97,11 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/chat/completions` | POST | Bearer | `/v1/chat/completions` 的短路径兼容别名 |
 | `/messages` | POST | Bearer | `/v1/messages` 的短路径兼容别名 |
 | `/responses` | POST | Bearer | `/v1/responses` 的短路径兼容别名 |
+| `/v1/embeddings` | POST | Bearer | OpenAI 兼容嵌入接口，按 model 透传（如 `BAAI/bge-m3`） |
+| `/v1/audio/transcriptions` | POST | Bearer | OpenAI 兼容语音转文本（multipart），按 model 透传（如 `TeleAI/TeleSpeech-ASR1.0`） |
+| `/embeddings`、`/audio/transcriptions` | POST | Bearer | 对应 `/v1/*` 的短路径兼容别名 |
+
+透传端点不做格式转换：请求/响应原样转发给模型所属 Provider；模型须在 `providers.yaml` 注册，Provider 的 `url` 配上游源站，网关在其后拼接端点路径。
 
 管理面板（使用 `ADMIN_TOKEN`，未配置时回退到 `LITELLM_MASTER_KEY`）：
 
