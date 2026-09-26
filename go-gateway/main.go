@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -130,6 +131,11 @@ func main() {
 	// 创建 Gin 引擎
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
+	// 按原始（未解码）路径路由：provider/模型名含「/」时，前端编码成 %2F
+	// 才能作为一个 :name 参数段匹配（默认解码后会被拆成多层导致 404）。
+	// 参数值由 admin 组中间件统一解码。
+	engine.UseRawPath = true
+	engine.UnescapePathValues = false
 
 	// CORS 配置（允许 Android WebView 跨域请求）
 	engine.Use(cors.New(cors.Config{
@@ -147,6 +153,14 @@ func main() {
 
 	// 管理端点使用独立的 admin auth
 	adminAuth := auth.AdminAuth(cfg.MasterKey, cfg.AdminToken, logger)
+	decodeAdminParams := func(c *gin.Context) {
+		for i, p := range c.Params {
+			if decoded, err := url.PathUnescape(p.Value); err == nil {
+				c.Params[i].Value = decoded
+			}
+		}
+		c.Next()
+	}
 
 	// 注册路由
 	msgHandler := handlers.NewMessageHandler(router, logger)
@@ -189,7 +203,7 @@ func main() {
 
 	// 管理面板 API
 	admin := engine.Group("/admin")
-	admin.Use(adminAuth)
+	admin.Use(adminAuth, decodeAdminParams)
 	{
 		admin.GET("/dashboard", adminHandler.HandleDashboard)
 		admin.GET("/providers", adminHandler.HandleProviders)

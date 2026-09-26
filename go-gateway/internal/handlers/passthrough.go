@@ -84,7 +84,7 @@ func (h *PassthroughHandler) forward(c *gin.Context, path string) {
 	}
 	p := providers[0]
 
-	target := strings.TrimSuffix(p.URL(), "/") + path
+	target := provider.DeriveUpstreamOrigin(p.URL()) + path
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"message": "build upstream request: " + err.Error(), "type": "server_error"}})

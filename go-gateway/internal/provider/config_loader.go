@@ -309,7 +309,15 @@ func (w *BoundModelProviderWrapper) ForwardStream(ctx context.Context, req *Requ
 
 // Probe 探测底层 provider 时带上绑定的模型名：同一个上游地址下，不同模型的
 // 可用性可能不同（例如账号只对部分模型有权限），用绑定名才测得到真实的那一个。
+// 非聊天能力（嵌入/语音转写）的上游端点不是 chat/completions，聊天探测请求
+// 只会得到 404，因此按能力走对应端点的最小请求。
 func (w *BoundModelProviderWrapper) Probe(ctx context.Context) ProbeResult {
+	if hasCapabilityFlag(w.capabilities, CapabilityEmbedding) {
+		return w.probeEmbedding(ctx)
+	}
+	if hasCapabilityFlag(w.capabilities, CapabilityTranscription) {
+		return w.probeTranscription(ctx)
+	}
 	if prober, ok := w.Provider.(modelProber); ok {
 		return prober.ProbeModel(ctx, w.boundModel)
 	}
