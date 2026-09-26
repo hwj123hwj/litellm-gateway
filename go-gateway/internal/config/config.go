@@ -8,6 +8,8 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/weijian/go-llm-gateway/internal/archive"
+	"github.com/weijian/go-llm-gateway/internal/assistant"
+	"github.com/weijian/go-llm-gateway/internal/memory"
 )
 
 // Config 应用全局配置
@@ -28,6 +30,8 @@ type Config struct {
 	CircuitRecoverySeconds  int
 	CircuitSuccessThreshold int
 	Archive                 archive.Config
+	Memory                  memory.Config
+	Assistant               assistant.Config
 }
 
 // Load 从环境变量加载配置
@@ -51,6 +55,8 @@ func Load() (*Config, error) {
 		CircuitRecoverySeconds:  getEnvInt("CIRCUIT_RECOVERY_SECONDS", 30),
 		CircuitSuccessThreshold: getEnvInt("CIRCUIT_SUCCESS_THRESHOLD", 1),
 		Archive:                 loadArchiveConfig(),
+		Memory:                  loadMemoryConfig(),
+		Assistant:               loadAssistantConfig(),
 	}
 
 	if cfg.MasterKey == "" {
@@ -95,5 +101,26 @@ func loadArchiveConfig() archive.Config {
 	cfg.Enabled = getEnvBool("ARCHIVE_ENABLED", false)
 	cfg.MaxBodyKB = getEnvInt("ARCHIVE_MAX_BODY_KB", cfg.MaxBodyKB)
 	cfg.RetentionDays = getEnvInt("ARCHIVE_RETENTION_DAYS", cfg.RetentionDays)
+	return cfg
+}
+
+// loadMemoryConfig reads MEMORY_* environment variables. Missing or invalid
+// values fall back to memory.DefaultConfig, so the gateway is always safe to
+// start even with an incomplete .env.
+func loadMemoryConfig() memory.Config {
+	cfg := memory.DefaultConfig()
+	cfg.Enabled = getEnvBool("MEMORY_ENABLED", false)
+	return cfg
+}
+
+// loadAssistantConfig reads ASSISTANT_* environment variables. The resident
+// assistant is disabled unless ASSISTANT_ENABLED=true and ASSISTANT_MODEL is
+// set — a model id from the gateway's own /v1/models catalog.
+func loadAssistantConfig() assistant.Config {
+	cfg := assistant.Config{Enabled: false}
+	cfg.Enabled = getEnvBool("ASSISTANT_ENABLED", false) && getEnv("ASSISTANT_MODEL", "") != ""
+	cfg.Model = getEnv("ASSISTANT_MODEL", "")
+	cfg.BaseURL = getEnv("ASSISTANT_BASE_URL", "")
+	cfg.APIKey = getEnv("ASSISTANT_API_KEY", "")
 	return cfg
 }

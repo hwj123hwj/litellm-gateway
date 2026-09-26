@@ -17,10 +17,12 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/archive"
+	"github.com/weijian/go-llm-gateway/internal/assistant"
 	"github.com/weijian/go-llm-gateway/internal/auth"
 	"github.com/weijian/go-llm-gateway/internal/config"
 	"github.com/weijian/go-llm-gateway/internal/dashboard"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
+	"github.com/weijian/go-llm-gateway/internal/memory"
 	"github.com/weijian/go-llm-gateway/internal/metrics"
 	"github.com/weijian/go-llm-gateway/internal/middleware"
 	"github.com/weijian/go-llm-gateway/internal/piconfig"
@@ -65,6 +67,7 @@ func main() {
 	// 归档数据平面：当 ARCHIVE_ENABLED=true 时启用，否则使用 NoopStore。
 	var archiver *archive.Archiver
 	var archiveStore archive.Store = archive.NoopStore{}
+	var memoryStore memory.Store = memory.NoopStore{}
 
 	if store, err := storage.NewSQLiteStore(sqlitePath, logger); err != nil {
 		logger.Printf("Warning: SQLite store init failed: %v, using memory only", err)
@@ -77,6 +80,11 @@ func main() {
 		// 避免引入新的外部依赖。
 		if cfg.Archive.Enabled {
 			archiveStore = store
+		}
+
+		// 记忆数据平面：MEMORY_ENABLED=true 时启用，否则 NoopStore。
+		if cfg.Memory.Enabled {
+			memoryStore = store
 		}
 
 		// 启动后台清理任务（每天清理 30 天前的指标数据 + 归档保留期外的对话）
@@ -176,6 +184,34 @@ func main() {
 	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger)
 	clientConfigHandler := handlers.NewClientConfigHandler(defaultGatewayHome(), defaultZCodeHome(), defaultDshHome(), router, logger)
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
+	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
+	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
+
+	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
+	var assistantHandler *handlers.AssistantHandler
+	if cfg.Assistant.Enabled {
+		baseURL := cfg.Assistant.BaseURL
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("http://127.0.0.1:%d", cfg.Port)
+		}
+		apiKey := cfg.Assistant.APIKey
+		if apiKey == "" {
+			apiKey = cfg.MasterKey
+		}
+		resident, err := assistant.New(assistant.Config{
+			Enabled: true, Model: cfg.Assistant.Model,
+			BaseURL: baseURL, APIKey: apiKey,
+		}, memoryStore, logger)
+		if err != nil {
+			logger.Printf("Warning: assistant init failed: %v（继续运行，助理端点返回 503）", err)
+		} else {
+			assistantHandler = handlers.NewAssistantHandler(resident, logger)
+			logger.Printf("Resident assistant enabled: model=%s via %s", cfg.Assistant.Model, baseURL)
+		}
+	}
+	if assistantHandler == nil {
+		assistantHandler = handlers.NewAssistantHandler(nil, logger)
+	}
 	dashboardHandler := dashboard.NewHandler()
 
 	engine.POST("/v1/messages", msgHandler.Handle)
@@ -184,6 +220,8 @@ func main() {
 	engine.POST("/v1/embeddings", passthroughHandler.HandleEmbeddings)
 	engine.POST("/v1/audio/transcriptions", passthroughHandler.HandleTranscriptions)
 	engine.GET("/v1/models", modelHandler.Handle)
+	engine.GET("/v1/memory", memoryHandler.HandleLookup)
+	engine.POST("/v1/memory", memoryHandler.HandleDraft)
 	engine.GET("/health", healthHandler.Handle)
 	engine.GET("/readyz", healthHandler.HandleReady)
 	// The Dashboard is embedded into release binaries. It is intentionally
@@ -229,6 +267,12 @@ func main() {
 		admin.GET("/archives/export", archiveHandler.HandleExport)
 		admin.DELETE("/archives", archiveHandler.HandleDeleteBefore)
 		admin.DELETE("/archives/:id", archiveHandler.HandleDeleteOne)
+		admin.GET("/memories", memoryAdminHandler.HandleList)
+		admin.POST("/memories", memoryAdminHandler.HandleCreate)
+		admin.POST("/memories/:id/confirm", memoryAdminHandler.HandleConfirm)
+		admin.POST("/memories/:id/retire", memoryAdminHandler.HandleRetire)
+		admin.DELETE("/memories/:id", memoryAdminHandler.HandleDelete)
+		admin.POST("/assistant/chat", assistantHandler.HandleChat)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
