@@ -50,6 +50,12 @@ func NewSQLiteStore(dbPath string, logger *log.Logger) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("init archive schema: %w", err)
 	}
 
+	// 记忆表（agent_memories）同样物理隔离：记忆长期存活，保留策略独立。
+	if err := initMemorySchema(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init memory schema: %w", err)
+	}
+
 	logger.Printf("SQLite store initialized: %s", dbPath)
 
 	return &SQLiteStore{db: db, logger: logger}, nil
