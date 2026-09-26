@@ -133,3 +133,35 @@ export interface PiConfigResponse {
   synced?: boolean
   error?: string
 }
+
+// ── 记忆层（EasyAgent 常驻助理 + 治理）──
+
+export type MemoryStatus = 'candidate' | 'active' | 'retired'
+export type MemoryScopeType = 'global' | 'client' | 'project'
+
+export interface MemoryEntry {
+  id: number
+  scope_type: MemoryScopeType
+  scope_key: string
+  statement: string
+  status: MemoryStatus
+  source: string
+  confidence: number
+  hit_count: number
+  last_hit_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MemoriesResponse {
+  memories: MemoryEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AssistantStreamEvent {
+  type: 'text_delta' | 'tool_start' | 'tool_end' | 'done' | 'error'
+  content?: string
+  tool?: string
+}
