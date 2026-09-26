@@ -7,7 +7,6 @@
 - [[source-go-gateway-readme]] — Gateway operational docs
 - [[source-providers-yaml]] — Provider/model configuration (updated 2026-06-21)
 - [[source-env-example]] — Environment variable template (updated 2026-06-21)
-- [[source-deploy-yml]] — CI/CD pipeline (GitHub Actions → server)
 - [[source-codebase-2026-06-21]] — Full codebase state capture (OpenRouter removed, alias-only exposure)
 
 ## Entities

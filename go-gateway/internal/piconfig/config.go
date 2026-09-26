@@ -21,6 +21,16 @@ type SetupOptions struct {
 	DryRun      bool
 }
 
+// ModelsFilePath 返回客户端模型清单的实际路径。
+// pi-go 改名 easyagent 后目录布局随之变化：旧 ~/.pi 下是 agent/models.json，
+// 新 ~/.easyagent 直接用根级 models.json（与 sdk/models.ResolveConfigPath 一致）。
+func ModelsFilePath(home string) string {
+	if filepath.Base(home) == ".easyagent" {
+		return filepath.Join(home, "models.json")
+	}
+	return filepath.Join(home, "agent", "models.json")
+}
+
 func Setup(options SetupOptions) ([]byte, string, error) {
 	if options.GatewayHome == "" || options.PiHome == "" {
 		return nil, "", fmt.Errorf("gateway and Pi home directories are required")
@@ -30,7 +40,7 @@ func Setup(options SetupOptions) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	modelsPath := filepath.Join(options.PiHome, "agent", "models.json")
+	modelsPath := ModelsFilePath(options.PiHome)
 	existing, err := os.ReadFile(modelsPath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, "", fmt.Errorf("read Pi models config: %w", err)

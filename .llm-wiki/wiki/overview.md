@@ -81,8 +81,7 @@ web/                     # Browser admin dashboard (React + Vite)
 
 ## Deployment
 
-Runs as a systemd service on the production server (8.141.97.21:4001), deployed via GitHub Actions.
-See [[server-deployment]] for details.
+Runs locally (launchd-managed, port 4001) and on the Mini PC; server deployment via GitHub Actions was retired in 2026-09.
 
 ## Related
 
