@@ -82,3 +82,26 @@
 - 不做向量库检索起步：精确约定用精确查询；等自然语言知识规模上来再评估语义检索；
 - 不做多租户：作用域键里没有租户维度，这是单用户基础设施；
 - 不在网关做知识编译/清洗：那是 agent-lessons 的职责（R7 分工）。
+
+## 7. 常驻助理（v1.1 已实现）
+
+网关内嵌一个基于 pi-go SDK（`github.com/hwj123hwj/pi-go/sdk`）的常驻智能体，
+端点 `POST /admin/assistant/chat`（Admin Token，SSE 流式）。
+
+**架构要点**：
+
+- LLM 调用**回环走网关自身**（`ASSISTANT_BASE_URL` 默认 `http://127.0.0.1:<port>`，
+  Key 默认复用 MasterKey）——助理流量与普通客户端同路，享受 fallback 链与指标记录；
+- 挂载网关域工具（pi-go `agent.Tool` 接口）：
+  - `memory_lookup`：按作用域检索 active 记忆；
+  - `memory_list_pending`：列出待确认候选；
+  - `memory_propose`：提案候选记忆（**只能进 candidate，无权确认**）——
+    助理可以打理记忆，但治理权在人；
+- pi-go 引擎自带流式输出、上下文压缩、循环检测；会话历史暂驻内存
+  （重启清零），持久化会话列入后续版本。
+
+**配置**：`ASSISTANT_ENABLED` + `ASSISTANT_MODEL`（/v1/models 中的 ID），
+`ASSISTANT_BASE_URL` / `ASSISTANT_API_KEY` 可选（默认自环 + MasterKey）。
+
+**与面板的关系**：localhost:4001 的 web 面板后续加对话页即可消费该 SSE
+端点，助手即"住在网关里的记忆管家"。

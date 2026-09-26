@@ -17,6 +17,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/archive"
+	"github.com/weijian/go-llm-gateway/internal/assistant"
 	"github.com/weijian/go-llm-gateway/internal/auth"
 	"github.com/weijian/go-llm-gateway/internal/config"
 	"github.com/weijian/go-llm-gateway/internal/dashboard"
@@ -185,6 +186,32 @@ func main() {
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
+
+	// 常驻助理（pi-go SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
+	var assistantHandler *handlers.AssistantHandler
+	if cfg.Assistant.Enabled {
+		baseURL := cfg.Assistant.BaseURL
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("http://127.0.0.1:%d", cfg.Port)
+		}
+		apiKey := cfg.Assistant.APIKey
+		if apiKey == "" {
+			apiKey = cfg.MasterKey
+		}
+		resident, err := assistant.New(assistant.Config{
+			Enabled: true, Model: cfg.Assistant.Model,
+			BaseURL: baseURL, APIKey: apiKey,
+		}, memoryStore, logger)
+		if err != nil {
+			logger.Printf("Warning: assistant init failed: %v（继续运行，助理端点返回 503）", err)
+		} else {
+			assistantHandler = handlers.NewAssistantHandler(resident, logger)
+			logger.Printf("Resident assistant enabled: model=%s via %s", cfg.Assistant.Model, baseURL)
+		}
+	}
+	if assistantHandler == nil {
+		assistantHandler = handlers.NewAssistantHandler(nil, logger)
+	}
 	dashboardHandler := dashboard.NewHandler()
 
 	engine.POST("/v1/messages", msgHandler.Handle)
@@ -245,6 +272,7 @@ func main() {
 		admin.POST("/memories/:id/confirm", memoryAdminHandler.HandleConfirm)
 		admin.POST("/memories/:id/retire", memoryAdminHandler.HandleRetire)
 		admin.DELETE("/memories/:id", memoryAdminHandler.HandleDelete)
+		admin.POST("/assistant/chat", assistantHandler.HandleChat)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
