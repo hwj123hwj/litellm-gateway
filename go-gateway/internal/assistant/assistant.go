@@ -15,9 +15,9 @@ import (
 	"strings"
 	"sync"
 
-	piagent "github.com/hwj123hwj/pi-go/sdk/agent"
-	"github.com/hwj123hwj/pi-go/sdk/ai"
-	"github.com/hwj123hwj/pi-go/sdk/ai/providers"
+	piagent "github.com/hwj123hwj/easyagent/sdk/agent"
+	"github.com/hwj123hwj/easyagent/sdk/ai"
+	"github.com/hwj123hwj/easyagent/sdk/ai/providers"
 
 	"github.com/weijian/go-llm-gateway/internal/memory"
 )
