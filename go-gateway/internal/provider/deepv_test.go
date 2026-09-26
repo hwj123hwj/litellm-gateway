@@ -110,7 +110,8 @@ func TestDeepVConvertRequest(t *testing.T) {
 }
 
 // TestDeepVToolCallTurnKeepsRealReasoning 验证：带真实思维链的工具调用轮
-// 原样回传，不被占位文本覆盖；纯文本轮不注入占位。
+// 原样回传，不被占位文本覆盖；缺思维链的轮次（含纯文本 model 轮）注入占位，
+// 上游思考模式要求所有历史 model 轮必须带 reasoning。
 func TestDeepVToolCallTurnKeepsRealReasoning(t *testing.T) {
 	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 
@@ -145,8 +146,8 @@ func TestDeepVToolCallTurnKeepsRealReasoning(t *testing.T) {
 	}
 
 	plain := out.Contents[1]
-	if plain.Parts[0].Reasoning != "" || plain.Parts[0].Text != "plain answer, no tools" {
-		t.Errorf("plain text turn should not get placeholder: %+v", plain.Parts)
+	if plain.Parts[0].Reasoning != placeholderReasoning || plain.Parts[1].Text != "plain answer, no tools" {
+		t.Errorf("plain text turn should get placeholder reasoning: %+v", plain.Parts)
 	}
 
 	withTools := out.Contents[2]
@@ -490,5 +491,36 @@ func TestDeepVRewriteQuotaError(t *testing.T) {
 
 	if got := rewriteDeepVQuotaError(nil); got != nil {
 		t.Fatalf("nil error rewritten: %+v", got)
+	}
+}
+
+// TestDeepVEmptyToolArgsOmitted 回归：空 input 的 tool_use 不能下发 "args":{}，
+// 上游会报「contents 数组包含无效元素」；省略字段才合法。
+func TestDeepVEmptyToolArgsOmitted(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
+
+	raw := `{
+		"model": "deepseek-v4.1-flash",
+		"messages": [
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"tu_e","name":"bash","input":{}}
+			]}
+		]
+	}`
+
+	var req Request
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	out, err := p.convertRequest(&req)
+	if err != nil {
+		t.Fatalf("convertRequest: %v", err)
+	}
+	data, err := json.Marshal(out.Contents[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"args":{}`) {
+		t.Fatalf("empty args must be omitted, got %s", data)
 	}
 }

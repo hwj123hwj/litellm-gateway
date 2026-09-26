@@ -287,7 +287,6 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 
 		content := deepVContent{Role: role}
 		var reasoningParts []deepVPart
-		hasFunctionCall := false
 
 		for _, block := range msg.Content.Blocks() {
 			switch block.Type {
@@ -303,14 +302,16 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 				}
 				content.Parts = append(content.Parts, deepVPart{Text: block.Text})
 			case "tool_use":
-				hasFunctionCall = true
 				toolUseIDToName[block.ID] = block.Name
 				var args map[string]interface{}
 				if len(block.Input) > 0 {
 					_ = json.Unmarshal(block.Input, &args)
 				}
-				if args == nil {
-					args = make(map[string]interface{})
+				// args 为空时保持 nil，让 omitempty 省略字段：上游对
+				// "args":{} 会报「contents 数组包含无效元素」（2026-09-26 实测），
+				// 省略字段则所有后端都接受。
+				if len(args) == 0 {
+					args = nil
 				}
 				content.Parts = append(content.Parts, deepVPart{
 					FunctionCall: &deepVFunctionCall{ID: block.ID, Name: block.Name, Args: args},
@@ -351,10 +352,11 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 			}
 		}
 
-		// 上游思考模式要求带工具调用的 model 轮必须带 reasoning part，缺失
-		// 会让整个请求被拒。部分客户端（如 zcode 走 Responses 协议回传历史）
+		// 上游思考模式要求历史 model 轮必须回传 reasoning：不止带工具调用的轮次，
+		// 纯文本 model 轮缺失同样会被拒（2026-09-26 实测 400 "The reasoning_text
+		// in the thinking mode must be passed back to the API"）。部分客户端
 		// 不回传思维链，此时注入最小占位文本，上游校验的是存在性。
-		if role == "model" && hasFunctionCall && len(reasoningParts) == 0 {
+		if role == "model" && len(content.Parts) > 0 && len(reasoningParts) == 0 {
 			reasoningParts = append(reasoningParts, deepVPart{Reasoning: placeholderReasoning})
 		}
 
