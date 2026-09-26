@@ -9,50 +9,172 @@ import {
   ShieldCheck,
   WarningCircle,
 } from '@phosphor-icons/react'
-import { getPiConfig, syncPiConfig } from '../api'
+import {
+  getHarnessConfig,
+  getPiConfig,
+  getZCodeConfig,
+  syncHarnessConfig,
+  syncPiConfig,
+  syncZCodeConfig,
+} from '../api'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 import type { PiConfigResponse } from '../api/types'
+
+// 三张「同步模型清单到客户端」卡片共用一套状态与交互。
+const SYNC_TARGETS = [
+  {
+    key: 'pi',
+    title: 'Pi 模型清单',
+    desc: '把网关精选的模型列表写入 Pi 的 models.json（~/.pi/agent）',
+    backupNote: '同步前自动备份为 models.json.pre-sync.bak；完成后重启 Pi 生效',
+    buttonLabel: '同步到 Pi',
+    getConfig: getPiConfig,
+    syncConfig: syncPiConfig,
+  },
+  {
+    key: 'zcode',
+    title: 'ZCode 模型清单',
+    desc: '更新 ZCode 的网关 provider 规则模型列表（~/.zcode/v2/provider_config.json）',
+    backupNote: '同步前自动备份为 provider_config.json.pre-sync.bak；只改网关规则的模型列表',
+    buttonLabel: '同步到 ZCode',
+    getConfig: getZCodeConfig,
+    syncConfig: syncZCodeConfig,
+  },
+  {
+    key: 'harness',
+    title: 'DeepSeek Harness 模型清单',
+    desc: '更新 harness 的 llm-deepseek / llm-pi-ai 条目模型列表（~/.dsh/profiles/desktop/cordis.patch.yml）',
+    backupNote: '同步前自动备份为 cordis.patch.yml.pre-sync.bak；缺失的条目会跳过',
+    buttonLabel: '同步到 Harness',
+    getConfig: getHarnessConfig,
+    syncConfig: syncHarnessConfig,
+  },
+] as const
+
+interface SyncCardProps {
+  target: (typeof SYNC_TARGETS)[number]
+  apiKey: string
+}
+
+function SyncCard({ target, apiKey }: SyncCardProps) {
+  const [config, setConfig] = useState<PiConfigResponse | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [synced, setSynced] = useState(false)
+  const [error, setError] = useState('')
+
+  const refresh = useCallback(() => {
+    if (!apiKey) return
+    target
+      .getConfig()
+      .then(setConfig)
+      .catch(() => setConfig(null))
+  }, [apiKey, target])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setError('')
+    try {
+      const next = await target.syncConfig()
+      setConfig(next)
+      setSynced(true)
+      setTimeout(() => setSynced(false), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '同步失败')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const skippedEntries = (config as { skipped_entries?: string[] } | null)?.skipped_entries
+
+  return (
+    <div className="settings-item settings-stack">
+      <div className="settings-heading">
+        <div className="si-icon success"><PlugsConnected size={18} weight="duotone" aria-hidden="true" /></div>
+        <div className="si-info">
+          <div className="si-label">{target.title}</div>
+          <div className="si-desc">{target.desc}</div>
+        </div>
+        {config && (
+          <span
+            className={`status-badge ${config.in_sync ? 'ok' : 'degraded'}`}
+            style={{ marginLeft: 'auto' }}
+          >
+            {config.in_sync ? (
+              <><CheckCircle size={13} weight="bold" aria-hidden="true" /> 已同步</>
+            ) : (
+              <><WarningCircle size={13} weight="bold" aria-hidden="true" /> 待同步</>
+            )}
+          </span>
+        )}
+      </div>
+      {config ? (
+        <>
+          <div className="settings-current">{config.path}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {config.desired.map((m) => {
+              const missing = config.missing_ids.includes(m.id)
+              return (
+                <span
+                  key={m.id}
+                  className={`capability-chip ${missing ? 'available' : 'selected'}`}
+                  style={{ cursor: 'default' }}
+                  title={missing ? '客户端缺失，同步后生效' : m.name}
+                >
+                  {m.id}
+                </span>
+              )
+            })}
+          </div>
+          {config.stale_ids.length > 0 && (
+            <div className="settings-current">
+              客户端多出（同步时将移除）：{config.stale_ids.join('、')}
+            </div>
+          )}
+          {skippedEntries && skippedEntries.length > 0 && (
+            <div className="settings-current">
+              跳过缺失条目：{skippedEntries.join('、')}（对应 bundle 未配置，不盲建）
+            </div>
+          )}
+          {error && <div className="settings-current">同步失败：{error}</div>}
+          <div className="settings-control-row">
+            <button
+              className={`button ${synced ? 'button-success' : 'button-primary'}`}
+              disabled={syncing}
+              onClick={handleSync}
+            >
+              {synced ? (
+                <><ShieldCheck size={15} weight="bold" aria-hidden="true" />已同步</>
+              ) : syncing ? '同步中…' : target.buttonLabel}
+            </button>
+            <span className="si-desc" style={{ alignSelf: 'center' }}>
+              {target.backupNote}
+            </span>
+          </div>
+        </>
+      ) : (
+        <div className="settings-current">
+          {apiKey ? '无法读取集成状态（请检查后端地址与 API Key）' : '填写 API Key 后可管理模型清单'}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function Settings() {
   const { backendUrl, setBackendUrl, apiKey, setApiKey } = useStore()
   const [urlInput, setUrlInput] = useState(backendUrl)
   const [saved, setSaved] = useState(false)
-  const [piConfig, setPiConfig] = useState<PiConfigResponse | null>(null)
-  const [piSyncing, setPiSyncing] = useState(false)
-  const [piSynced, setPiSynced] = useState(false)
-  const [piError, setPiError] = useState('')
-
-  const refreshPiConfig = useCallback(() => {
-    if (!apiKey) return
-    getPiConfig()
-      .then(setPiConfig)
-      .catch(() => setPiConfig(null))
-  }, [apiKey])
-
-  useEffect(() => {
-    refreshPiConfig()
-  }, [refreshPiConfig])
 
   const handleSaveUrl = () => {
     setBackendUrl(urlInput)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }
-
-  const handleSyncPi = async () => {
-    setPiSyncing(true)
-    setPiError('')
-    try {
-      const next = await syncPiConfig()
-      setPiConfig(next)
-      setPiSynced(true)
-      setTimeout(() => setPiSynced(false), 2000)
-    } catch (err) {
-      setPiError(err instanceof Error ? err.message : '同步失败')
-    } finally {
-      setPiSyncing(false)
-    }
   }
 
   return (
@@ -110,74 +232,10 @@ export default function Settings() {
       </div>
 
       <div className="settings-group">
-        <div className="sg-title">Pi 集成</div>
-        <div className="settings-item settings-stack">
-          <div className="settings-heading">
-            <div className="si-icon success"><PlugsConnected size={18} weight="duotone" aria-hidden="true" /></div>
-            <div className="si-info">
-              <div className="si-label">Pi 模型清单</div>
-              <div className="si-desc">
-                把网关精选的模型列表写入 Pi 的 models.json（~/.pi/agent）
-              </div>
-            </div>
-            {piConfig && (
-              <span
-                className={`status-badge ${piConfig.in_sync ? 'ok' : 'degraded'}`}
-                style={{ marginLeft: 'auto' }}
-              >
-                {piConfig.in_sync ? (
-                  <><CheckCircle size={13} weight="bold" aria-hidden="true" /> 已同步</>
-                ) : (
-                  <><WarningCircle size={13} weight="bold" aria-hidden="true" /> 待同步</>
-                )}
-              </span>
-            )}
-          </div>
-          {piConfig ? (
-            <>
-              <div className="settings-current">{piConfig.path}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {piConfig.desired.map((m) => {
-                  const missing = piConfig.missing_ids.includes(m.id)
-                  return (
-                    <span
-                      key={m.id}
-                      className={`capability-chip ${missing ? 'available' : 'selected'}`}
-                      style={{ cursor: 'default' }}
-                      title={missing ? 'Pi 中缺失，同步后生效' : m.name}
-                    >
-                      {m.id}
-                    </span>
-                  )
-                })}
-              </div>
-              {piConfig.stale_ids.length > 0 && (
-                <div className="settings-current">
-                  Pi 中多出（同步时将移除）：{piConfig.stale_ids.join('、')}
-                </div>
-              )}
-              {piError && <div className="settings-current">同步失败：{piError}</div>}
-              <div className="settings-control-row">
-                <button
-                  className={`button ${piSynced ? 'button-success' : 'button-primary'}`}
-                  disabled={piSyncing}
-                  onClick={handleSyncPi}
-                >
-                  {piSynced ? (
-                    <><ShieldCheck size={15} weight="bold" aria-hidden="true" />已同步</>
-                  ) : piSyncing ? '同步中…' : '同步到 Pi'}
-                </button>
-                <span className="si-desc" style={{ alignSelf: 'center' }}>
-                  同步前自动备份为 models.json.pre-sync.bak；完成后重启 Pi 生效
-                </span>
-              </div>
-            </>
-          ) : (
-            <div className="settings-current">
-              {apiKey ? '无法读取 Pi 集成状态（请检查后端地址与 API Key）' : '填写 API Key 后可管理 Pi 模型清单'}
-            </div>
-          )}
-        </div>
+        <div className="sg-title">客户端集成</div>
+        {SYNC_TARGETS.map((target) => (
+          <SyncCard key={target.key} target={target} apiKey={apiKey} />
+        ))}
       </div>
 
       <div className="settings-group">

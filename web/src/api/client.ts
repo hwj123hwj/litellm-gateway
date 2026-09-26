@@ -111,3 +111,19 @@ export function getPiConfig(): Promise<PiConfigResponse> {
 export function syncPiConfig(): Promise<PiConfigResponse> {
   return fetchJSON('/pi/sync', { method: 'POST' })
 }
+
+export function getZCodeConfig(): Promise<PiConfigResponse> {
+  return fetchJSON('/zcode')
+}
+
+export function syncZCodeConfig(): Promise<PiConfigResponse> {
+  return fetchJSON('/zcode/sync', { method: 'POST' })
+}
+
+export function getHarnessConfig(): Promise<PiConfigResponse> {
+  return fetchJSON('/harness')
+}
+
+export function syncHarnessConfig(): Promise<PiConfigResponse> {
+  return fetchJSON('/harness/sync', { method: 'POST' })
+}

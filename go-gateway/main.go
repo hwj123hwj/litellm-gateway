@@ -174,6 +174,7 @@ func main() {
 	healthHandler := handlers.NewHealthHandler(router, logger)
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
 	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger)
+	clientConfigHandler := handlers.NewClientConfigHandler(defaultGatewayHome(), defaultZCodeHome(), defaultDshHome(), router, logger)
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 	dashboardHandler := dashboard.NewHandler()
 
@@ -219,6 +220,10 @@ func main() {
 		admin.GET("/config", adminHandler.HandleConfig)
 		admin.GET("/pi", piConfigHandler.HandleStatus)
 		admin.POST("/pi/sync", piConfigHandler.HandleSync)
+		admin.GET("/zcode", clientConfigHandler.HandleZCodeStatus)
+		admin.POST("/zcode/sync", clientConfigHandler.HandleZCodeSync)
+		admin.GET("/harness", clientConfigHandler.HandleHarnessStatus)
+		admin.POST("/harness/sync", clientConfigHandler.HandleHarnessSync)
 		admin.GET("/stats", adminHandler.HandleStats)
 		admin.GET("/archives", archiveHandler.HandleList)
 		admin.GET("/archives/export", archiveHandler.HandleExport)
@@ -312,6 +317,28 @@ func defaultGatewayHome() string {
 		return ".llm-gateway"
 	}
 	return filepath.Join(userHome, ".llm-gateway")
+}
+
+func defaultZCodeHome() string {
+	if home := os.Getenv("ZCODE_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".zcode"
+	}
+	return filepath.Join(userHome, ".zcode")
+}
+
+func defaultDshHome() string {
+	if home := os.Getenv("DSH_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".dsh"
+	}
+	return filepath.Join(userHome, ".dsh")
 }
 
 func defaultPiHome() string {
