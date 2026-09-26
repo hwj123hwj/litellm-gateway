@@ -88,6 +88,13 @@
 网关内嵌一个基于 EasyAgent SDK（`github.com/hwj123hwj/easyagent/sdk`）的常驻智能体，
 端点 `POST /admin/assistant/chat`（Admin Token，SSE 流式）。
 
+**人设自定义与反馈（v1.2）**：
+- `GET/PUT /admin/assistant/prompt` — 用户自定义 system prompt（存 `agent_settings` 表，
+  保存后热更新无需重启；空串恢复内置默认）。内置默认已编码核心纪律：
+  只记用户本人状态（设备/目标/现场经验），通用知识不入记忆；
+- `POST/GET /admin/assistant/feedback` — 对回复打分（up/down + 备注，存 `assistant_feedback`），
+  在设置页复盘规律后人工迭代人设。治理边界与记忆一致：agent 不改写自己的 prompt。
+
 **架构要点**：
 
 - LLM 调用**回环走网关自身**（`ASSISTANT_BASE_URL` 默认 `http://127.0.0.1:<port>`，

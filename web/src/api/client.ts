@@ -9,6 +9,8 @@ import type {
   MemoriesResponse,
   MemoryEntry,
   AssistantStreamEvent,
+  AssistantPromptResponse,
+  AssistantFeedbackEntry,
 } from './types'
 
 // 获取后端地址（支持运行时配置）
@@ -205,4 +207,25 @@ export function chatWithAssistant(
       }
     })
   return { abort: () => controller.abort() }
+}
+
+// ── 助理人设与反馈 ──
+
+export function getAssistantPrompt(): Promise<AssistantPromptResponse> {
+  return fetchJSON('/assistant/prompt')
+}
+
+export function setAssistantPrompt(prompt: string): Promise<AssistantPromptResponse> {
+  return fetchJSON('/assistant/prompt', { method: 'PUT', body: JSON.stringify({ prompt }) })
+}
+
+export function addAssistantFeedback(rating: 'up' | 'down', reply: string, note = ''): Promise<unknown> {
+  return fetchJSON('/assistant/feedback', {
+    method: 'POST',
+    body: JSON.stringify({ rating, reply, note }),
+  })
+}
+
+export function listAssistantFeedback(limit = 50): Promise<{ feedback: AssistantFeedbackEntry[]; total: number }> {
+  return fetchJSON(`/assistant/feedback?limit=${limit}`)
 }

@@ -17,3 +17,4 @@ runner/
 
 # Go gateway runtime data
 go-gateway/data/
+go-gateway/go-llm-gateway

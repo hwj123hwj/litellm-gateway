@@ -31,12 +31,17 @@ type Config struct {
 	BaseURL string
 	// APIKey 默认复用 MasterKey。
 	APIKey string
+	// System 覆盖内置 system prompt（空 = 用 DefaultSystemPrompt）。
+	// 持久化在 agent_settings 表，经 /admin/assistant/prompt 管理。
+	System string
 }
 
 // Assistant is a long-lived EasyAgent agent wired to gateway-domain tools.
 type Assistant struct {
 	mu       sync.Mutex
 	agent    *piagent.Agent
+	build    func(system string) *piagent.Agent
+	system   string
 	memories memory.Store
 	log      *log.Logger
 }
@@ -59,18 +64,43 @@ func New(cfg Config, memories memory.Store, logger *log.Logger) (*Assistant, err
 		ContextWindow: 128000,
 		MaxTokens:     8192,
 	}
-	agent := piagent.New(piagent.Options{
-		Model:    model,
-		Registry: registry,
-		System:   systemPrompt,
-		Tools: []piagent.Tool{
-			newMemoryLookupTool(memories),
-			newMemoryListPendingTool(memories),
-			newMemoryProposeTool(memories),
-		},
-		MaxTurns: 8,
-	})
-	return &Assistant{agent: agent, memories: memories, log: logger}, nil
+	system := cfg.System
+	if system == "" {
+		system = DefaultSystemPrompt
+	}
+	build := func(sys string) *piagent.Agent {
+		return piagent.New(piagent.Options{
+			Model:    model,
+			Registry: registry,
+			System:   sys,
+			Tools: []piagent.Tool{
+				newMemoryLookupTool(memories),
+				newMemoryListPendingTool(memories),
+				newMemoryProposeTool(memories),
+			},
+			MaxTurns: 8,
+		})
+	}
+	return &Assistant{agent: build(system), build: build, system: system, memories: memories, log: logger}, nil
+}
+
+// UpdateSystemPrompt hot-swaps the resident agent with a new system prompt
+// (Chat serializes on the same mutex, so in-flight turns finish first).
+func (a *Assistant) UpdateSystemPrompt(prompt string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if prompt == "" {
+		prompt = DefaultSystemPrompt
+	}
+	a.system = prompt
+	a.agent = a.build(prompt)
+}
+
+// SystemPrompt returns the currently effective prompt.
+func (a *Assistant) SystemPrompt() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.system
 }
 
 // StreamUpdate is one SSE-mappable update from a Chat turn.
@@ -119,7 +149,10 @@ func (a *Assistant) Chat(ctx context.Context, message string, onUpdate func(Stre
 	return final, nil
 }
 
-const systemPrompt = `你是常驻在 LLM Gateway 里的助理（网关地址即你自己的 LLM 出口）。
+// DefaultSystemPrompt 是未自定义时的助理人设。核心纪律（用户设定）：
+// 只记「用户本人的状态」——设备与环境、进行中的目标、现场经验；
+// 模型本就懂的通用知识一律不入记忆。
+const DefaultSystemPrompt = `你是常驻在 LLM Gateway 里的助理（网关地址即你自己的 LLM 出口）。
 
 职责：
 1. 记忆管家：按用户要求检索、审阅长期记忆；发现值得长期记住的事实时，用
@@ -127,8 +160,15 @@ const systemPrompt = `你是常驻在 LLM Gateway 里的助理（网关地址即
 2. 网关顾问：回答关于网关自身能力、配置约定的问题。
 3. 日常问答。
 
+记忆提案判据（最重要）：
+- 只提案关于**用户本人状态**的记忆：他的设备与环境（哪台机器、什么系统、怎么互连）、
+  他的进行中目标与主线方向、他的偏好与踩过的坑、他的现场经验（如"网线直连可让
+  电脑扫描到无法联网的迷你主机"——用户自己未必记得、模型更不可能知道的事）；
+- 通用知识、操作步骤、教程类内容一律不提案——模型本来就懂，记了只会制造冗余；
+- 偏离用户主线目标的偶发内容不提案（如主攻 Go 后端的人偶尔写 JS）；
+- 记忆提案必须是命题化的陈述（一句话可检验），不要存聊天摘要或一次性细节。
+
 守则：
-- 记忆提案必须是命题化的陈述（一句话可检验），不要存聊天摘要或一次性细节；
 - 任何密钥、token、密码类内容一律不写入记忆，也不要复述；
 - 检索记忆时优先按用户提到的项目作用域（project scope_key 形如 host:owner/repo）；
 - 回答用中文，简洁直接。`
