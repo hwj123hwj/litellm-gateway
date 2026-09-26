@@ -85,30 +85,34 @@ providers:
       - id: gemini-3.8-flash-high
         capabilities: [text, vision, tool_calling, streaming, reasoning]
         input_modalities: [text, image]
-  # 硅基流动：免费嵌入与电信 ASR。url 配上游源站，embeddings / audio
-  # transcriptions 端点由网关透传时在其后拼接路径；两个模型都不注册 chat
+  # 硅基流动：免费嵌入与语音转写。url 配上游源站，embeddings / audio
+  # transcriptions 端点由网关透传时在其后拼接路径；这些模型都不注册 chat
   # 能力，不会被聊天路由选中。
   - name: siliconflow
     type: openai
     url: https://api.siliconflow.cn
     api_key_env: SILICONFLOW_API_KEY
     models:
+      # 免费嵌入：kbvector / RAG 向量化用这个
       - id: BAAI/bge-m3
         capabilities: [embedding]
-      # 免费兜底
+        description: "免费嵌入模型（1024 维），知识库向量化用"
+      # 免费兜底：带语种检测字段，多语言混杂音频首选
       - id: FunAudioLLM/SenseVoiceSmall
         capabilities: [audio_transcription]
-      # 讯飞星辰 ASR 系列（V3.2 主力 / Ultra 高精度 / Diarize 带说话人分离）
+        description: "免费兜底，带语种检测；多语言/不确定来源音频首选"
+      # 日常主力：准确流畅，常规录音转写
       - id: XingChenAGI/XingChenASR-V3.2
         capabilities: [audio_transcription]
+        description: "日常主力，准确流畅；常规单人说活录音用它"
+      # 高精度档：专有名词、中英混排的大小写渲染最准，适合定稿
       - id: XingChenAGI/XingChenASR-V3.2-Ultra
         capabilities: [audio_transcription]
+        description: "高精度定稿档；专有名词与中英混排大小写最准，耗时内容首选"
+      # 会议档：返回 segments 说话人分段+时间戳（谁在何时说了什么）
       - id: XingChenAGI/XingChenASR-Diarize-V3.0
         capabilities: [audio_transcription]
-      # GSR 用途待确认，先注册实测
-      - id: XingChenAGI/XingChenGSR-V1.0
-        capabilities: [audio_transcription]
-
+        description: "多人会议档；响应含 segments 说话人分段与时间戳"
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
   # 上游 5xx）都自动降级到下一档，客户端始终只调用这个名字。

@@ -31,6 +31,7 @@ type ModelConfig struct {
 	InputModalities []string `yaml:"input_modalities,omitempty"`
 	MaxInputTokens  int      `yaml:"max_input_tokens,omitempty"`
 	MaxOutputTokens int      `yaml:"max_output_tokens,omitempty"`
+	Description     string   `yaml:"description,omitempty"` // 选型说明，经 /v1/models 暴露给客户端
 }
 
 // ProvidersConfig 提供商配置文件
@@ -198,6 +199,7 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 						InputModalities: modelInputModalities(capabilities, mc.InputModalities),
 						MaxInputTokens:  mc.MaxInputTokens,
 						MaxOutputTokens: mc.MaxOutputTokens,
+						Description:     mc.Description,
 					})
 					modelToProvider[modelName] = pc.Name
 				}
@@ -238,6 +240,7 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 					InputModalities: modelInputModalities(capabilities, mc.InputModalities),
 					MaxInputTokens:  mc.MaxInputTokens,
 					MaxOutputTokens: mc.MaxOutputTokens,
+					Description:     mc.Description,
 				})
 			}
 

@@ -40,6 +40,7 @@ type ModelInfo struct {
 	InputModalities []string `json:"input_modalities,omitempty"`
 	MaxInputTokens  int      `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	Description     string   `json:"description,omitempty"`
 }
 
 // UnsupportedCapabilityError is a client error: the requested model exists,

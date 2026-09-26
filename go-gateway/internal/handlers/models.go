@@ -47,6 +47,9 @@ func (h *ModelHandler) Handle(c *gin.Context) {
 		if info.MaxOutputTokens > 0 {
 			model["max_output_tokens"] = info.MaxOutputTokens
 		}
+		if info.Description != "" {
+			model["description"] = info.Description
+		}
 		models = append(models, model)
 	}
 	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models, "models": models})
