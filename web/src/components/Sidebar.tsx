@@ -1,5 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
+  Brain,
   ChartLineUp,
   Cube,
   FileText,
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { path: '/models', label: 'Models', icon: Cube },
   { path: '/providers', label: 'Providers', icon: PlugsConnected },
   { path: '/logs', label: 'Logs', icon: FileText },
+  { path: '/memory', label: '记忆管家', icon: Brain },
   { path: '/settings', label: 'Settings', icon: Gear },
 ]
 

@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Models from './pages/Models'
 import Providers from './pages/Providers'
 import Logs from './pages/Logs'
+import MemoryPanel from './pages/MemoryPanel'
 import Settings from './pages/Settings'
 import { useStore } from './store'
 
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/models" element={<Models />} />
             <Route path="/providers" element={<Providers />} />
             <Route path="/logs" element={<Logs />} />
+            <Route path="/memory" element={<MemoryPanel />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

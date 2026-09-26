@@ -6,6 +6,9 @@ import type {
   HealthResponse,
   RoutesResponse,
   PiConfigResponse,
+  MemoriesResponse,
+  MemoryEntry,
+  AssistantStreamEvent,
 } from './types'
 
 // 获取后端地址（支持运行时配置）
@@ -126,4 +129,80 @@ export function getHarnessConfig(): Promise<PiConfigResponse> {
 
 export function syncHarnessConfig(): Promise<PiConfigResponse> {
   return fetchJSON('/harness/sync', { method: 'POST' })
+}
+
+// ── 记忆层 ──
+
+export function getMemories(status = '', limit = 200): Promise<MemoriesResponse> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (status) params.set('status', status)
+  return fetchJSON(`/memories?${params}`)
+}
+
+export function confirmMemory(id: number): Promise<unknown> {
+  return fetchJSON(`/memories/${id}/confirm`, { method: 'POST' })
+}
+
+export function retireMemory(id: number): Promise<unknown> {
+  return fetchJSON(`/memories/${id}/retire`, { method: 'POST' })
+}
+
+export function deleteMemory(id: number): Promise<unknown> {
+  return fetchJSON(`/memories/${id}`, { method: 'DELETE' })
+}
+
+export function createMemory(body: {
+  scope_type: string
+  scope_key?: string
+  statement: string
+  confidence?: number
+}): Promise<{ memory: MemoryEntry }> {
+  return fetchJSON('/memories', { method: 'POST', body: JSON.stringify(body) })
+}
+
+// 助理对话（SSE 流式）。onEvent 逐帧回调；返回的 abort 可中断。
+export function chatWithAssistant(
+  message: string,
+  onEvent: (ev: AssistantStreamEvent) => void,
+): { abort: () => void } {
+  const controller = new AbortController()
+  const apiKey = localStorage.getItem('api_key') || ''
+  const base = getBaseUrl()
+  fetch(`${base}/assistant/chat`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok || !res.body) {
+        onEvent({ type: 'error', content: `API error: ${res.status}` })
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() || ''
+        for (const frame of frames) {
+          const line = frame.split('\n').find((l) => l.startsWith('data: '))
+          if (!line) continue
+          try {
+            onEvent(JSON.parse(line.slice(6)) as AssistantStreamEvent)
+          } catch {
+            // 忽略不完整帧
+          }
+        }
+      }
+    })
+    .catch((err: unknown) => {
+      if ((err as Error).name !== 'AbortError') {
+        onEvent({ type: 'error', content: (err as Error).message })
+      }
+    })
+  return { abort: () => controller.abort() }
 }
