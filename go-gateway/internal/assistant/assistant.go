@@ -1,4 +1,4 @@
-// Package assistant embeds a pi-go-based resident agent inside the gateway
+// Package assistant embeds an EasyAgent-based resident agent inside the gateway
 // (docs/MEMORY_DESIGN.md §常驻助理). The agent's LLM calls loop back through
 // the gateway's own OpenAI-compatible endpoint — dogfooding the router, so
 // assistant traffic lands in request_logs and inherits provider failover.
@@ -33,7 +33,7 @@ type Config struct {
 	APIKey string
 }
 
-// Assistant is a long-lived pi-go agent wired to gateway-domain tools.
+// Assistant is a long-lived EasyAgent agent wired to gateway-domain tools.
 type Assistant struct {
 	mu       sync.Mutex
 	agent    *piagent.Agent

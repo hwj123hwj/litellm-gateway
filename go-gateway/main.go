@@ -187,7 +187,7 @@ func main() {
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
 
-	// 常驻助理（pi-go SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
+	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
 	var assistantHandler *handlers.AssistantHandler
 	if cfg.Assistant.Enabled {
 		baseURL := cfg.Assistant.BaseURL
