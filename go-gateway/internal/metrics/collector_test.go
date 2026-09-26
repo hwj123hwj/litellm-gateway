@@ -79,3 +79,56 @@ func TestIsBusinessRequestRecognizesAllModelProtocols(t *testing.T) {
 		}
 	}
 }
+
+// 回归：重启后看板 KPI 与模型/供应商聚合必须从持久化日志恢复「今日」部分，
+// 跨天记录不能计入今日；恢复后新请求在恢复值上继续累计。
+func TestCollectorRestoresTodayAggregates(t *testing.T) {
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	store := &memoryStore{records: []RequestRecord{
+		// 昨天：不应计入今日
+		{Timestamp: todayStart.Add(-time.Hour), Method: http.MethodPost, Path: "/v1/chat/completions", Model: "yesterday-model", Provider: "p0", StatusCode: 200, Latency: 100},
+		// 今天：2 成功 1 失败
+		{Timestamp: todayStart.Add(time.Hour), Method: http.MethodPost, Path: "/v1/chat/completions", Model: "today-model", Provider: "p1", StatusCode: 200, Latency: 200},
+		{Timestamp: todayStart.Add(2 * time.Hour), Method: http.MethodPost, Path: "/v1/chat/completions", Model: "today-model", Provider: "p1", StatusCode: 200, Latency: 400},
+		{Timestamp: todayStart.Add(3 * time.Hour), Method: http.MethodPost, Path: "/v1/chat/completions", Model: "today-model", Provider: "p1", StatusCode: 500, Latency: 600},
+		// 非业务请求：不计入
+		{Timestamp: todayStart.Add(time.Hour), Method: http.MethodGet, Path: "/v1/models", Model: "today-model", Provider: "p1", StatusCode: 200, Latency: 5},
+	}}
+
+	c := NewCollector()
+	c.SetStore(store)
+
+	summary := c.GetDashboard()
+	if summary.TodayRequests != 3 {
+		t.Fatalf("today_requests = %d, want 3", summary.TodayRequests)
+	}
+	wantRate := float64(2) / 3 * 100
+	if diff := summary.SuccessRate - wantRate; diff > 0.01 || diff < -0.01 {
+		t.Fatalf("success_rate = %v, want %v", summary.SuccessRate, wantRate)
+	}
+	if summary.ActiveModels != 1 {
+		t.Fatalf("active_models = %d, want 1", summary.ActiveModels)
+	}
+
+	stats := c.GetModelStats()
+	if len(stats) != 1 || stats[0].Model != "today-model" {
+		t.Fatalf("model stats = %+v, want only today-model", stats)
+	}
+	if stats[0].Requests != 3 || stats[0].Successes != 2 || stats[0].Errors != 1 {
+		t.Fatalf("model stats = %+v, want 3/2/1", stats[0])
+	}
+	wantAvg := (200 + 400 + 600) / 3
+	if diff := stats[0].AvgLatency - float64(wantAvg); diff > 0.01 || diff < -0.01 {
+		t.Fatalf("avg latency = %v, want %v", stats[0].AvgLatency, wantAvg)
+	}
+
+	// 恢复后新请求继续累计
+	c.mu.Lock()
+	c.applyToAggregates(RequestRecord{Timestamp: now, Method: http.MethodPost, Path: "/v1/chat/completions", Model: "today-model", Provider: "p1", StatusCode: 200, Latency: 800})
+	c.mu.Unlock()
+	if summary := c.GetDashboard(); summary.TodayRequests != 4 {
+		t.Fatalf("today_requests after new record = %d, want 4", summary.TodayRequests)
+	}
+}

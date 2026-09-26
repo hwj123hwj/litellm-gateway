@@ -130,18 +130,26 @@ func (c *Collector) SetStore(store Store) {
 	if store == nil || len(c.records) > 0 {
 		return
 	}
-	// Restore the recent lightweight log window after a restart. Aggregates are
-	// intentionally kept in memory; the persisted request log is enough for the
-	// Dashboard activity view and avoids replaying records into today's stats.
+	// Restore the recent lightweight log window after a restart. The Dashboard
+	// KPIs and per-model/provider aggregates are "today"-scoped, so replay only
+	// today's persisted records into the aggregates; older records are kept in
+	// the ring buffer for the request log view.
 	persisted, err := store.GetRecentLogs(c.maxRecords)
 	if err != nil {
 		return
 	}
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	c.todayStart = todayStart
 	for i := len(persisted) - 1; i >= 0; i-- {
-		if !IsBusinessRequest(persisted[i].Method, persisted[i].Path) {
+		r := persisted[i]
+		if !IsBusinessRequest(r.Method, r.Path) {
 			continue
 		}
-		c.records = append(c.records, persisted[i])
+		c.records = append(c.records, r)
+		if !r.Timestamp.Before(todayStart) {
+			c.applyToAggregates(r)
+		}
 	}
 }
 
@@ -175,6 +183,12 @@ func (c *Collector) Record(r RequestRecord) {
 		go c.store.SaveRecord(r)
 	}
 
+	c.applyToAggregates(r)
+}
+
+// applyToAggregates 把一条业务请求计入今日计数器与模型/提供商聚合。
+// Record 与重启恢复（SetStore）共用；调用方需持锁并保证时间顺序。
+func (c *Collector) applyToAggregates(r RequestRecord) {
 	// 更新每日计数
 	c.todayTotal++
 	if r.StatusCode >= 200 && r.StatusCode < 400 {
@@ -233,7 +247,9 @@ func (c *Collector) resetDaily(todayStart time.Time) {
 	c.todayErrors = 0
 	c.todayLatencySum = 0
 	c.activeModels = make(map[string]bool)
-	// 注意：不清除 modelStats 和 providerStats，保留累计数据
+	// modelStats/providerStats 同样按「今日」语义清理，与面板标题一致
+	c.modelStats = make(map[string]*ModelStats)
+	c.providerStats = make(map[string]*ProviderStats)
 }
 
 // GetDashboard 获取仪表盘概览
