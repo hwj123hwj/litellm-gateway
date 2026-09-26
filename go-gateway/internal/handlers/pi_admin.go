@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/piconfig"
@@ -26,7 +25,7 @@ func NewPiConfigHandler(gatewayHome, piHome string, logger *log.Logger) *PiConfi
 }
 
 func (h *PiConfigHandler) modelsPath() string {
-	return filepath.Join(h.piHome, "agent", "models.json")
+	return piconfig.ModelsFilePath(h.piHome)
 }
 
 // piStatus 汇总看板需要展示的状态。currentIDs 为空表示 Pi 配置还不存在。

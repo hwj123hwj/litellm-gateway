@@ -389,11 +389,24 @@ func defaultPiHome() string {
 	if home := os.Getenv("PI_HOME"); home != "" {
 		return home
 	}
+	if home := os.Getenv("EA_HOME"); home != "" {
+		return home
+	}
 	userHome, err := os.UserHomeDir()
 	if err != nil {
-		return ".pi"
+		return ".easyagent"
 	}
-	return filepath.Join(userHome, ".pi")
+	// pi-go 改名 easyagent 后，客户端数据目录默认从 ~/.pi 迁到 ~/.easyagent。
+	// 同步模型清单要跟着新目录走；旧 ~/.pi 只在仍存有 models.json 时兜底（未迁移的环境）。
+	easyagentHome := filepath.Join(userHome, ".easyagent")
+	if _, err := os.Stat(filepath.Join(easyagentHome, "models.json")); err == nil {
+		return easyagentHome
+	}
+	legacyPiHome := filepath.Join(userHome, ".pi")
+	if _, err := os.Stat(filepath.Join(legacyPiHome, "agent", "models.json")); err == nil {
+		return legacyPiHome
+	}
+	return easyagentHome
 }
 
 // setupDefaultProviders 设置默认提供商（当 providers.yaml 不存在时使用）。

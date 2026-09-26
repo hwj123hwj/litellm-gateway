@@ -25,10 +25,10 @@ import type { PiConfigResponse } from '../api/types'
 const SYNC_TARGETS = [
   {
     key: 'pi',
-    title: 'Pi 模型清单',
-    desc: '把网关精选的模型列表写入 Pi 的 models.json（~/.pi/agent）',
-    backupNote: '同步前自动备份为 models.json.pre-sync.bak；完成后重启 Pi 生效',
-    buttonLabel: '同步到 Pi',
+    title: 'EasyAgent 模型清单',
+    desc: '把网关精选的模型列表写入 EasyAgent 的 models.json（~/.easyagent，兼容旧 ~/.pi/agent）',
+    backupNote: '同步前自动备份为 models.json.pre-sync.bak；完成后重启 EasyAgent 生效',
+    buttonLabel: '同步到 EasyAgent',
     getConfig: getPiConfig,
     syncConfig: syncPiConfig,
   },

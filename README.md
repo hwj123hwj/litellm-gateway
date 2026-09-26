@@ -232,7 +232,7 @@ litellm-gateway/
 
 ## 相关项目
 
-- [π-go](https://github.com/hwj123hwj/pi-go) — AI 编程搭档，写代码、搜知识、放音乐
+- [EasyAgent](https://github.com/hwj123hwj/easyagent)（原 pi-go）— AI 编程搭档，写代码、搜知识、放音乐
 
 ## 展示页
 
