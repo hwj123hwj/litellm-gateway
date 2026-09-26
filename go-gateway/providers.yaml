@@ -95,8 +95,18 @@ providers:
     models:
       - id: BAAI/bge-m3
         capabilities: [embedding]
-      # TeleAI/TeleSpeech-ASR1.0 已于 2026-09 下架，当前免费 ASR 是 SenseVoice
+      # 免费兜底
       - id: FunAudioLLM/SenseVoiceSmall
+        capabilities: [audio_transcription]
+      # 讯飞星辰 ASR 系列（V3.2 主力 / Ultra 高精度 / Diarize 带说话人分离）
+      - id: XingChenAGI/XingChenASR-V3.2
+        capabilities: [audio_transcription]
+      - id: XingChenAGI/XingChenASR-V3.2-Ultra
+        capabilities: [audio_transcription]
+      - id: XingChenAGI/XingChenASR-Diarize-V3.0
+        capabilities: [audio_transcription]
+      # GSR 用途待确认，先注册实测
+      - id: XingChenAGI/XingChenGSR-V1.0
         capabilities: [audio_transcription]
 
 chains:
