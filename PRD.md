@@ -171,7 +171,7 @@ Admin API 和管理端至少支持：
 - 网关：采集、保护、归档、导出；
 - agent-lessons：多源采集、清洗、编译和分类；
 - hwj-wiki personal：个人知识库和检索；
-- pi-go .llm-wiki：代码事实和项目技术知识。
+- EasyAgent .llm-wiki：代码事实和项目技术知识。
 
 ### R8：管理端与部署
 
@@ -258,7 +258,7 @@ Admin API 和管理端至少支持：
 
 ### P2：统一检索
 
-- 明确 agent-lessons、hwj-wiki 和 pi-go 的职责；
+- 明确 agent-lessons、hwj-wiki 和 EasyAgent 的职责；
 - 提供跨来源的关键词、标签和向量检索。
 
 ## 10. 关键决策

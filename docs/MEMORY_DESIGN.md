@@ -85,19 +85,19 @@
 
 ## 7. 常驻助理（v1.1 已实现）
 
-网关内嵌一个基于 pi-go SDK（`github.com/hwj123hwj/pi-go/sdk`）的常驻智能体，
+网关内嵌一个基于 EasyAgent SDK（`github.com/hwj123hwj/easyagent/sdk`）的常驻智能体，
 端点 `POST /admin/assistant/chat`（Admin Token，SSE 流式）。
 
 **架构要点**：
 
 - LLM 调用**回环走网关自身**（`ASSISTANT_BASE_URL` 默认 `http://127.0.0.1:<port>`，
   Key 默认复用 MasterKey）——助理流量与普通客户端同路，享受 fallback 链与指标记录；
-- 挂载网关域工具（pi-go `agent.Tool` 接口）：
+- 挂载网关域工具（EasyAgent `agent.Tool` 接口）：
   - `memory_lookup`：按作用域检索 active 记忆；
   - `memory_list_pending`：列出待确认候选；
   - `memory_propose`：提案候选记忆（**只能进 candidate，无权确认**）——
     助理可以打理记忆，但治理权在人；
-- pi-go 引擎自带流式输出、上下文压缩、循环检测；会话历史暂驻内存
+- EasyAgent 引擎自带流式输出、上下文压缩、循环检测；会话历史暂驻内存
   （重启清零），持久化会话列入后续版本。
 
 **配置**：`ASSISTANT_ENABLED` + `ASSISTANT_MODEL`（/v1/models 中的 ID），
