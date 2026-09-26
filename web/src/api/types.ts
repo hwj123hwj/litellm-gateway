@@ -165,3 +165,17 @@ export interface AssistantStreamEvent {
   content?: string
   tool?: string
 }
+
+export interface AssistantPromptResponse {
+  prompt: string
+  custom: string
+  default: string
+}
+
+export interface AssistantFeedbackEntry {
+  id: number
+  rating: 'up' | 'down'
+  reply_excerpt: string
+  note: string
+  created_at: string
+}

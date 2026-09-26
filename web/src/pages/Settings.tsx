@@ -5,18 +5,25 @@ import {
   Globe,
   Info,
   Key,
+  ChatCircleDots,
   PlugsConnected,
   ShieldCheck,
+  ThumbsDown,
+  ThumbsUp,
   WarningCircle,
 } from '@phosphor-icons/react'
 import {
+  getAssistantPrompt,
   getHarnessConfig,
   getPiConfig,
   getZCodeConfig,
+  listAssistantFeedback,
+  setAssistantPrompt,
   syncHarnessConfig,
   syncPiConfig,
   syncZCodeConfig,
 } from '../api'
+import type { AssistantFeedbackEntry } from '../api/types'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 import type { PiConfigResponse } from '../api/types'
@@ -166,6 +173,139 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
   )
 }
 
+
+// 助理人设：编辑 system prompt（热更新，空串恢复内置默认）+ 反馈复盘列表。
+function AssistantPersona() {
+  const { apiKey } = useStore()
+  const [prompt, setPrompt] = useState('')
+  const [custom, setCustom] = useState('')
+  const [defaultPrompt, setDefaultPrompt] = useState('')
+  const [feedback, setFeedback] = useState<AssistantFeedbackEntry[]>([])
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+
+  const refresh = useCallback(() => {
+    if (!apiKey) return
+    getAssistantPrompt()
+      .then((r) => {
+        setPrompt(r.custom || r.default)
+        setCustom(r.custom)
+        setDefaultPrompt(r.default)
+        setDirty(false)
+        setError('')
+      })
+      .catch((e: Error) => setError(e.message))
+    listAssistantFeedback(20)
+      .then((r) => setFeedback(r.feedback))
+      .catch(() => setFeedback([]))
+  }, [apiKey])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      // 输入与内置默认一致 = 恢复默认（清空自定义）。
+      const r = await setAssistantPrompt(prompt.trim() === defaultPrompt.trim() ? '' : prompt)
+      setCustom(r.custom)
+      setPrompt(r.custom || r.default)
+      setSaved(true)
+      setDirty(false)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="settings-group">
+      <div className="sg-title">助理人设</div>
+      <div className="settings-item settings-stack">
+        <div className="settings-heading">
+          <div className="si-icon accent"><ChatCircleDots size={18} weight="duotone" aria-hidden="true" /></div>
+          <div className="si-info">
+            <div className="si-label">System Prompt（记忆管家的行为准则）</div>
+            <div className="si-desc">保存后立即生效，无需重启；与默认一致时视为恢复默认</div>
+          </div>
+          {custom ? (
+            <span className="status-badge ok" style={{ marginLeft: 'auto' }}>
+              <><CheckCircle size={13} weight="bold" aria-hidden="true" /> 自定义中</>
+            </span>
+          ) : (
+            <span className="status-badge degraded" style={{ marginLeft: 'auto' }}>内置默认</span>
+          )}
+        </div>
+        {apiKey ? (
+          <>
+            <textarea
+              className="settings-input"
+              rows={12}
+              spellCheck={false}
+              value={prompt}
+              onChange={(e) => { setPrompt(e.target.value); setDirty(true) }}
+              placeholder={defaultPrompt || '加载中…'}
+            />
+            {error && <div className="settings-current">操作失败：{error}</div>}
+            <div className="settings-control-row">
+              <button
+                className={`button ${saved ? 'button-success' : 'button-primary'}`}
+                disabled={saving || !dirty}
+                onClick={handleSave}
+              >
+                {saved ? '已保存' : saving ? '保存中…' : '保存并生效'}
+              </button>
+              <button
+                className="button button-ghost"
+                disabled={saving || !custom}
+                onClick={() => { setPrompt(defaultPrompt); setDirty(true) }}
+              >
+                载入默认
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="settings-current">填写 API Key 后可自定义助理人设</div>
+        )}
+      </div>
+      <div className="settings-item settings-stack" style={{ borderTop: '1px solid var(--line)' }}>
+        <div className="settings-heading">
+          <div className="si-icon indigo"><ThumbsUp size={18} weight="duotone" aria-hidden="true" /></div>
+          <div className="si-info">
+            <div className="si-label">反馈记录</div>
+            <div className="si-desc">在「记忆管家」对话里对回复打分；据规律自己迭代人设</div>
+          </div>
+        </div>
+        {feedback.length === 0 ? (
+          <div className="settings-current">暂无反馈</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {feedback.map((f) => (
+              <div key={f.id} className="settings-current" style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <span style={{ flexShrink: 0 }}>
+                  {f.rating === 'up'
+                    ? <ThumbsUp size={13} weight="fill" aria-hidden="true" style={{ color: 'var(--green)' }} />
+                    : <ThumbsDown size={13} weight="fill" aria-hidden="true" style={{ color: 'var(--red)' }} />}
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  {f.reply_excerpt}
+                  {f.note && <span style={{ color: 'var(--text-muted)' }}>（{f.note}）</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Settings() {
   const { backendUrl, setBackendUrl, apiKey, setApiKey } = useStore()
   const [urlInput, setUrlInput] = useState(backendUrl)
@@ -230,6 +370,8 @@ export default function Settings() {
           />
         </div>
       </div>
+
+      <AssistantPersona />
 
       <div className="settings-group">
         <div className="sg-title">客户端集成</div>

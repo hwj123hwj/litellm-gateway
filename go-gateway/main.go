@@ -68,11 +68,13 @@ func main() {
 	var archiver *archive.Archiver
 	var archiveStore archive.Store = archive.NoopStore{}
 	var memoryStore memory.Store = memory.NoopStore{}
+	var sqliteStore *storage.SQLiteStore
 
 	if store, err := storage.NewSQLiteStore(sqlitePath, logger); err != nil {
 		logger.Printf("Warning: SQLite store init failed: %v, using memory only", err)
 	} else {
 		collector.SetStore(store)
+		sqliteStore = store
 		defer store.Close()
 		logger.Printf("SQLite metrics store: %s", sqlitePath)
 
@@ -189,6 +191,7 @@ func main() {
 
 	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
 	var assistantHandler *handlers.AssistantHandler
+	var assistantAdminHandler *handlers.AssistantAdminHandler
 	if cfg.Assistant.Enabled {
 		baseURL := cfg.Assistant.BaseURL
 		if baseURL == "" {
@@ -205,12 +208,24 @@ func main() {
 		if err != nil {
 			logger.Printf("Warning: assistant init failed: %v（继续运行，助理端点返回 503）", err)
 		} else {
+			// 用户自定义人设（agent_settings 表）优先于内置默认。
+			if sqliteStore != nil {
+				if custom, err := sqliteStore.GetSetting("assistant_system_prompt"); err == nil && custom != "" {
+					resident.UpdateSystemPrompt(custom)
+					logger.Printf("Assistant system prompt: user-customized (%d chars)", len(custom))
+				}
+			}
 			assistantHandler = handlers.NewAssistantHandler(resident, logger)
+			assistantAdminHandler = handlers.NewAssistantAdminHandler(resident, sqliteStore, logger)
 			logger.Printf("Resident assistant enabled: model=%s via %s", cfg.Assistant.Model, baseURL)
 		}
 	}
 	if assistantHandler == nil {
 		assistantHandler = handlers.NewAssistantHandler(nil, logger)
+	}
+	if assistantAdminHandler == nil {
+		// 助理未启用时 prompt 端点回 503，反馈端点仍可用（sqliteStore 为 nil 时也 503）。
+		assistantAdminHandler = handlers.NewAssistantAdminHandler(nil, sqliteStore, logger)
 	}
 	dashboardHandler := dashboard.NewHandler()
 
@@ -273,6 +288,10 @@ func main() {
 		admin.POST("/memories/:id/retire", memoryAdminHandler.HandleRetire)
 		admin.DELETE("/memories/:id", memoryAdminHandler.HandleDelete)
 		admin.POST("/assistant/chat", assistantHandler.HandleChat)
+		admin.GET("/assistant/prompt", assistantAdminHandler.HandleGetPrompt)
+		admin.PUT("/assistant/prompt", assistantAdminHandler.HandlePutPrompt)
+		admin.POST("/assistant/feedback", assistantAdminHandler.HandleAddFeedback)
+		admin.GET("/assistant/feedback", assistantAdminHandler.HandleListFeedback)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

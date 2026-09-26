@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Brain,
-  CheckCircle,
   ChatCircleDots,
+  CheckCircle,
   FloppyDisk,
   Pause,
+  ThumbsDown,
+  ThumbsUp,
   Trash,
   Warning,
-  XCircle,
 } from '@phosphor-icons/react'
 import {
+  addAssistantFeedback,
   chatWithAssistant,
   confirmMemory,
   createMemory,
@@ -104,7 +106,7 @@ function MemoryRow({
 }
 
 function AssistantCard() {
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string; tool?: string }[]>([])
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string; tool?: string; rating?: 'up' | 'down' }[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<{ abort: () => void } | null>(null)
@@ -180,6 +182,28 @@ function AssistantCard() {
             {m.text || (streaming && i === messages.length - 1 ? '…' : '')}
           </div>
         ))}
+        {!streaming && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (() => {
+          const last = messages[messages.length - 1]
+          if (!last.text) return null
+          const rate = (rating: 'up' | 'down') => {
+            setMessages((all) => {
+              const next = [...all]
+              next[next.length - 1] = { ...next[next.length - 1], rating }
+              return next
+            })
+            addAssistantFeedback(rating, last.text).catch(() => {})
+          }
+          return (
+            <div style={{ display: 'flex', gap: 6, alignSelf: 'flex-start' }}>
+              <button className="button button-ghost" style={{ minHeight: 24, padding: '0 7px' }} onClick={() => rate('up')} title="有帮助">
+                <ThumbsUp size={12} weight={last.rating === 'up' ? 'fill' : 'regular'} aria-hidden="true" style={{ color: last.rating === 'up' ? 'var(--green)' : undefined }} />
+              </button>
+              <button className="button button-ghost" style={{ minHeight: 24, padding: '0 7px' }} onClick={() => rate('down')} title="需要改进">
+                <ThumbsDown size={12} weight={last.rating === 'down' ? 'fill' : 'regular'} aria-hidden="true" style={{ color: last.rating === 'down' ? 'var(--red)' : undefined }} />
+              </button>
+            </div>
+          )
+        })()}
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <input

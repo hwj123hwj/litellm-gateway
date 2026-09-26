@@ -56,6 +56,12 @@ func NewSQLiteStore(dbPath string, logger *log.Logger) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("init memory schema: %w", err)
 	}
 
+	// 助理人设与反馈表（agent_settings / assistant_feedback）。
+	if err := initAgentSchema(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init agent schema: %w", err)
+	}
+
 	logger.Printf("SQLite store initialized: %s", dbPath)
 
 	return &SQLiteStore{db: db, logger: logger}, nil
