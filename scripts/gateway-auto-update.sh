@@ -4,13 +4,13 @@
 set -Eeuo pipefail
 umask 077
 
-API_BASE=\${GATEWAY_API_BASE:-https://api.github.com/repos/hwj123hwj/litellm-gateway}
-WORKFLOW=\${GATEWAY_WORKFLOW:-ci.yml}
-ARTIFACT_NAME=\${GATEWAY_ARTIFACT_NAME:-gateway-linux-amd64}
-BINARY=\${GATEWAY_BINARY:-"$HOME/.llm-gateway/bin/gateway"}
-SERVICE=\${GATEWAY_SERVICE:-llm-gateway.service}
-HEALTH_URL=\${GATEWAY_HEALTH_URL:-http://127.0.0.1:4001/health}
-STATE_DIR=\${GATEWAY_UPDATE_STATE:-"$HOME/.local/state/litellm-gateway-update"}
+API_BASE=${GATEWAY_API_BASE:-https://api.github.com/repos/hwj123hwj/litellm-gateway}
+WORKFLOW=${GATEWAY_WORKFLOW:-ci.yml}
+ARTIFACT_NAME=${GATEWAY_ARTIFACT_NAME:-gateway-linux-amd64}
+BINARY=${GATEWAY_BINARY:-"$HOME/.llm-gateway/bin/gateway"}
+SERVICE=${GATEWAY_SERVICE:-llm-gateway.service}
+HEALTH_URL=${GATEWAY_HEALTH_URL:-http://127.0.0.1:4001/health}
+STATE_DIR=${GATEWAY_UPDATE_STATE:-"$HOME/.local/state/litellm-gateway-update"}
 API_HEADERS=(-H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
 
 mkdir -p "$STATE_DIR" "$(dirname "$BINARY")"
@@ -21,7 +21,7 @@ WORK_DIR=$(mktemp -d "$STATE_DIR/run.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
 api_get() {
   curl --fail --silent --show-error --location --retry 2 \
-    --connect-timeout 8 --max-time 45 "\${API_HEADERS[@]}" "$1" -o "$2"
+    --connect-timeout 8 --max-time 45 "${API_HEADERS[@]}" "$1" -o "$2"
 }
 
 api_get "$API_BASE/commits/main" "$WORK_DIR/main.json"
@@ -74,7 +74,7 @@ PY
 
 curl --fail --silent --show-error --location --retry 2 \
   --connect-timeout 8 --max-time 120 --max-filesize 100000000 \
-  "\${API_HEADERS[@]}" "$API_BASE/actions/artifacts/$ARTIFACT_ID/zip" -o "$WORK_DIR/artifact.zip"
+  "${API_HEADERS[@]}" "$API_BASE/actions/artifacts/$ARTIFACT_ID/zip" -o "$WORK_DIR/artifact.zip"
 printf '%s  %s\n' "$ARTIFACT_DIGEST" "$WORK_DIR/artifact.zip" | sha256sum --check --status
 python3 - "$WORK_DIR/artifact.zip" "$WORK_DIR/gateway.new" <<'PY'
 import stat, sys, zipfile

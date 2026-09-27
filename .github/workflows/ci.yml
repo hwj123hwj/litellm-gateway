@@ -44,6 +44,9 @@ jobs:
           go test -v ./...
           bash ../scripts/tests/install-unix.Tests.sh
 
+      - name: Test mini-host updater request configuration
+        run: bash scripts/tests/gateway-auto-update.Tests.sh
+
   installer-test:
     name: Test Windows Installer
     runs-on: windows-latest
