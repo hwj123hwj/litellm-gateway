@@ -127,7 +127,11 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 
 ### 技能面板（custom-skills 技能市场）
 
-设置 `SKILLS_REPO_PATH` 指向 custom-skills 仓库根目录后，Dashboard 出现 Skills 页。仓库内的 `registry/skills.json` 是技能目录（`generate:registry` 生成），`skills.enabled.json` 是启用清单（声明哪些技能装到哪些目录）。同步用**符号链接**把仓库的 `skills/<id>` 铺进目标目录：仓库更新即时生效，重装系统后一条同步命令即可恢复；清理时只移除指向技能仓库的链接，目标目录里的其他文件一律不动。
+Dashboard 的 Skills 页在设置 `SKILLS_REPO_PATH` 指向 custom-skills 仓库根目录后可用。仓库内的 `registry/skills.json` 是技能目录（`generate:registry` 生成），`skills.enabled.json` 是启用清单（声明哪些技能装到哪些目录）。同步用**符号链接**把仓库的 `skills/<id>` 铺进目标目录：仓库更新即时生效，重装系统后一条同步命令即可恢复；清理时只移除指向技能仓库的链接，目标目录里的其他文件一律不动。
+
+目标目录属于**运行网关的主机**，使用绝对路径或 `~/`（网关进程用户的 home）；不支持相对目标路径。技能 ID 必须是 registry 内不含路径分隔符的目录名。保存与同步均校验清单，保存采用临时文件替换，并串行处理管理端的保存/同步请求。`targets` 和 `enabled` 都必须显式传入数组，全部停用用 `enabled: []`。
+
+同步结果中的 `linked/current/removed/skipped/errors` 始终为数组；有同名文件冲突时跳过并保持 `in_sync: false`，其他错误显示在面板。同步只检查当前清单中的目标目录：如需移除旧目标内的技能，先停用并同步旧目标，再修改目标列表。
 
 ### 对话归档与增量导出
 

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CheckCircle,
   Lightning,
-  MagnifyingGlass,
   PlugsConnected,
   ShieldCheck,
   WarningCircle,
@@ -27,10 +26,10 @@ function summarizeSync(report: SkillsSyncTargetReport[] | undefined): string {
   return report
     .map((target) => {
       const parts = [
-        target.linked.length > 0 ? `新装 ${target.linked.length}` : '',
-        target.removed.length > 0 ? `清理 ${target.removed.length}` : '',
-        target.skipped.length > 0 ? `跳过 ${target.skipped.length}` : '',
-        target.errors.length > 0 ? `错误 ${target.errors.length}` : '',
+        (target.linked ?? []).length > 0 ? `新装 ${(target.linked ?? []).length}` : '',
+        (target.removed ?? []).length > 0 ? `清理 ${(target.removed ?? []).length}` : '',
+        (target.skipped ?? []).length > 0 ? `跳过 ${(target.skipped ?? []).length}` : '',
+        (target.errors ?? []).length > 0 ? `错误 ${(target.errors ?? []).length}` : '',
       ].filter(Boolean)
       return parts.length > 0 ? `${target.target}：${parts.join('，')}` : `${target.target}：无变化`
     })
@@ -44,18 +43,28 @@ export default function Skills() {
   const [enabled, setEnabled] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
 
+  const acceptStatus = (next: SkillsStatusResponse) => {
+    setStatus(next)
+    setTargetsInput((next.targets ?? []).join(', '))
+    setEnabled(new Set(next.enabled ?? []))
+  }
+
   const refresh = useCallback(() => {
-    if (!apiKey) return
+    setStatus(null)
+    setError('')
+    if (!apiKey) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
     getSkills()
-      .then((next) => {
-        setStatus(next)
-        setTargetsInput((next.targets ?? []).join(', '))
-        setEnabled(new Set(next.enabled ?? []))
-      })
-      .catch(() => setStatus(null))
+      .then(acceptStatus)
+      .catch((err) => setError(err instanceof Error ? err.message : '读取技能清单失败'))
+      .finally(() => setLoading(false))
   }, [apiKey])
 
   useEffect(() => {
@@ -77,27 +86,53 @@ export default function Skills() {
     if (!status) return false
     const serverTargets = (status.targets ?? []).join(', ')
     const serverEnabled = [...(status.enabled ?? [])].sort().join(',')
-    return serverTargets !== targetsInput || serverEnabled !== [...enabled].sort().join(',')
+    return serverTargets !== [...new Set(parseTargets(targetsInput))].join(', ') || serverEnabled !== [...enabled].sort().join(',')
   }, [status, targetsInput, enabled])
 
   const handleSave = async (withSync: boolean) => {
+    if (!status?.configured || busy || loading) return
     setBusy(true)
     setError('')
     setFeedback('')
     try {
-      let next = await updateSkillsConfig(parseTargets(targetsInput), [...enabled].sort())
+      if (dirty) {
+        const saved = await updateSkillsConfig(parseTargets(targetsInput), [...enabled].sort())
+        acceptStatus(saved)
+        if (!saved.configured) return
+      }
       if (withSync) {
-        next = await syncSkills()
-        setFeedback(summarizeSync(next.sync?.targets) || '已同步')
+        const next = await syncSkills()
+        acceptStatus(next)
+        const summary = summarizeSync(next.sync?.targets)
+        setFeedback(`${next.in_sync ? '已同步' : '同步尚未完成'}${summary ? ` · ${summary}` : ''}`)
+        const errors = (next.sync?.targets ?? []).flatMap((target) =>
+          (target.errors ?? []).map((message) => `${target.target}：${message}`),
+        )
+        if (errors.length) setError(errors.join('；'))
       } else {
         setFeedback('清单已保存')
       }
-      setStatus(next)
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败')
     } finally {
       setBusy(false)
     }
+  }
+
+  if (!status) {
+    return (
+      <>
+        <PageHeader title="技能" subtitle="custom-skills 技能市场" />
+        <div className="settings-group" aria-busy={loading}>
+          <div className="settings-item settings-stack">
+            <div className="si-label" role={error ? 'alert' : 'status'}>
+              {loading ? '正在读取技能清单…' : error ? `读取失败：${error}` : '请先在设置中配置管理密钥'}
+            </div>
+            {!loading && error && <button className="button" onClick={refresh}>重新加载</button>}
+          </div>
+        </div>
+      </>
+    )
   }
 
   if (status && !status.configured) {
@@ -149,6 +184,8 @@ export default function Skills() {
             className="settings-input"
             type="text"
             placeholder="~/.agents/skills"
+            aria-label="目标目录"
+            disabled={busy}
             value={targetsInput}
             onChange={(event) => setTargetsInput(event.target.value)}
           />
@@ -158,8 +195,8 @@ export default function Skills() {
               待清理的旧链接：{status?.stale_links?.join('、')}
             </div>
           )}
-          {error && <div className="settings-current">失败：{error}</div>}
-          {feedback && !error && <div className="settings-current">{feedback}</div>}
+          {error && <div className="settings-current" role="alert">失败：{error}</div>}
+          {feedback && !error && <div className="settings-current" role="status">{feedback}</div>}
           <div className="settings-control-row">
             <button
               className="button button-primary"
@@ -191,11 +228,13 @@ export default function Skills() {
             className="settings-input"
             type="text"
             placeholder="搜索技能…"
+            aria-label="搜索技能"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
         </div>
         {skills.map((skill) => {
+          const isEnabled = enabled.has(skill.id)
           const installedCount = Object.values(skill.installed ?? {}).filter(Boolean).length
           return (
             <div key={skill.id} className="settings-item settings-stack">
@@ -231,7 +270,9 @@ export default function Skills() {
                     </span>
                   )}
                   <button
-                    className={`capability-chip ${skill.enabled ? 'selected' : 'available'}`}
+                    className={`capability-chip ${isEnabled ? 'selected' : 'available'}`}
+                    aria-pressed={isEnabled}
+                    aria-label={`${isEnabled ? '停用' : '启用'} ${skill.displayName || skill.id}`}
                     style={{ cursor: 'pointer' }}
                     disabled={busy}
                     onClick={() => {
@@ -244,7 +285,7 @@ export default function Skills() {
                       setEnabled(next)
                     }}
                   >
-                    {skill.enabled ? '停用' : '启用'}
+                    {isEnabled ? '停用' : '启用'}
                   </button>
                 </div>
               </div>
@@ -254,7 +295,7 @@ export default function Skills() {
         {skills.length === 0 && (
           <div className="settings-item">
             <div className="si-info">
-              <div className="si-desc">没有匹配的技能</div>
+              <div className="si-desc">{search.trim() ? '没有匹配的技能，请换个关键词' : '技能目录为空，请先在 custom-skills 仓库生成 registry'}</div>
             </div>
           </div>
         )}

@@ -146,3 +146,36 @@ func TestSkillsUpdateConfigRejectsUnknownSkill(t *testing.T) {
 		t.Fatalf("未知技能应 400: %d", w.Code)
 	}
 }
+
+func TestSkillsConfigReturnsNormalizedState(t *testing.T) {
+	repo := newSkillsRepo(t)
+	engine := skillsTestRouter(t, repo)
+	target := t.TempDir()
+	w := doJSON(t, engine, http.MethodPut, "/admin/skills/config", gin.H{
+		"targets": []string{" " + target + " ", target}, "enabled": []string{" alpha ", "alpha"},
+	})
+	var status skills.Status
+	if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || len(status.Targets) != 1 || len(status.Enabled) != 1 || !status.Skills[0].Enabled {
+		t.Fatalf("response must match saved normalized config: %s", w.Body.String())
+	}
+	for _, body := range []gin.H{{}, {"targets": []string{target}}, {"enabled": []string{}}} {
+		w = doJSON(t, engine, http.MethodPut, "/admin/skills/config", body)
+		if w.Code != 400 {
+			t.Fatalf("incomplete config should be rejected: %s", w.Body.String())
+		}
+	}
+	saved, _, err := skills.LoadManifest(repo)
+	if err != nil || len(saved.Enabled) != 1 {
+		t.Fatal("incomplete request cleared config")
+	}
+}
+
+func TestSkillsUnconfiguredDetailReturnsHint(t *testing.T) {
+	w := doJSON(t, skillsTestRouter(t, ""), http.MethodGet, "/admin/skills/alpha", nil)
+	if w.Code != 200 {
+		t.Fatalf("unconfigured detail should return hint: %s", w.Body.String())
+	}
+}

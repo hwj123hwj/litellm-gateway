@@ -123,11 +123,14 @@ func TestApplyLinksEnabledAndRemovesStale(t *testing.T) {
 func TestApplySkipsRealDirAndReportsMissingSkill(t *testing.T) {
 	repo := newTestRepo(t)
 	target := t.TempDir()
-	// alpha 名字被一个真实目录占用 → 跳过；ghost 不在仓库 → 报错。
+	// alpha 名字被真实目录占用 → 跳过；beta 的源目录丢失 → 报错。
 	if err := os.MkdirAll(filepath.Join(target, "alpha"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	report, err := Apply(repo, Manifest{Version: 1, Targets: []string{target}, Enabled: []string{"alpha", "ghost"}})
+	if err := os.RemoveAll(filepath.Join(SkillsDir(repo), "beta")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Apply(repo, Manifest{Version: 1, Targets: []string{target}, Enabled: []string{"alpha", "beta"}})
 	if err != nil {
 		t.Fatalf("Apply 失败: %v", err)
 	}

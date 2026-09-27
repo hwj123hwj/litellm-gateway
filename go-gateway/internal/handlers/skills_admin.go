@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/skills"
@@ -17,6 +18,7 @@ import (
 // 本地技能目录。仓库路径来自 SKILLS_REPO_PATH，未配置时端点保持可用但
 // 返回 configured=false，不影响网关其他功能。
 type SkillsHandler struct {
+	mu     sync.RWMutex
 	repo   string
 	logger *log.Logger
 }
@@ -28,6 +30,8 @@ func NewSkillsHandler(repo string, logger *log.Logger) *SkillsHandler {
 
 // HandleStatus GET /admin/skills
 func (h *SkillsHandler) HandleStatus(c *gin.Context) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	if !h.configured(c) {
 		return
 	}
@@ -50,6 +54,11 @@ func (h *SkillsHandler) HandleStatus(c *gin.Context) {
 
 // HandleDetail GET /admin/skills/:id — 目录条目 + SKILL.md 原文（前端渲染）。
 func (h *SkillsHandler) HandleDetail(c *gin.Context) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if !h.configured(c) {
+		return
+	}
 	id := c.Param("id")
 	if id == "" || strings.ContainsAny(id, "/\\") || id == "." || id == ".." {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法技能 ID"})
@@ -81,6 +90,8 @@ func (h *SkillsHandler) HandleDetail(c *gin.Context) {
 
 // HandleUpdateConfig PUT /admin/skills/config — 写入启用清单（写入前轮转备份）。
 func (h *SkillsHandler) HandleUpdateConfig(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if !h.configured(c) {
 		return
 	}
@@ -92,13 +103,24 @@ func (h *SkillsHandler) HandleUpdateConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体应为 {targets, enabled}"})
 		return
 	}
+	if body.Targets == nil || body.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "targets 和 enabled 必须是数组；全部停用请显式传入空数组"})
+		return
+	}
 	manifest := skills.Manifest{Version: 1, Targets: body.Targets, Enabled: body.Enabled}
 	if err := backupFile(skills.ManifestPath(h.repo)); err != nil {
 		h.logger.Printf("backup skills manifest failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "备份清单失败，未保存修改"})
+		return
 	}
 	if err := skills.SaveManifest(h.repo, manifest); err != nil {
 		h.logger.Printf("save skills manifest: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	manifest, _, err := skills.LoadManifest(h.repo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	h.logger.Printf("skills manifest updated: %d enabled, %d targets", len(manifest.Enabled), len(manifest.Targets))
@@ -107,6 +129,8 @@ func (h *SkillsHandler) HandleUpdateConfig(c *gin.Context) {
 
 // HandleSync POST /admin/skills/sync — 按当前清单落盘（建立/清理符号链接）。
 func (h *SkillsHandler) HandleSync(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if !h.configured(c) {
 		return
 	}

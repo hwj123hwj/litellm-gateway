@@ -58,6 +58,13 @@ func LoadRegistry(repo string) ([]Skill, error) {
 	if err := json.Unmarshal(raw, &registry); err != nil {
 		return nil, fmt.Errorf("解析 registry/skills.json 失败: %w", err)
 	}
+	seen := make(map[string]bool, len(registry))
+	for _, skill := range registry {
+		if !validID(skill.ID) || seen[skill.ID] {
+			return nil, fmt.Errorf("技能目录包含非法或重复 ID: %q", skill.ID)
+		}
+		seen[skill.ID] = true
+	}
 	return registry, nil
 }
 
@@ -86,25 +93,58 @@ func SaveManifest(repo string, m Manifest) error {
 	if err != nil {
 		return err
 	}
-	known := make(map[string]bool, len(registry))
-	for _, s := range registry {
-		known[s.ID] = true
-	}
 	m = normalize(m)
-	var unknown []string
-	for _, id := range m.Enabled {
-		if !known[id] {
-			unknown = append(unknown, id)
-		}
-	}
-	if len(unknown) > 0 {
-		return fmt.Errorf("启用的技能不在目录中: %s", strings.Join(unknown, "、"))
+	if err := validateManifest(m, registry); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ManifestPath(repo), append(data, '\n'), 0o644)
+	// Publish a complete file so readers and interrupted writes cannot observe
+	// a truncated manifest. Rename also avoids following an existing symlink.
+	file, err := os.CreateTemp(repo, ".skills-enabled-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), ManifestPath(repo))
+}
+
+func validID(id string) bool {
+	return id != "" && strings.TrimSpace(id) == id && id != "." && id != ".." &&
+		!strings.ContainsAny(id, "/\\:\x00") && filepath.Base(id) == id
+}
+
+func validateManifest(m Manifest, registry []Skill) error {
+	if m.Version != 1 {
+		return fmt.Errorf("不支持的清单版本: %d", m.Version)
+	}
+	known := make(map[string]bool, len(registry))
+	for _, skill := range registry {
+		known[skill.ID] = true
+	}
+	for _, id := range m.Enabled {
+		if !validID(id) || !known[id] {
+			return fmt.Errorf("启用的技能不在目录中或 ID 非法: %q", id)
+		}
+	}
+	if len(m.Enabled) > 0 && len(m.Targets) == 0 {
+		return fmt.Errorf("启用技能时至少需要一个目标目录")
+	}
+	for _, target := range m.Targets {
+		if !filepath.IsAbs(expandTilde(target)) {
+			return fmt.Errorf("目标目录须为绝对路径或 ~/ 路径: %q", target)
+		}
+	}
+	return nil
 }
 
 // normalize 去空格、丢空项、按原顺序去重。
@@ -152,8 +192,17 @@ type Status struct {
 
 // BuildStatus 汇总目录清单、启用清单和各目标目录的实际链接状态。
 func BuildStatus(repo string, m Manifest) (Status, error) {
+	var err error
+	repo, err = filepath.Abs(expandTilde(repo))
+	if err != nil {
+		return Status{}, err
+	}
+	m = normalize(m)
 	registry, err := LoadRegistry(repo)
 	if err != nil {
+		return Status{}, err
+	}
+	if err := validateManifest(m, registry); err != nil {
 		return Status{}, err
 	}
 	enabled := make(map[string]bool, len(m.Enabled))
@@ -233,16 +282,25 @@ type Report struct {
 // Apply 把启用清单落到各目标目录：为启用的技能建链接、清理指向本仓库但已
 // 停用（或已从仓库删除）的旧链接。非本仓库的条目一律不动。
 func Apply(repo string, m Manifest) (Report, error) {
-	if _, err := LoadRegistry(repo); err != nil {
+	var err error
+	repo, err = filepath.Abs(expandTilde(repo))
+	if err != nil {
+		return Report{}, err
+	}
+	registry, err := LoadRegistry(repo)
+	if err != nil {
 		return Report{}, err
 	}
 	m = normalize(m)
+	if err := validateManifest(m, registry); err != nil {
+		return Report{}, err
+	}
 	repoSkills := SkillsDir(repo)
 
 	report := Report{Targets: make([]TargetReport, 0, len(m.Targets))}
 	for _, raw := range m.Targets {
 		target := expandTilde(raw)
-		rep := TargetReport{Target: target}
+		rep := TargetReport{Target: target, Linked: []string{}, Current: []string{}, Removed: []string{}, Skipped: []string{}, Errors: []string{}}
 
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			rep.Errors = append(rep.Errors, fmt.Sprintf("创建目录失败: %v", err))
@@ -279,6 +337,9 @@ func Apply(repo string, m Manifest) (Report, error) {
 		}
 
 		entries, err := os.ReadDir(target)
+		if err != nil {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("读取目录失败: %v", err))
+		}
 		if err == nil {
 			for _, e := range entries {
 				if enabled[e.Name()] {
