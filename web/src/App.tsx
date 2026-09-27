@@ -10,6 +10,7 @@ import Providers from './pages/Providers'
 import Logs from './pages/Logs'
 import MemoryPanel from './pages/MemoryPanel'
 import Settings from './pages/Settings'
+import Skills from './pages/Skills'
 import { useStore } from './store'
 
 function AuthGate({ onSubmit }: { onSubmit: (key: string) => void }) {
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="/providers" element={<Providers />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/memory" element={<MemoryPanel />} />
+            <Route path="/skills" element={<Skills />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
