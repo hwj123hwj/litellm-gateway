@@ -7,6 +7,7 @@ umask 077
 API_BASE=${GATEWAY_API_BASE:-https://api.github.com/repos/hwj123hwj/litellm-gateway}
 WORKFLOW=${GATEWAY_WORKFLOW:-ci.yml}
 ARTIFACT_NAME=${GATEWAY_ARTIFACT_NAME:-gateway-linux-amd64}
+TOKEN_FILE=${GATEWAY_GITHUB_TOKEN_FILE:-"$HOME/.config/litellm-gateway/github-token"}
 BINARY=${GATEWAY_BINARY:-"$HOME/.llm-gateway/bin/gateway"}
 SERVICE=${GATEWAY_SERVICE:-llm-gateway.service}
 HEALTH_URL=${GATEWAY_HEALTH_URL:-http://127.0.0.1:4001/health}
@@ -19,9 +20,24 @@ flock -n 9 || exit 0
 
 WORK_DIR=$(mktemp -d "$STATE_DIR/run.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
+if [[ ! -r "$TOKEN_FILE" ]]; then
+  echo "GitHub Actions read token file is missing: $TOKEN_FILE" >&2
+  exit 1
+fi
+GITHUB_TOKEN=$(<"$TOKEN_FILE")
+if [[ ! "$GITHUB_TOKEN" =~ ^(ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)$ ]]; then
+  echo "GitHub token file has an invalid format" >&2
+  exit 1
+fi
+AUTH_CONFIG="$WORK_DIR/github-auth.conf"
+printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" > "$AUTH_CONFIG"
+chmod 0600 "$AUTH_CONFIG"
+unset GITHUB_TOKEN
+CURL_AUTH_ARGS=(--config "$AUTH_CONFIG")
+
 api_get() {
   curl --fail --silent --show-error --location --retry 2 \
-    --connect-timeout 8 --max-time 45 "${API_HEADERS[@]}" "$1" -o "$2"
+    --connect-timeout 8 --max-time 45 "${API_HEADERS[@]}" "${CURL_AUTH_ARGS[@]}" "$1" -o "$2"
 }
 
 api_get "$API_BASE/commits/main" "$WORK_DIR/main.json"
@@ -74,7 +90,7 @@ PY
 
 curl --fail --silent --show-error --location --retry 2 \
   --connect-timeout 8 --max-time 120 --max-filesize 100000000 \
-  "${API_HEADERS[@]}" "$API_BASE/actions/artifacts/$ARTIFACT_ID/zip" -o "$WORK_DIR/artifact.zip"
+  "${API_HEADERS[@]}" "${CURL_AUTH_ARGS[@]}" "$API_BASE/actions/artifacts/$ARTIFACT_ID/zip" -o "$WORK_DIR/artifact.zip"
 printf '%s  %s\n' "$ARTIFACT_DIGEST" "$WORK_DIR/artifact.zip" | sha256sum --check --status
 python3 - "$WORK_DIR/artifact.zip" "$WORK_DIR/gateway.new" <<'PY'
 import stat, sys, zipfile
