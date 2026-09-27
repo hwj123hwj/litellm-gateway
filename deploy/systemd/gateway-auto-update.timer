@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a CI-verified LiteLLM Gateway update every ten minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+RandomizedDelaySec=45s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
