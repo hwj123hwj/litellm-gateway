@@ -59,7 +59,7 @@ jobs:
 
   build-linux-gateway:
     name: Build Linux mini-host artifact
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs:
       - test
       - installer-test
@@ -80,6 +80,7 @@ jobs:
           go build -trimpath -buildvcs=false -ldflags "-X main.version=$GITHUB_SHA" -o ../dist/gateway-linux-amd64 .
 
       - name: Publish verified artifact for the mini host
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: gateway-linux-amd64

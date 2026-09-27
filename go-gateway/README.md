@@ -444,7 +444,7 @@ make docker-run    # Docker Compose 启动
 
 ### 方式一：迷你主机自动同步（推荐）
 
-.github/workflows/ci.yml 在每个 PR 上运行 Go 检查、Dashboard 嵌入检查和 Windows 安装器回归；合并到 main 后，只有这些检查全通过，GitHub Actions 才会构建并发布 Linux x86_64 网关产物。
+.github/workflows/ci.yml 在每个 PR 上运行 Go 检查、Dashboard 嵌入检查、Windows 安装器回归和 Linux x86_64 构建；合并到 main 后，只有这些检查全通过，GitHub Actions 才会发布迷你主机使用的构建产物。PR 构建不会发布给更新器。
 
 迷你主机上的用户级 systemd timer 每 10 分钟检查一次 GitHub。主机只会部署与当前 main 完全一致、CI 成功且摘要校验通过的构建产物；安装后会检查网关健康状态，并触发现有 systemd 服务重启。如果更新后健康检查失败，会恢复上一份二进制。构建失败、检查进行中或 main 已继续前进时，现有网关不变。
 
