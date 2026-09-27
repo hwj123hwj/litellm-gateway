@@ -1,0 +1,11 @@
+[Unit]
+Description=Deploy the latest CI-verified LiteLLM Gateway main build
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/litellm-gateway/update.env
+ExecStart=%h/.local/bin/gateway-auto-update
+TimeoutStartSec=3min
+Nice=10
+UMask=0077

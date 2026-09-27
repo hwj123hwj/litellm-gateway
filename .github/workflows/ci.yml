@@ -56,3 +56,33 @@ jobs:
         run: |
           powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
             -File scripts\tests\install-windows.Tests.ps1
+
+  build-linux-gateway:
+    name: Build Linux mini-host artifact
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - test
+      - installer-test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build Linux x86_64 gateway
+        working-directory: go-gateway
+        run: |
+          mkdir -p ../dist
+          go build -trimpath -buildvcs=false -ldflags "-X main.version=$GITHUB_SHA" -o ../dist/gateway-linux-amd64 .
+
+      - name: Publish verified artifact for the mini host
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-linux-amd64
+          path: dist/gateway-linux-amd64
+          if-no-files-found: error
+          retention-days: 90

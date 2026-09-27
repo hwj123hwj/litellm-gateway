@@ -440,38 +440,24 @@ make docker-run    # Docker Compose 启动
 - OpenAI 接口: `http://localhost:4001/v1/chat/completions`
 - Anthropic 接口: `http://localhost:4001/v1/messages`
 
-### 方式一：GitHub Actions（推荐）
+### 方式一：迷你主机自动同步（推荐）
 
-本仓库已包含 GitHub Actions 配置（`.github/workflows/deploy.yml`）：
+.github/workflows/ci.yml 在每个 PR 上运行 Go 检查、Dashboard 嵌入检查和 Windows 安装器回归；合并到 main 后，只有这些检查全通过，GitHub Actions 才会构建并发布 Linux x86_64 网关产物。
 
-- 自动运行 `go vet` 和 `go test`
-- SSH 到服务器，上传代码构建 Docker 镜像并启动容器
+迷你主机上的用户级 systemd timer 每 10 分钟检查一次 GitHub。主机只会部署与当前 main 完全一致、CI 成功且摘要校验通过的构建产物；安装后会检查网关健康状态，并触发现有 systemd 服务重启。如果更新后健康检查失败，会恢复上一份二进制。构建失败、检查进行中或 main 已继续前进时，现有网关不变。
 
-#### 需要在 GitHub 配置的 Secrets
+该流程只需要迷你主机访问 GitHub 的出站 HTTPS，不配置 GitHub Secrets、部署私钥、入站端口或仓库 Runner。主机保留自己的 .env 和 provider 凭据。首次安装需要在主机上运行一次（此项目默认使用 Linux 用户 q 和 llm-gateway.service）：
 
-进入仓库 `Settings → Secrets and variables → Actions`，添加以下 Secrets：
+    curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install-mini-gateway-updater.sh | bash
 
-| Secret | 说明 |
-|--------|------|
-| `DEPLOY_HOST` | 服务器 IP，如 `your-server-ip` |
-| `DEPLOY_USER` | SSH 用户名，如 `root` |
-| `SSH_PRIVATE_KEY` | 服务器 SSH 私钥（完整内容，含换行） |
-| `LITELLM_MASTER_KEY` | 网关认证 token |
-| `GLM_API_KEY` | 智谱 API key |
-| `ALI_API_KEY` | 阿里 MaaS API key |
+如果从 Mac 执行，可通过 SSH 把这条一次性命令交给迷你主机；后续检查、下载和重启均由主机本地 timer 完成，无需逐次 SSH。安装脚本不使用 sudo；配置文件位于 ~/.config/litellm-gateway/update.env。
 
-**优势**：
-- API keys 通过 Secrets 传入，部署时自动写入 `.env` 并传到服务器
-- 不需要在服务器上手动管理 `.env` 文件
-- 每次 push 到 `main` 分支自动部署
+查看同步状态和最近日志：
 
-#### 部署步骤
+    systemctl --user status gateway-auto-update.timer
+    journalctl --user -u gateway-auto-update.service -n 30 --no-pager
 
-1. 在 GitHub 仓库 Settings 中配置上述 Secrets
-2. 把代码推送到 `main` 分支
-3. GitHub Actions 自动触发部署
-4. 在 Actions 页面查看部署进度和健康检查结果
-5. 部署完成后访问 `http://localhost:4001/health` 验证
+只有网关进程健康时才会更新；失败的版本会记在 ~/.local/state/litellm-gateway-update/failed-revision，排除问题后删除该文件即可重试。
 
 ### 方式二：手动部署
 

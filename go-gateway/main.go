@@ -30,6 +30,8 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/storage"
 )
 
+var version = "dev"
+
 func main() {
 	if len(os.Args) > 1 {
 		if err := runCommand(os.Args[1:]); err != nil {
@@ -323,6 +325,12 @@ func main() {
 
 func runCommand(args []string) error {
 	switch args[0] {
+	case "version":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: llm-gateway version")
+		}
+		_, err := fmt.Fprintln(os.Stdout, version)
+		return err
 	case "setup":
 		if len(args) < 2 || args[1] != "pi" {
 			return fmt.Errorf("usage: llm-gateway setup pi [--endpoint URL] [--dry-run]")
