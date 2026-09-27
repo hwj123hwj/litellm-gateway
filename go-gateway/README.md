@@ -448,11 +448,18 @@ make docker-run    # Docker Compose 启动
 
 迷你主机上的用户级 systemd timer 每 10 分钟检查一次 GitHub。主机只会部署与当前 main 完全一致、CI 成功且摘要校验通过的构建产物；安装后会检查网关健康状态，并触发现有 systemd 服务重启。如果更新后健康检查失败，会恢复上一份二进制。构建失败、检查进行中或 main 已继续前进时，现有网关不变。
 
-该流程只需要迷你主机访问 GitHub 的出站 HTTPS，不配置 GitHub Secrets、部署私钥、入站端口或仓库 Runner。主机保留自己的 .env 和 provider 凭据。首次安装需要在主机上运行一次（此项目默认使用 Linux 用户 q 和 llm-gateway.service）：
+该流程只需要迷你主机访问 GitHub 的出站 HTTPS，不配置 GitHub Secrets、部署私钥、入站端口或仓库 Runner。首次安装前，在 GitHub 创建只对本仓库开放、仅有 Actions Read 权限的 fine-grained token，并在主机终端隐藏输入：
 
-    curl -fsSL https://raw.githubusercontent.com/hwj123hwj/litellm-gateway/main/scripts/install-mini-gateway-updater.sh | bash
+```bash
+bash -c 'install -d -m 700 ~/.config/litellm-gateway; read -r -s -p "GitHub Actions read token: " EA_GITHUB_TOKEN; printf "\\n"; printf "%s" "$EA_GITHUB_TOKEN" > ~/.config/litellm-gateway/github-token; unset EA_GITHUB_TOKEN; chmod 600 ~/.config/litellm-gateway/github-token'
+```
 
-如果从 Mac 执行，可通过 SSH 把这条一次性命令交给迷你主机；后续检查、下载和重启均由主机本地 timer 完成，无需逐次 SSH。安装脚本不使用 sudo；配置文件位于 ~/.config/litellm-gateway/update.env。
+令牌只用于读取 GitHub Actions API 元数据和成功 CI 生成的构建产物，保存在主机的独立权限文件中，不会进入服务环境变量、进程参数或日志。主机保留自己的 .env 和 provider 凭据。随后在主机上运行一次安装命令（此项目默认使用 Linux 用户 q 和 llm-gateway.service）：
+
+    set -o pipefail
+    curl --fail --silent --show-error https://api.github.com/repos/hwj123hwj/litellm-gateway/contents/scripts/install-mini-gateway-updater.sh | python3 -c 'import base64,json,sys; print(base64.b64decode("".join(json.load(sys.stdin)["content"].split())).decode(), end="")' | bash
+
+如果从 Mac 执行，可通过 SSH 完成这次凭据录入和安装；后续检查、下载和重启均由主机本地 timer 完成，无需逐次 SSH。安装脚本不使用 sudo；配置文件位于 ~/.config/litellm-gateway/update.env。
 
 查看同步状态和最近日志：
 
