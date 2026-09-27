@@ -29,7 +29,9 @@ PORT=4001
 ### 2. 编译并运行
 
 ```bash
-go build -o gateway . && ./gateway
+go build -o gateway .
+./gateway version
+./gateway
 ```
 
 或使用 Makefile：
