@@ -134,6 +134,51 @@ export interface PiConfigResponse {
   error?: string
 }
 
+// ── 技能面板（custom-skills 技能市场）──
+
+export interface SkillEntry {
+  id: string
+  displayName?: string
+  description?: string
+  emoji?: string
+  tags?: string[]
+  author?: string
+  sourcePath?: string
+  githubUrl?: string
+  lastUpdated?: string
+  upstream?: string
+}
+
+export interface SkillInstallRow extends SkillEntry {
+  enabled: boolean
+  installed: Record<string, boolean>
+}
+
+export interface SkillsSyncTargetReport {
+  target: string
+  linked: string[]
+  current: string[]
+  removed: string[]
+  skipped: string[]
+  errors: string[]
+}
+
+export interface SkillsStatusResponse {
+  configured: boolean
+  hint?: string
+  repo?: string
+  registry_path?: string
+  manifest_path?: string
+  manifest_exists?: boolean
+  targets?: string[]
+  enabled?: string[]
+  in_sync?: boolean
+  stale_links?: string[]
+  skills?: SkillInstallRow[]
+  sync?: { targets: SkillsSyncTargetReport[] }
+  error?: string
+}
+
 // ── 记忆层（EasyAgent 常驻助理 + 治理）──
 
 export type MemoryStatus = 'candidate' | 'active' | 'retired'

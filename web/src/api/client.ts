@@ -11,6 +11,7 @@ import type {
   AssistantStreamEvent,
   AssistantPromptResponse,
   AssistantFeedbackEntry,
+  SkillsStatusResponse,
 } from './types'
 
 // 获取后端地址（支持运行时配置）
@@ -131,6 +132,23 @@ export function getHarnessConfig(): Promise<PiConfigResponse> {
 
 export function syncHarnessConfig(): Promise<PiConfigResponse> {
   return fetchJSON('/harness/sync', { method: 'POST' })
+}
+
+// ── 技能面板 ──
+
+export function getSkills(): Promise<SkillsStatusResponse> {
+  return fetchJSON('/skills')
+}
+
+export function updateSkillsConfig(targets: string[], enabled: string[]): Promise<SkillsStatusResponse> {
+  return fetchJSON('/skills/config', {
+    method: 'PUT',
+    body: JSON.stringify({ targets, enabled }),
+  })
+}
+
+export function syncSkills(): Promise<SkillsStatusResponse> {
+  return fetchJSON('/skills/sync', { method: 'POST' })
 }
 
 // ── 记忆层 ──

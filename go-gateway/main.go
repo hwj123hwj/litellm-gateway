@@ -188,6 +188,7 @@ func main() {
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
+	skillsHandler := handlers.NewSkillsHandler(skillsRepoPath(), logger)
 
 	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
 	var assistantHandler *handlers.AssistantHandler
@@ -292,6 +293,10 @@ func main() {
 		admin.PUT("/assistant/prompt", assistantAdminHandler.HandlePutPrompt)
 		admin.POST("/assistant/feedback", assistantAdminHandler.HandleAddFeedback)
 		admin.GET("/assistant/feedback", assistantAdminHandler.HandleListFeedback)
+		admin.GET("/skills", skillsHandler.HandleStatus)
+		admin.GET("/skills/:id", skillsHandler.HandleDetail)
+		admin.PUT("/skills/config", skillsHandler.HandleUpdateConfig)
+		admin.POST("/skills/sync", skillsHandler.HandleSync)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -402,6 +407,12 @@ func defaultDshHome() string {
 		return ".dsh"
 	}
 	return filepath.Join(userHome, ".dsh")
+}
+
+// skillsRepoPath 返回技能仓库（custom-skills）根目录。未设置 SKILLS_REPO_PATH
+// 时技能面板保持未配置状态（configured=false），不影响网关其他功能。
+func skillsRepoPath() string {
+	return os.Getenv("SKILLS_REPO_PATH")
 }
 
 func defaultPiHome() string {

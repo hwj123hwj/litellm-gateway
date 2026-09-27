@@ -120,6 +120,14 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/admin/archives/export` | GET | 增量导出归档为 JSONL（`since`/`limit`，响应头返回下一游标） |
 | `/admin/archives` | DELETE | 按时间清理归档（`before_days` 或 `before`） |
 | `/admin/archives/:id` | DELETE | 删除单条归档 |
+| `/admin/skills` | GET | 技能面板状态：技能目录、启用清单、各目标目录链接是否同步（未设置 `SKILLS_REPO_PATH` 时返回 `configured:false`） |
+| `/admin/skills/:id` | GET | 单个技能详情（registry 条目 + SKILL.md 原文） |
+| `/admin/skills/config` | PUT | 写入启用清单 `{"targets":[...],"enabled":[...]}`（写入前自动备份） |
+| `/admin/skills/sync` | POST | 按清单落盘：为启用技能建符号链接、清理指向技能仓库的旧链接 |
+
+### 技能面板（custom-skills 技能市场）
+
+设置 `SKILLS_REPO_PATH` 指向 custom-skills 仓库根目录后，Dashboard 出现 Skills 页。仓库内的 `registry/skills.json` 是技能目录（`generate:registry` 生成），`skills.enabled.json` 是启用清单（声明哪些技能装到哪些目录）。同步用**符号链接**把仓库的 `skills/<id>` 铺进目标目录：仓库更新即时生效，重装系统后一条同步命令即可恢复；清理时只移除指向技能仓库的链接，目标目录里的其他文件一律不动。
 
 ### 对话归档与增量导出
 
