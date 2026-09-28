@@ -23,6 +23,20 @@ func setUsageMetadata(c *gin.Context, inputTokens, outputTokens int) {
 	c.Set(requestmeta.OutputTokensKey, outputTokens)
 }
 
+func setCacheUsageMetadata(c *gin.Context, cacheReadInputTokens, cacheCreationInputTokens, cacheInputTokens int, known bool) {
+	c.Set(requestmeta.CacheReadInputTokensKey, cacheReadInputTokens)
+	c.Set(requestmeta.CacheCreationInputTokensKey, cacheCreationInputTokens)
+	c.Set(requestmeta.CacheInputTokensKey, cacheInputTokens)
+	c.Set(requestmeta.CacheUsageKnownKey, known)
+}
+
+func totalPromptTokens(resp *provider.Response) int {
+	if resp.CacheUsageKnown && resp.CacheInputTokens > resp.Usage.InputTokens {
+		return resp.CacheInputTokens
+	}
+	return resp.Usage.InputTokens
+}
+
 func setForwardMetadata(c *gin.Context, finalProvider string, attempts []requestmeta.ProviderAttempt, err error) {
 	if finalProvider != "" {
 		c.Set(requestmeta.ProviderKey, finalProvider)

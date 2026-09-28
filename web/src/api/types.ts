@@ -4,6 +4,11 @@ export interface DashboardSummary {
   active_models: number
   avg_latency_ms: number
   uptime: string
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_input_tokens?: number
+  cache_usage_requests?: number
+  cache_hit_rate?: number | null
 }
 
 export interface ProviderInfo {
@@ -40,6 +45,11 @@ export interface ModelInfo {
   capabilities?: string[]
   input_modalities?: string[]
   providers?: string[]
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_input_tokens?: number
+  cache_usage_requests?: number
+  cache_hit_rate?: number | null
 }
 
 export interface RouteProviderInfo {
@@ -65,6 +75,11 @@ export interface LogEntry {
   latency_ms: number
   input_tokens: number
   output_tokens: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_input_tokens?: number
+  cache_usage_known?: boolean
+  cache_hit_rate?: number | null
   is_stream: boolean
   error?: string
   provider_attempts?: ProviderAttempt[]
@@ -156,14 +171,16 @@ export interface SkillInstallRow extends SkillEntry {
 
 export interface SkillsSyncTargetReport {
   target: string
-  linked: string[]
-  current: string[]
-  removed: string[]
-  skipped: string[]
-  errors: string[]
+  linked: string[] | null
+  current: string[] | null
+  removed: string[] | null
+  skipped: string[] | null
+  errors: string[] | null
 }
 
 export interface SkillsStatusResponse {
+  project?: string
+  local_skills?: { id: string; path: string; source: string }[]
   configured: boolean
   hint?: string
   repo?: string

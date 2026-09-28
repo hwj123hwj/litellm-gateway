@@ -83,6 +83,7 @@ func (h *MessageHandler) handleNonStream(c *gin.Context, req *provider.Request, 
 		return
 	}
 	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	setCacheUsageMetadata(c, resp.CacheReadInputTokens, resp.CacheCreationInputTokens, resp.CacheInputTokens, resp.CacheUsageKnown)
 
 	// Archive the full request+response before sending to the client. We marshal
 	// the response ourselves so the archived body matches what the client gets.

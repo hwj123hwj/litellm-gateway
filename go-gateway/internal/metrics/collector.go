@@ -11,30 +11,39 @@ import (
 
 // RequestRecord 单条请求记录
 type RequestRecord struct {
-	RequestID        string                        `json:"request_id,omitempty"`
-	ProviderAttempts []requestmeta.ProviderAttempt `json:"provider_attempts,omitempty"`
-	Timestamp        time.Time                     `json:"timestamp"`
-	Method           string                        `json:"method"`
-	Path             string                        `json:"path"`
-	Model            string                        `json:"model"`
-	Provider         string                        `json:"provider"`
-	StatusCode       int                           `json:"status_code"`
-	Latency          float64                       `json:"latency_ms"` // 毫秒
-	InputTokens      int                           `json:"input_tokens"`
-	OutputTokens     int                           `json:"output_tokens"`
-	IsStream         bool                          `json:"is_stream"`
-	Error            string                        `json:"error,omitempty"`
+	RequestID                string                        `json:"request_id,omitempty"`
+	ProviderAttempts         []requestmeta.ProviderAttempt `json:"provider_attempts,omitempty"`
+	Timestamp                time.Time                     `json:"timestamp"`
+	Method                   string                        `json:"method"`
+	Path                     string                        `json:"path"`
+	Model                    string                        `json:"model"`
+	Provider                 string                        `json:"provider"`
+	StatusCode               int                           `json:"status_code"`
+	Latency                  float64                       `json:"latency_ms"` // 毫秒
+	InputTokens              int                           `json:"input_tokens"`
+	OutputTokens             int                           `json:"output_tokens"`
+	CacheReadInputTokens     int                           `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int                           `json:"cache_creation_input_tokens"`
+	CacheInputTokens         int                           `json:"cache_input_tokens"`
+	CacheUsageKnown          bool                          `json:"cache_usage_known"`
+	IsStream                 bool                          `json:"is_stream"`
+	Error                    string                        `json:"error,omitempty"`
 }
 
 // ModelStats 模型维度统计
 type ModelStats struct {
-	Model       string  `json:"model"`
-	Requests    int     `json:"requests"`
-	Successes   int     `json:"successes"`
-	Errors      int     `json:"errors"`
-	TotalTokens int     `json:"total_tokens"`
-	AvgLatency  float64 `json:"avg_latency_ms"`
-	Provider    string  `json:"provider"`
+	Model                    string   `json:"model"`
+	Requests                 int      `json:"requests"`
+	Successes                int      `json:"successes"`
+	Errors                   int      `json:"errors"`
+	TotalTokens              int      `json:"total_tokens"`
+	AvgLatency               float64  `json:"avg_latency_ms"`
+	Provider                 string   `json:"provider"`
+	CacheReadInputTokens     int      `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int      `json:"cache_creation_input_tokens"`
+	CacheInputTokens         int      `json:"cache_input_tokens"`
+	CacheUsageRequests       int      `json:"cache_usage_requests"`
+	CacheHitRate             *float64 `json:"cache_hit_rate"`
 }
 
 // ProviderStats 提供商维度统计
@@ -50,11 +59,26 @@ type ProviderStats struct {
 
 // DashboardSummary 仪表盘概览
 type DashboardSummary struct {
-	TodayRequests int     `json:"today_requests"`
-	SuccessRate   float64 `json:"success_rate"`
-	ActiveModels  int     `json:"active_models"`
-	AvgLatency    float64 `json:"avg_latency_ms"`
-	Uptime        string  `json:"uptime"`
+	TodayRequests            int      `json:"today_requests"`
+	SuccessRate              float64  `json:"success_rate"`
+	ActiveModels             int      `json:"active_models"`
+	AvgLatency               float64  `json:"avg_latency_ms"`
+	Uptime                   string   `json:"uptime"`
+	CacheReadInputTokens     int      `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int      `json:"cache_creation_input_tokens"`
+	CacheInputTokens         int      `json:"cache_input_tokens"`
+	CacheUsageRequests       int      `json:"cache_usage_requests"`
+	CacheHitRate             *float64 `json:"cache_hit_rate"`
+}
+
+// CacheStats contains only provider-reported cache usage. A request whose
+// provider omitted cache usage is intentionally excluded from the hit-rate
+// denominator and sample count.
+type CacheStats struct {
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
+	CacheInputTokens         int
+	CacheUsageRequests       int
 }
 
 // Store 持久化存储接口
@@ -96,6 +120,7 @@ type Collector struct {
 	todaySuccess    int
 	todayErrors     int
 	todayLatencySum float64
+	todayCacheStats CacheStats
 
 	// 按模型聚合
 	modelStats map[string]*ModelStats
@@ -149,6 +174,39 @@ func (c *Collector) SetStore(store Store) {
 		c.records = append(c.records, r)
 		if !r.Timestamp.Before(todayStart) {
 			c.applyToAggregates(r)
+		}
+	}
+
+	// SQLite keeps unbounded daily aggregates separately from the 2,000-entry
+	// request-log window. Prefer those totals after restart when the store
+	// supports them, so the cache rate does not silently shrink to the log ring.
+	if dailyStore, ok := store.(interface {
+		GetDailyStats(date string) ([]ModelStats, error)
+	}); ok {
+		stats, err := dailyStore.GetDailyStats(todayStart.Format("2006-01-02"))
+		if err == nil && len(stats) > 0 {
+			c.modelStats = make(map[string]*ModelStats, len(stats))
+			c.activeModels = make(map[string]bool, len(stats))
+			c.todayTotal = 0
+			c.todaySuccess = 0
+			c.todayErrors = 0
+			c.todayLatencySum = 0
+			c.todayCacheStats = CacheStats{}
+			for i := range stats {
+				ms := &stats[i]
+				if ms.Model != "" {
+					c.modelStats[ms.Model] = ms
+					c.activeModels[ms.Model] = true
+				}
+				c.todayTotal += ms.Requests
+				c.todaySuccess += ms.Successes
+				c.todayErrors += ms.Errors
+				c.todayLatencySum += ms.AvgLatency * float64(ms.Requests)
+				c.todayCacheStats.CacheReadInputTokens += ms.CacheReadInputTokens
+				c.todayCacheStats.CacheCreationInputTokens += ms.CacheCreationInputTokens
+				c.todayCacheStats.CacheInputTokens += ms.CacheInputTokens
+				c.todayCacheStats.CacheUsageRequests += ms.CacheUsageRequests
+			}
 		}
 	}
 }
@@ -207,7 +265,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 			c.modelStats[r.Model] = ms
 		}
 		ms.Requests++
-		ms.TotalTokens += r.InputTokens + r.OutputTokens
+		ms.TotalTokens += totalTokens(r)
 		if r.StatusCode >= 200 && r.StatusCode < 400 {
 			ms.Successes++
 		} else {
@@ -215,7 +273,9 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		}
 		// 增量平均延迟
 		ms.AvgLatency = (ms.AvgLatency*float64(ms.Requests-1) + r.Latency) / float64(ms.Requests)
+		applyModelCacheStats(ms, r)
 	}
+	applyCacheStats(&c.todayCacheStats, r)
 
 	// 更新提供商统计
 	if r.Provider != "" {
@@ -246,6 +306,7 @@ func (c *Collector) resetDaily(todayStart time.Time) {
 	c.todaySuccess = 0
 	c.todayErrors = 0
 	c.todayLatencySum = 0
+	c.todayCacheStats = CacheStats{}
 	c.activeModels = make(map[string]bool)
 	// modelStats/providerStats 同样按「今日」语义清理，与面板标题一致
 	c.modelStats = make(map[string]*ModelStats)
@@ -271,11 +332,16 @@ func (c *Collector) GetDashboard() DashboardSummary {
 	uptimeStr := formatDuration(uptime)
 
 	return DashboardSummary{
-		TodayRequests: c.todayTotal,
-		SuccessRate:   successRate,
-		ActiveModels:  len(c.activeModels),
-		AvgLatency:    avgLatency,
-		Uptime:        uptimeStr,
+		TodayRequests:            c.todayTotal,
+		SuccessRate:              successRate,
+		ActiveModels:             len(c.activeModels),
+		AvgLatency:               avgLatency,
+		Uptime:                   uptimeStr,
+		CacheReadInputTokens:     c.todayCacheStats.CacheReadInputTokens,
+		CacheCreationInputTokens: c.todayCacheStats.CacheCreationInputTokens,
+		CacheInputTokens:         c.todayCacheStats.CacheInputTokens,
+		CacheUsageRequests:       c.todayCacheStats.CacheUsageRequests,
+		CacheHitRate:             cacheHitRate(c.todayCacheStats),
 	}
 }
 
@@ -286,9 +352,54 @@ func (c *Collector) GetModelStats() []ModelStats {
 
 	result := make([]ModelStats, 0, len(c.modelStats))
 	for _, ms := range c.modelStats {
-		result = append(result, *ms)
+		copy := *ms
+		copy.CacheHitRate = cacheHitRate(CacheStats{
+			CacheReadInputTokens:     copy.CacheReadInputTokens,
+			CacheCreationInputTokens: copy.CacheCreationInputTokens,
+			CacheInputTokens:         copy.CacheInputTokens,
+			CacheUsageRequests:       copy.CacheUsageRequests,
+		})
+		result = append(result, copy)
 	}
 	return result
+}
+
+func applyCacheStats(total *CacheStats, r RequestRecord) {
+	if !r.CacheUsageKnown {
+		return
+	}
+	total.CacheReadInputTokens += r.CacheReadInputTokens
+	total.CacheCreationInputTokens += r.CacheCreationInputTokens
+	total.CacheInputTokens += r.CacheInputTokens
+	total.CacheUsageRequests++
+}
+
+func applyModelCacheStats(total *ModelStats, r RequestRecord) {
+	if !r.CacheUsageKnown {
+		return
+	}
+	total.CacheReadInputTokens += r.CacheReadInputTokens
+	total.CacheCreationInputTokens += r.CacheCreationInputTokens
+	total.CacheInputTokens += r.CacheInputTokens
+	total.CacheUsageRequests++
+}
+
+func cacheHitRate(stats CacheStats) *float64 {
+	if stats.CacheInputTokens <= 0 {
+		return nil
+	}
+	rate := float64(stats.CacheReadInputTokens) / float64(stats.CacheInputTokens) * 100
+	return &rate
+}
+
+func totalTokens(r RequestRecord) int {
+	totalInput := r.InputTokens
+	if r.CacheUsageKnown && r.CacheInputTokens > totalInput {
+		// Anthropic reports uncached input separately from cache reads/writes;
+		// OpenAI and Gemini report cached input as part of input_tokens.
+		totalInput = r.CacheInputTokens
+	}
+	return totalInput + r.OutputTokens
 }
 
 // GetProviderStats 获取所有提供商统计

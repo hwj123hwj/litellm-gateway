@@ -3,14 +3,18 @@
 package requestmeta
 
 const (
-	RequestIDKey        = "request_id"
-	ModelKey            = "request_model"
-	ProviderKey         = "request_provider"
-	ProviderAttemptsKey = "request_provider_attempts"
-	RequestErrorKey     = "request_error"
-	RequestIsStreamKey  = "request_is_stream"
-	InputTokensKey      = "request_input_tokens"
-	OutputTokensKey     = "request_output_tokens"
+	RequestIDKey                = "request_id"
+	ModelKey                    = "request_model"
+	ProviderKey                 = "request_provider"
+	ProviderAttemptsKey         = "request_provider_attempts"
+	RequestErrorKey             = "request_error"
+	RequestIsStreamKey          = "request_is_stream"
+	InputTokensKey              = "request_input_tokens"
+	OutputTokensKey             = "request_output_tokens"
+	CacheReadInputTokensKey     = "request_cache_read_input_tokens"
+	CacheCreationInputTokensKey = "request_cache_creation_input_tokens"
+	CacheInputTokensKey         = "request_cache_input_tokens"
+	CacheUsageKnownKey          = "request_cache_usage_known"
 )
 
 // ProviderAttempt describes one provider selected by the router for a

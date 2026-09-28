@@ -127,8 +127,9 @@ type deepVResponse struct {
 		FinishReason string `json:"finishReason"`
 	} `json:"candidates"`
 	UsageMetadata *struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
+		PromptTokenCount        int  `json:"promptTokenCount"`
+		CandidatesTokenCount    int  `json:"candidatesTokenCount"`
+		CachedContentTokenCount *int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata"`
 }
 
@@ -526,6 +527,11 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 	if genaiResp.UsageMetadata != nil {
 		result.Usage.InputTokens = genaiResp.UsageMetadata.PromptTokenCount
 		result.Usage.OutputTokens = genaiResp.UsageMetadata.CandidatesTokenCount
+		if cached := genaiResp.UsageMetadata.CachedContentTokenCount; cached != nil {
+			result.CacheReadInputTokens = *cached
+			result.CacheInputTokens = genaiResp.UsageMetadata.PromptTokenCount
+			result.CacheUsageKnown = true
+		}
 	}
 
 	// 上游的 functionCall 自带唯一 id，必须原样保留：同一轮并行调用如果回给

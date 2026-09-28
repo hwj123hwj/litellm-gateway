@@ -158,9 +158,10 @@ type openAIChatChoice struct {
 }
 
 type openAIChatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                  `json:"prompt_tokens"`
+	CompletionTokens    int                  `json:"completion_tokens"`
+	TotalTokens         int                  `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 type openAIStreamChunkResponse struct {
@@ -264,7 +265,8 @@ func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	setUsageMetadata(c, totalPromptTokens(resp), resp.Usage.OutputTokens)
+	setCacheUsageMetadata(c, resp.CacheReadInputTokens, resp.CacheCreationInputTokens, resp.CacheInputTokens, resp.CacheUsageKnown)
 
 	responseObj := toOpenAIChatCompletionResponse(resp)
 	if h.archiver != nil && h.archiver.Enabled() {
@@ -520,10 +522,14 @@ func toOpenAIChatCompletionResponse(resp *provider.Response) *openAIChatCompleti
 		}
 	}
 	message.Content = openAIMessageContent{Str: content, IsStr: true}
+	promptTokens := totalPromptTokens(resp)
 	usage := openAIChatCompletionUsage{
-		PromptTokens:     resp.Usage.InputTokens,
+		PromptTokens:     promptTokens,
 		CompletionTokens: resp.Usage.OutputTokens,
-		TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		TotalTokens:      promptTokens + resp.Usage.OutputTokens,
+	}
+	if resp.CacheUsageKnown {
+		usage.PromptTokensDetails = &promptTokensDetails{CachedTokens: resp.CacheReadInputTokens}
 	}
 	return &openAIChatCompletionResponse{
 		ID:      resp.ID,
@@ -558,8 +564,11 @@ func anthropicSSEToOpenAISSEWithUsage(r io.Reader, w io.Writer, c *gin.Context) 
 	model := ""
 	var pendingToolCalls map[int]*openAIChatToolCall
 	accInputTokens := 0
+	accInputTokensKnown := false
 	accOutputTokens := 0
 	accCachedTokens := 0
+	accCacheCreationTokens := 0
+	cacheUsageKnown := false
 
 	toolIndexMap := make(map[int]int)
 
@@ -575,29 +584,51 @@ func anthropicSSEToOpenAISSEWithUsage(r io.Reader, w io.Writer, c *gin.Context) 
 			var ms struct {
 				Message struct {
 					Usage struct {
-						InputTokens int `json:"input_tokens"`
+						InputTokens              *int `json:"input_tokens"`
+						CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+						CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
 					} `json:"usage"`
 				} `json:"message"`
 			}
 			if err := json.Unmarshal([]byte(payload), &ms); err == nil {
-				if ms.Message.Usage.InputTokens > 0 {
-					accInputTokens = ms.Message.Usage.InputTokens
+				if ms.Message.Usage.InputTokens != nil {
+					accInputTokens = *ms.Message.Usage.InputTokens
+					accInputTokensKnown = true
+				}
+				if ms.Message.Usage.CacheReadInputTokens != nil {
+					accCachedTokens = *ms.Message.Usage.CacheReadInputTokens
+					cacheUsageKnown = true
+				}
+				if ms.Message.Usage.CacheCreationInputTokens != nil {
+					accCacheCreationTokens = *ms.Message.Usage.CacheCreationInputTokens
+					cacheUsageKnown = true
 				}
 			}
 		case "message_delta":
 			var md struct {
 				Usage struct {
-					InputTokens          int `json:"input_tokens"`
-					OutputTokens         int `json:"output_tokens"`
-					CacheReadInputTokens int `json:"cache_read_input_tokens"`
+					InputTokens              *int `json:"input_tokens"`
+					OutputTokens             *int `json:"output_tokens"`
+					CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+					CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
 				} `json:"usage"`
 			}
 			if err := json.Unmarshal([]byte(payload), &md); err == nil {
-				if md.Usage.InputTokens > 0 {
-					accInputTokens = md.Usage.InputTokens
+				if md.Usage.InputTokens != nil {
+					accInputTokens = *md.Usage.InputTokens
+					accInputTokensKnown = true
 				}
-				accOutputTokens = md.Usage.OutputTokens
-				accCachedTokens = md.Usage.CacheReadInputTokens
+				if md.Usage.OutputTokens != nil {
+					accOutputTokens = *md.Usage.OutputTokens
+				}
+				if md.Usage.CacheReadInputTokens != nil {
+					accCachedTokens = *md.Usage.CacheReadInputTokens
+					cacheUsageKnown = true
+				}
+				if md.Usage.CacheCreationInputTokens != nil {
+					accCacheCreationTokens = *md.Usage.CacheCreationInputTokens
+					cacheUsageKnown = true
+				}
 			}
 		}
 
@@ -617,6 +648,18 @@ func anthropicSSEToOpenAISSEWithUsage(r io.Reader, w io.Writer, c *gin.Context) 
 			}
 		}
 		if done {
+			promptTokens := accInputTokens
+			if accInputTokensKnown {
+				promptTokens += accCachedTokens + accCacheCreationTokens
+			}
+			usage := &openAIStreamUsage{
+				PromptTokens:     promptTokens,
+				CompletionTokens: accOutputTokens,
+				TotalTokens:      promptTokens + accOutputTokens,
+			}
+			if cacheUsageKnown {
+				usage.PromptTokensDetails = &promptTokensDetails{CachedTokens: accCachedTokens}
+			}
 			// 发送最终 usage chunk（OpenAI 标准：最后一条带 usage，choices 为空）
 			if err := writeOpenAIChunk(w, &openAIStreamChunkResponse{
 				ID:      messageID,
@@ -624,20 +667,14 @@ func anthropicSSEToOpenAISSEWithUsage(r io.Reader, w io.Writer, c *gin.Context) 
 				Created: created,
 				Model:   model,
 				Choices: []openAIStreamChunkChoice{},
-				Usage: &openAIStreamUsage{
-					PromptTokens:     accInputTokens,
-					CompletionTokens: accOutputTokens,
-					TotalTokens:      accInputTokens + accOutputTokens,
-					PromptTokensDetails: &promptTokensDetails{
-						CachedTokens: accCachedTokens,
-					},
-				},
+				Usage:   usage,
 			}); err != nil {
 				return err
 			}
 			// Propagate usage to gin.Context for archive metadata.
 			if c != nil {
-				setUsageMetadata(c, accInputTokens, accOutputTokens)
+				setUsageMetadata(c, promptTokens, accOutputTokens)
+				setCacheUsageMetadata(c, accCachedTokens, accCacheCreationTokens, promptTokens, cacheUsageKnown && accInputTokensKnown)
 			}
 			eventType = ""
 			dataLines = nil

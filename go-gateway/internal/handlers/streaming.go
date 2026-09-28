@@ -136,20 +136,32 @@ func (w *usageTrackingWriter) flushEvent() {
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return
 	}
-	inputTokens, outputTokens, ok := findUsage(value)
+	usage, ok := findUsageDetails(value)
 	if !ok || w.ctx == nil {
 		return
 	}
 	currentInput := w.ctx.GetInt(requestmeta.InputTokensKey)
 	currentOutput := w.ctx.GetInt(requestmeta.OutputTokensKey)
-	if inputTokens > 0 {
-		currentInput = inputTokens
+	if usage.InputFound {
+		currentInput = usage.InputTokens
 	}
-	if outputTokens > 0 {
-		currentOutput = outputTokens
+	if usage.OutputFound {
+		currentOutput = usage.OutputTokens
 	}
-	if inputTokens > 0 || outputTokens > 0 {
+	if usage.InputFound || usage.OutputFound {
 		setUsageMetadata(w.ctx, currentInput, currentOutput)
+	}
+	if usage.CacheUsageKnown {
+		cacheInput := usage.CacheInputTokens
+		if !usage.CacheInputFound {
+			cacheInput = w.ctx.GetInt(requestmeta.CacheInputTokensKey)
+			if usage.CacheDenominatorAddsCache {
+				cacheInput = currentInput + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+			} else if cacheInput <= 0 {
+				cacheInput = currentInput
+			}
+		}
+		setCacheUsageMetadata(w.ctx, usage.CacheReadInputTokens, usage.CacheCreationInputTokens, cacheInput, true)
 	}
 }
 
@@ -157,35 +169,115 @@ func (w *usageTrackingWriter) flushEvent() {
 // Responses usage. Walking nested objects also covers response.completed
 // payloads without coupling the tracker to one protocol's response shape.
 func findUsage(value any) (int, int, bool) {
+	usage, found := findUsageDetails(value)
+	return usage.InputTokens, usage.OutputTokens, found
+}
+
+type parsedUsage struct {
+	InputTokens               int
+	OutputTokens              int
+	InputFound                bool
+	OutputFound               bool
+	CacheReadInputTokens      int
+	CacheCreationInputTokens  int
+	CacheInputTokens          int
+	CacheInputFound           bool
+	CacheDenominatorAddsCache bool
+	CacheUsageKnown           bool
+}
+
+func findUsageDetails(value any) (parsedUsage, bool) {
 	switch current := value.(type) {
 	case map[string]any:
 		if rawUsage, ok := current["usage"]; ok {
 			if usage, ok := rawUsage.(map[string]any); ok {
-				input, output, found := usageCounts(usage)
+				parsed, found := parseUsage(usage)
 				if found {
-					return input, output, true
+					return parsed, true
 				}
 			}
 		}
+		if parsed, found := parseUsage(current); found {
+			return parsed, true
+		}
+		if rawUsage, ok := current["usageMetadata"].(map[string]any); ok {
+			if parsed, found := parseUsage(rawUsage); found {
+				return parsed, true
+			}
+		}
 		for _, child := range current {
-			if input, output, ok := findUsage(child); ok {
-				return input, output, true
+			if usage, ok := findUsageDetails(child); ok {
+				return usage, true
 			}
 		}
 	case []any:
 		for _, child := range current {
-			if input, output, ok := findUsage(child); ok {
-				return input, output, true
+			if usage, ok := findUsageDetails(child); ok {
+				return usage, true
 			}
 		}
 	}
-	return 0, 0, false
+	return parsedUsage{}, false
 }
 
 func usageCounts(usage map[string]any) (int, int, bool) {
-	input, inputFound := usageNumber(usage, "input_tokens", "prompt_tokens", "inputTokens", "promptTokens")
-	output, outputFound := usageNumber(usage, "output_tokens", "completion_tokens", "outputTokens", "completionTokens")
-	return input, output, inputFound || outputFound
+	parsed, found := parseUsage(usage)
+	return parsed.InputTokens, parsed.OutputTokens, found
+}
+
+func parseUsage(usage map[string]any) (parsedUsage, bool) {
+	input, inputFound := usageNumber(usage, "input_tokens", "prompt_tokens", "inputTokens", "promptTokens", "promptTokenCount", "prompt_token_count")
+	output, outputFound := usageNumber(usage, "output_tokens", "completion_tokens", "outputTokens", "completionTokens", "candidatesTokenCount", "candidates_token_count")
+	cacheRead, cacheReadFound := usageNumber(usage, "cache_read_input_tokens", "cacheReadInputTokens", "cachedContentTokenCount", "cached_content_token_count")
+	cacheCreation, cacheCreationFound := usageNumber(usage, "cache_creation_input_tokens", "cacheCreationInputTokens")
+
+	openAICacheDetails := false
+	for _, key := range []string{"prompt_tokens_details", "input_tokens_details", "promptTokensDetails", "inputTokensDetails"} {
+		if details, ok := usage[key].(map[string]any); ok {
+			if cached, found := usageNumber(details, "cached_tokens", "cachedTokens"); found {
+				cacheRead = cached
+				cacheReadFound = true
+				openAICacheDetails = true
+			}
+		}
+	}
+	known := cacheReadFound || cacheCreationFound
+	denominatorAddsCache := !openAICacheDetails && usageHasKey(usage,
+		"cache_read_input_tokens", "cache_creation_input_tokens", "cacheReadInputTokens", "cacheCreationInputTokens",
+	)
+	cacheInput := 0
+	if known && inputFound {
+		cacheInput = input
+		if denominatorAddsCache {
+			// Anthropic reports uncached, cache-read, and cache-write input
+			// counts separately. OpenAI and Gemini input counts already include
+			// cached tokens, so their denominators are just the input count.
+			cacheInput += cacheRead + cacheCreation
+		}
+	}
+
+	parsed := parsedUsage{
+		InputTokens:               input,
+		OutputTokens:              output,
+		InputFound:                inputFound,
+		OutputFound:               outputFound,
+		CacheReadInputTokens:      cacheRead,
+		CacheCreationInputTokens:  cacheCreation,
+		CacheInputTokens:          cacheInput,
+		CacheInputFound:           known && inputFound,
+		CacheDenominatorAddsCache: denominatorAddsCache,
+		CacheUsageKnown:           known,
+	}
+	return parsed, inputFound || outputFound || known
+}
+
+func usageHasKey(usage map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := usage[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func usageNumber(usage map[string]any, keys ...string) (int, bool) {
