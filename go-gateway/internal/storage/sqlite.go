@@ -83,6 +83,10 @@ func initSchema(db *sql.DB) error {
 		latency_ms REAL DEFAULT 0,
 		input_tokens INTEGER DEFAULT 0,
 		output_tokens INTEGER DEFAULT 0,
+		cache_read_input_tokens INTEGER DEFAULT 0,
+		cache_creation_input_tokens INTEGER DEFAULT 0,
+		cache_input_tokens INTEGER DEFAULT 0,
+		cache_usage_known BOOLEAN DEFAULT 0,
 		is_stream BOOLEAN DEFAULT 0,
 		error TEXT DEFAULT ''
 	);
@@ -100,6 +104,10 @@ func initSchema(db *sql.DB) error {
 		errors INTEGER DEFAULT 0,
 		total_tokens INTEGER DEFAULT 0,
 		total_latency_ms REAL DEFAULT 0,
+		cache_read_input_tokens INTEGER DEFAULT 0,
+		cache_creation_input_tokens INTEGER DEFAULT 0,
+		cache_input_tokens INTEGER DEFAULT 0,
+		cache_usage_requests INTEGER DEFAULT 0,
 		PRIMARY KEY (date, model)
 	);
 	`
@@ -113,6 +121,22 @@ func initSchema(db *sql.DB) error {
 	}
 	if err := ensureColumn(db, "request_logs", "provider_attempts", "TEXT DEFAULT '[]'"); err != nil {
 		return err
+	}
+	for _, column := range []struct {
+		table, name, definition string
+	}{
+		{"request_logs", "cache_read_input_tokens", "INTEGER DEFAULT 0"},
+		{"request_logs", "cache_creation_input_tokens", "INTEGER DEFAULT 0"},
+		{"request_logs", "cache_input_tokens", "INTEGER DEFAULT 0"},
+		{"request_logs", "cache_usage_known", "BOOLEAN DEFAULT 0"},
+		{"daily_stats", "cache_read_input_tokens", "INTEGER DEFAULT 0"},
+		{"daily_stats", "cache_creation_input_tokens", "INTEGER DEFAULT 0"},
+		{"daily_stats", "cache_input_tokens", "INTEGER DEFAULT 0"},
+		{"daily_stats", "cache_usage_requests", "INTEGER DEFAULT 0"},
+	} {
+		if err := ensureColumn(db, column.table, column.name, column.definition); err != nil {
+			return err
+		}
 	}
 	_, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_logs_request_id ON request_logs(request_id)")
 	return err
@@ -150,9 +174,9 @@ func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
 		return fmt.Errorf("encode provider attempts: %w", err)
 	}
 	_, err = s.db.Exec(`
-		INSERT INTO request_logs (timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, is_stream, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, r.Timestamp, r.RequestID, r.Method, r.Path, r.Model, r.Provider, string(attempts), r.StatusCode, r.Latency, r.InputTokens, r.OutputTokens, r.IsStream, r.Error)
+		INSERT INTO request_logs (timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_input_tokens, cache_usage_known, is_stream, error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.Timestamp, r.RequestID, r.Method, r.Path, r.Model, r.Provider, string(attempts), r.StatusCode, r.Latency, r.InputTokens, r.OutputTokens, r.CacheReadInputTokens, r.CacheCreationInputTokens, r.CacheInputTokens, r.CacheUsageKnown, r.IsStream, r.Error)
 
 	if err != nil {
 		s.logger.Printf("Save record error: %v", err)
@@ -165,19 +189,32 @@ func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
 	if r.StatusCode >= 200 && r.StatusCode < 400 {
 		success = 1
 	}
-	tokens := r.InputTokens + r.OutputTokens
+	totalInput := r.InputTokens
+	if r.CacheUsageKnown && r.CacheInputTokens > totalInput {
+		totalInput = r.CacheInputTokens
+	}
+	tokens := totalInput + r.OutputTokens
+	cacheUsageRequests := 0
+	if r.CacheUsageKnown {
+		cacheUsageRequests = 1
+	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO daily_stats (date, model, provider, requests, successes, errors, total_tokens, total_latency_ms)
-		VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+		INSERT INTO daily_stats (date, model, provider, requests, successes, errors, total_tokens, total_latency_ms, cache_read_input_tokens, cache_creation_input_tokens, cache_input_tokens, cache_usage_requests)
+		VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(date, model) DO UPDATE SET
 			requests = requests + 1,
 			successes = successes + ?,
 			errors = errors + ?,
 			total_tokens = total_tokens + ?,
-			total_latency_ms = total_latency_ms + ?
+			total_latency_ms = total_latency_ms + ?,
+			cache_read_input_tokens = cache_read_input_tokens + ?,
+			cache_creation_input_tokens = cache_creation_input_tokens + ?,
+			cache_input_tokens = cache_input_tokens + ?,
+			cache_usage_requests = cache_usage_requests + ?
 	`, date, r.Model, r.Provider, success, 1-success, tokens, r.Latency,
-		success, 1-success, tokens, r.Latency)
+		r.CacheReadInputTokens, r.CacheCreationInputTokens, r.CacheInputTokens, cacheUsageRequests,
+		success, 1-success, tokens, r.Latency, r.CacheReadInputTokens, r.CacheCreationInputTokens, r.CacheInputTokens, cacheUsageRequests)
 
 	return err
 }
@@ -185,7 +222,7 @@ func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
 // GetRecentLogs 获取最近的请求日志
 func (s *SQLiteStore) GetRecentLogs(limit int) ([]metrics.RequestRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, is_stream, error
+		SELECT timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_input_tokens, cache_usage_known, is_stream, error
 		FROM request_logs
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -200,7 +237,7 @@ func (s *SQLiteStore) GetRecentLogs(limit int) ([]metrics.RequestRecord, error) 
 		var r metrics.RequestRecord
 		var ts string
 		var attemptsJSON string
-		if err := rows.Scan(&ts, &r.RequestID, &r.Method, &r.Path, &r.Model, &r.Provider, &attemptsJSON, &r.StatusCode, &r.Latency, &r.InputTokens, &r.OutputTokens, &r.IsStream, &r.Error); err != nil {
+		if err := rows.Scan(&ts, &r.RequestID, &r.Method, &r.Path, &r.Model, &r.Provider, &attemptsJSON, &r.StatusCode, &r.Latency, &r.InputTokens, &r.OutputTokens, &r.CacheReadInputTokens, &r.CacheCreationInputTokens, &r.CacheInputTokens, &r.CacheUsageKnown, &r.IsStream, &r.Error); err != nil {
 			continue
 		}
 		r.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
@@ -216,6 +253,7 @@ func (s *SQLiteStore) GetRecentLogs(limit int) ([]metrics.RequestRecord, error) 
 func (s *SQLiteStore) GetDailyStats(date string) ([]metrics.ModelStats, error) {
 	rows, err := s.db.Query(`
 		SELECT model, provider, requests, successes, errors, total_tokens,
+			cache_read_input_tokens, cache_creation_input_tokens, cache_input_tokens, cache_usage_requests,
 			CASE WHEN requests > 0 THEN total_latency_ms / requests ELSE 0 END as avg_latency
 		FROM daily_stats
 		WHERE date = ?
@@ -229,7 +267,7 @@ func (s *SQLiteStore) GetDailyStats(date string) ([]metrics.ModelStats, error) {
 	var stats []metrics.ModelStats
 	for rows.Next() {
 		var ms metrics.ModelStats
-		if err := rows.Scan(&ms.Model, &ms.Provider, &ms.Requests, &ms.Successes, &ms.Errors, &ms.TotalTokens, &ms.AvgLatency); err != nil {
+		if err := rows.Scan(&ms.Model, &ms.Provider, &ms.Requests, &ms.Successes, &ms.Errors, &ms.TotalTokens, &ms.CacheReadInputTokens, &ms.CacheCreationInputTokens, &ms.CacheInputTokens, &ms.CacheUsageRequests, &ms.AvgLatency); err != nil {
 			continue
 		}
 		stats = append(stats, ms)

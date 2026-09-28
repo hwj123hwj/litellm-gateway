@@ -43,19 +43,23 @@ func Logging(logger *log.Logger, collector *metrics.Collector) gin.HandlerFunc {
 				attempts, _ = value.([]requestmeta.ProviderAttempt)
 			}
 			collector.Record(metrics.RequestRecord{
-				Timestamp:        start,
-				RequestID:        requestID,
-				Method:           c.Request.Method,
-				Path:             path,
-				Model:            model,
-				Provider:         provider,
-				ProviderAttempts: attempts,
-				StatusCode:       status,
-				Latency:          float64(latency.Milliseconds()),
-				IsStream:         c.GetBool(requestmeta.RequestIsStreamKey),
-				InputTokens:      c.GetInt(requestmeta.InputTokensKey),
-				OutputTokens:     c.GetInt(requestmeta.OutputTokensKey),
-				Error:            requestError,
+				Timestamp:                start,
+				RequestID:                requestID,
+				Method:                   c.Request.Method,
+				Path:                     path,
+				Model:                    model,
+				Provider:                 provider,
+				ProviderAttempts:         attempts,
+				StatusCode:               status,
+				Latency:                  float64(latency.Milliseconds()),
+				IsStream:                 c.GetBool(requestmeta.RequestIsStreamKey),
+				InputTokens:              c.GetInt(requestmeta.InputTokensKey),
+				OutputTokens:             c.GetInt(requestmeta.OutputTokensKey),
+				CacheReadInputTokens:     c.GetInt(requestmeta.CacheReadInputTokensKey),
+				CacheCreationInputTokens: c.GetInt(requestmeta.CacheCreationInputTokensKey),
+				CacheInputTokens:         c.GetInt(requestmeta.CacheInputTokensKey),
+				CacheUsageKnown:          c.GetBool(requestmeta.CacheUsageKnownKey),
+				Error:                    requestError,
 			})
 		}
 	}

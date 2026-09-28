@@ -103,6 +103,15 @@ export default function Models() {
                   </div>
                   <div className="md-stat-label">延迟</div>
                 </div>
+                <div className="md-stat">
+                  <div
+                    className="md-stat-value"
+                    title={`${m.cache_usage_requests ?? 0} 个请求报告缓存 usage；${fmt(m.cache_read_input_tokens ?? 0)} / ${fmt(m.cache_input_tokens ?? 0)} 输入 tokens 命中`}
+                  >
+                    {m.cache_hit_rate != null ? `${m.cache_hit_rate.toFixed(1)}%` : 'N/A'}
+                  </div>
+                  <div className="md-stat-label">缓存命中</div>
+                </div>
               </div>
               <div className="capability-section">
                 <div className="capability-label">能力校验</div>

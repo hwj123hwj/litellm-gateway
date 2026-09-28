@@ -292,6 +292,84 @@ type Response struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
+	// Cache usage remains internal metadata except when serializing the
+	// Anthropic-compatible response, where the protocol exposes it in usage.
+	CacheReadInputTokens     int  `json:"-"`
+	CacheCreationInputTokens int  `json:"-"`
+	CacheInputTokens         int  `json:"-"`
+	CacheUsageKnown          bool `json:"-"`
+}
+
+func (r *Response) UnmarshalJSON(data []byte) error {
+	type responseAlias Response
+	var decoded responseAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = Response(decoded)
+
+	var usage struct {
+		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	}
+	var payload struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	if len(payload.Usage) > 0 {
+		if err := json.Unmarshal(payload.Usage, &usage); err != nil {
+			return err
+		}
+	}
+	if usage.CacheReadInputTokens != nil {
+		r.CacheReadInputTokens = *usage.CacheReadInputTokens
+		r.CacheUsageKnown = true
+	}
+	if usage.CacheCreationInputTokens != nil {
+		r.CacheCreationInputTokens = *usage.CacheCreationInputTokens
+		r.CacheUsageKnown = true
+	}
+	if r.CacheUsageKnown {
+		r.CacheInputTokens = r.Usage.InputTokens + r.CacheReadInputTokens + r.CacheCreationInputTokens
+	}
+	return nil
+}
+
+func (r Response) MarshalJSON() ([]byte, error) {
+	type responseAlias Response
+	encoded, err := json.Marshal(responseAlias(r))
+	if err != nil {
+		return nil, err
+	}
+	if !r.CacheUsageKnown && r.CacheReadInputTokens == 0 && r.CacheCreationInputTokens == 0 {
+		return encoded, nil
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+	var usage map[string]json.RawMessage
+	if err := json.Unmarshal(payload["usage"], &usage); err != nil {
+		return nil, err
+	}
+	cacheRead, err := json.Marshal(r.CacheReadInputTokens)
+	if err != nil {
+		return nil, err
+	}
+	cacheCreation, err := json.Marshal(r.CacheCreationInputTokens)
+	if err != nil {
+		return nil, err
+	}
+	usage["cache_read_input_tokens"] = cacheRead
+	usage["cache_creation_input_tokens"] = cacheCreation
+	payload["usage"], err = json.Marshal(usage)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(payload)
 }
 
 // ErrorResponse 错误响应结构

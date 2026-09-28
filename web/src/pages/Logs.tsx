@@ -17,6 +17,12 @@ function fmtLatency(ms: number) {
   return ms < 1000 ? ms.toFixed(0) + 'ms' : (ms / 1000).toFixed(1) + 's'
 }
 
+function fmt(n: number) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
+  return String(n)
+}
+
 export default function Logs() {
   const { logs, logsLoading, logsError, fetchLogs } = useStore()
 
@@ -45,6 +51,9 @@ export default function Logs() {
           const statusClass = log.error ? 'error' : isSuccess ? 'success' : 'error'
           const statusText = log.error ? '错误' : isSuccess ? '成功' : `${log.status_code}`
           const StatusIcon = log.error ? XCircle : isSuccess ? CheckCircle : Warning
+          const totalInputTokens = log.cache_usage_known && (log.cache_input_tokens ?? 0) > log.input_tokens
+            ? log.cache_input_tokens!
+            : log.input_tokens
 
           return (
             <article key={i} className="log-entry">
@@ -57,7 +66,13 @@ export default function Logs() {
               <div className="log-detail">
                 <span>{log.method} {log.path}</span>
                 {log.latency_ms > 0 && <span><Clock size={13} aria-hidden="true" />{fmtLatency(log.latency_ms)}</span>}
-                {log.input_tokens > 0 && <span>{log.input_tokens + log.output_tokens} tokens</span>}
+                {log.input_tokens > 0 && <span>{totalInputTokens + log.output_tokens} tokens</span>}
+                {log.cache_usage_known && (
+                  <span title={`缓存写入 ${fmt(log.cache_creation_input_tokens ?? 0)} tokens`}>
+                    缓存命中 {log.cache_hit_rate != null ? `${log.cache_hit_rate.toFixed(1)}%` : 'N/A'}
+                    {' '}· {fmt(log.cache_read_input_tokens ?? 0)} / {fmt(log.cache_input_tokens ?? 0)} tokens
+                  </span>
+                )}
                 {log.is_stream && <span><Broadcast size={13} aria-hidden="true" />流式</span>}
                 {log.request_id && <span className="log-request-id">{log.request_id}</span>}
               </div>

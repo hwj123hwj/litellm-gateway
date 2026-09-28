@@ -101,9 +101,10 @@ type openAIChoice struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                  `json:"prompt_tokens"`
+	CompletionTokens    int                  `json:"completion_tokens"`
+	TotalTokens         int                  `json:"total_tokens"`
+	PromptTokensDetails *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 type openAIResponse struct {
@@ -156,7 +157,23 @@ type openAIStreamUsage struct {
 }
 
 type promptTokensDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
+	cacheTokensKnown bool
+}
+
+func (d *promptTokensDetails) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		CachedTokens *int `json:"cached_tokens"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	d.CachedTokens = 0
+	d.cacheTokensKnown = decoded.CachedTokens != nil
+	if decoded.CachedTokens != nil {
+		d.CachedTokens = *decoded.CachedTokens
+	}
+	return nil
 }
 
 // ─── OpenAIProvider ──────────────────────────────────────────────────────────
@@ -418,17 +435,30 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	inputTokens := 0
 	outputTokens := 0
 	cacheReadTokens := 0
+	cacheUsageKnown := false
 	if streamUsage != nil {
 		inputTokens = streamUsage.PromptTokens
 		outputTokens = streamUsage.CompletionTokens
-		if streamUsage.PromptTokensDetails != nil {
+		if streamUsage.PromptTokensDetails != nil && streamUsage.PromptTokensDetails.cacheTokensKnown {
 			cacheReadTokens = streamUsage.PromptTokensDetails.CachedTokens
+			cacheUsageKnown = true
 		}
 	}
-	writeSSE(w, "message_delta", fmt.Sprintf(
-		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d,"cache_read_input_tokens":%d}}`,
-		stopReason, inputTokens, outputTokens, cacheReadTokens,
-	))
+	if cacheUsageKnown {
+		inputTokens -= cacheReadTokens // Anthropic input_tokens excludes cache reads.
+		if inputTokens < 0 {
+			inputTokens = 0
+		}
+		writeSSE(w, "message_delta", fmt.Sprintf(
+			`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d,"cache_read_input_tokens":%d}}`,
+			stopReason, inputTokens, outputTokens, cacheReadTokens,
+		))
+	} else {
+		writeSSE(w, "message_delta", fmt.Sprintf(
+			`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d}}`,
+			stopReason, inputTokens, outputTokens,
+		))
+	}
 	writeSSE(w, "message_stop", `{"type":"message_stop"}`)
 
 	return nil
@@ -824,6 +854,15 @@ func fromOpenAIResponse(oai *openAIResponse) *Response {
 	}
 	resp.Usage.InputTokens = oai.Usage.PromptTokens
 	resp.Usage.OutputTokens = oai.Usage.CompletionTokens
+	if details := oai.Usage.PromptTokensDetails; details != nil && details.cacheTokensKnown {
+		resp.CacheReadInputTokens = details.CachedTokens
+		resp.CacheInputTokens = oai.Usage.PromptTokens
+		resp.CacheUsageKnown = true
+		resp.Usage.InputTokens -= details.CachedTokens
+		if resp.Usage.InputTokens < 0 {
+			resp.Usage.InputTokens = 0
+		}
+	}
 	return resp
 }
 

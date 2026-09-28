@@ -136,19 +136,21 @@ export function syncHarnessConfig(): Promise<PiConfigResponse> {
 
 // ── 技能面板 ──
 
-export function getSkills(): Promise<SkillsStatusResponse> {
-  return fetchJSON('/skills')
+function skillsQuery(project = ''): string { return project ? '?project=' + encodeURIComponent(project) : '' }
+
+export function getSkills(project = ''): Promise<SkillsStatusResponse> {
+  return fetchJSON('/skills' + skillsQuery(project))
 }
 
-export function updateSkillsConfig(targets: string[], enabled: string[]): Promise<SkillsStatusResponse> {
-  return fetchJSON('/skills/config', {
+export function updateSkillsConfig(targets: string[], enabled: string[], project = ''): Promise<SkillsStatusResponse> {
+  return fetchJSON('/skills/config' + skillsQuery(project), {
     method: 'PUT',
     body: JSON.stringify({ targets, enabled }),
   })
 }
 
-export function syncSkills(): Promise<SkillsStatusResponse> {
-  return fetchJSON('/skills/sync', { method: 'POST' })
+export function syncSkills(project = ''): Promise<SkillsStatusResponse> {
+  return fetchJSON('/skills/sync' + skillsQuery(project), { method: 'POST' })
 }
 
 // ── 记忆层 ──

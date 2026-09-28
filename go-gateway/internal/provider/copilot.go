@@ -314,17 +314,30 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 	inputTokens := 0
 	outputTokens := 0
 	cacheReadTokens := 0
+	cacheUsageKnown := false
 	if streamUsage != nil {
 		inputTokens = streamUsage.PromptTokens
 		outputTokens = streamUsage.CompletionTokens
-		if streamUsage.PromptTokensDetails != nil {
+		if streamUsage.PromptTokensDetails != nil && streamUsage.PromptTokensDetails.cacheTokensKnown {
 			cacheReadTokens = streamUsage.PromptTokensDetails.CachedTokens
+			cacheUsageKnown = true
 		}
 	}
-	writeSSE(w, "message_delta", fmt.Sprintf(
-		`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d,"prompt_tokens_details":{"cached_tokens":%d}}}`,
-		stopReason, inputTokens, outputTokens, cacheReadTokens,
-	))
+	if cacheUsageKnown {
+		inputTokens -= cacheReadTokens
+		if inputTokens < 0 {
+			inputTokens = 0
+		}
+		writeSSE(w, "message_delta", fmt.Sprintf(
+			`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d,"cache_read_input_tokens":%d}}`,
+			stopReason, inputTokens, outputTokens, cacheReadTokens,
+		))
+	} else {
+		writeSSE(w, "message_delta", fmt.Sprintf(
+			`{"type":"message_delta","delta":{"stop_reason":%q,"stop_sequence":null},"usage":{"input_tokens":%d,"output_tokens":%d}}`,
+			stopReason, inputTokens, outputTokens,
+		))
+	}
 	writeSSE(w, "message_stop", `{"type":"message_stop"}`)
 
 	return nil

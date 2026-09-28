@@ -44,6 +44,16 @@ go build -o gateway . && ./gateway
 
 启动后直接访问 <http://localhost:4001/> 即可打开内置 Dashboard。生产版本已将 Dashboard 静态资源嵌入网关二进制，不需要额外启动 Node/Vite 进程；`web/` 下的 `npm run dev` 仅用于前端开发。
 
+### 更新本机 macOS 网关
+
+维护本机 `local.go-gateway` LaunchAgent 时，在仓库根目录运行：
+
+```bash
+bash scripts/deploy-local-gateway.sh
+```
+
+脚本要求当前分支包含本地已获取的 `origin/main`；更新源码后运行 `git fetch origin main` 再部署。它会重建嵌入式 Dashboard 和 Go 二进制，在隔离端口及临时数据库中检查缓存统计 API、记忆/助理接口和控制台资源；检查通过后才切换 LaunchAgent，并确认 4001 端口由候选二进制提供服务。失败时会恢复之前的 LaunchAgent 配置并重新启动旧版本。每个版本目录记录源码提交、变更摘要和二进制校验和。新增关键功能或接口时，应同步扩展候选检查项。
+
 ## 配置 Pi
 
 安装并启动本地网关后，执行：

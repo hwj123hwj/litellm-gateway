@@ -65,6 +65,7 @@ export default function Dashboard() {
   const { summary, providers, models } = dashboard
   const hasRequests = summary.today_requests > 0
   const status = dashboardStatus(summary.today_requests, summary.success_rate)
+  const cacheSamples = summary.cache_usage_requests ?? 0
   const sortedModels = models.slice().sort((a, b) => b.requests - a.requests)
   const statusText = status === 'idle'
     ? '暂无业务请求'
@@ -112,6 +113,15 @@ export default function Dashboard() {
               {summary.avg_latency_ms < 2000 ? '正常' : '偏高'}
             </div>
           )}
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label"><ChartLineUp size={16} weight="duotone" aria-hidden="true" />缓存命中率</div>
+          <div className="kpi-value">{summary.cache_hit_rate != null ? summary.cache_hit_rate.toFixed(1) + '%' : 'N/A'}</div>
+          <div className="kpi-trend neutral">
+            {cacheSamples > 0
+              ? `${formatNumber(cacheSamples)} 个请求已报告缓存 usage`
+              : '暂无可用缓存样本'}
+          </div>
         </div>
       </div>
 

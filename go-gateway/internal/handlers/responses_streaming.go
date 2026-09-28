@@ -220,7 +220,11 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 	toolCallID := ""
 	toolCallName := ""
 	inputTokens := 0
+	inputTokensKnown := false
 	outputTokens := 0
+	cacheReadInputTokens := 0
+	cacheCreationInputTokens := 0
+	cacheUsageKnown := false
 
 	// 收集完整文本内容（用于 output_item.done）
 	var fullText strings.Builder
@@ -257,12 +261,25 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 			var evt struct {
 				Message struct {
 					Usage struct {
-						InputTokens int `json:"input_tokens"`
+						InputTokens              *int `json:"input_tokens"`
+						CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+						CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
 					} `json:"usage"`
 				} `json:"message"`
 			}
 			if err := json.Unmarshal([]byte(payload), &evt); err == nil {
-				inputTokens = evt.Message.Usage.InputTokens
+				if evt.Message.Usage.InputTokens != nil {
+					inputTokens = *evt.Message.Usage.InputTokens
+					inputTokensKnown = true
+				}
+				if evt.Message.Usage.CacheReadInputTokens != nil {
+					cacheReadInputTokens = *evt.Message.Usage.CacheReadInputTokens
+					cacheUsageKnown = true
+				}
+				if evt.Message.Usage.CacheCreationInputTokens != nil {
+					cacheCreationInputTokens = *evt.Message.Usage.CacheCreationInputTokens
+					cacheUsageKnown = true
+				}
 			}
 
 		case "content_block_start":
@@ -469,13 +486,30 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 					StopReason string `json:"stop_reason"`
 				} `json:"delta"`
 				Usage struct {
-					OutputTokens int `json:"output_tokens"`
+					InputTokens              *int `json:"input_tokens"`
+					OutputTokens             *int `json:"output_tokens"`
+					CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+					CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
 				} `json:"usage"`
 			}
 			if err := json.Unmarshal([]byte(payload), &evt); err != nil {
 				return nil
 			}
-			outputTokens = evt.Usage.OutputTokens
+			if evt.Usage.InputTokens != nil {
+				inputTokens = *evt.Usage.InputTokens
+				inputTokensKnown = true
+			}
+			if evt.Usage.OutputTokens != nil {
+				outputTokens = *evt.Usage.OutputTokens
+			}
+			if evt.Usage.CacheReadInputTokens != nil {
+				cacheReadInputTokens = *evt.Usage.CacheReadInputTokens
+				cacheUsageKnown = true
+			}
+			if evt.Usage.CacheCreationInputTokens != nil {
+				cacheCreationInputTokens = *evt.Usage.CacheCreationInputTokens
+				cacheUsageKnown = true
+			}
 
 			status := "completed"
 			if evt.Delta.StopReason == "max_tokens" {
@@ -483,6 +517,18 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 			}
 
 			// response.completed — 只需 id，其他可选
+			promptTokens := inputTokens
+			if inputTokensKnown {
+				promptTokens += cacheReadInputTokens + cacheCreationInputTokens
+			}
+			usage := map[string]any{
+				"input_tokens":  promptTokens,
+				"output_tokens": outputTokens,
+				"total_tokens":  promptTokens + outputTokens,
+			}
+			if cacheUsageKnown {
+				usage["input_tokens_details"] = map[string]int{"cached_tokens": cacheReadInputTokens}
+			}
 			writeResponsesSSE(w, "response.completed", map[string]any{
 				"type": "response.completed",
 				"response": map[string]any{
@@ -492,16 +538,13 @@ func anthropicSSEToResponsesSSEWithUsage(r io.Reader, w io.Writer, model string,
 					"status":     status,
 					"model":      model,
 					"output":     []any{},
-					"usage": map[string]any{
-						"input_tokens":  inputTokens,
-						"output_tokens": outputTokens,
-						"total_tokens":  inputTokens + outputTokens,
-					},
+					"usage":      usage,
 				},
 			})
 			// Propagate usage to gin.Context for archive metadata.
 			if c != nil {
-				setUsageMetadata(c, inputTokens, outputTokens)
+				setUsageMetadata(c, promptTokens, outputTokens)
+				setCacheUsageMetadata(c, cacheReadInputTokens, cacheCreationInputTokens, promptTokens, cacheUsageKnown && inputTokensKnown)
 			}
 
 		case "message_stop":

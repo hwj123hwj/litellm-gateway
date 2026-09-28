@@ -40,23 +40,33 @@ func (h *AdminHandler) HandleDashboard(c *gin.Context) {
 	models := make([]gin.H, 0, len(modelStats))
 	for _, ms := range modelStats {
 		models = append(models, gin.H{
-			"model":        ms.Model,
-			"provider":     ms.Provider,
-			"requests":     ms.Requests,
-			"total_tokens": ms.TotalTokens,
-			"avg_latency":  ms.AvgLatency,
-			"successes":    ms.Successes,
-			"errors":       ms.Errors,
+			"model":                       ms.Model,
+			"provider":                    ms.Provider,
+			"requests":                    ms.Requests,
+			"total_tokens":                ms.TotalTokens,
+			"avg_latency":                 ms.AvgLatency,
+			"successes":                   ms.Successes,
+			"errors":                      ms.Errors,
+			"cache_read_input_tokens":     ms.CacheReadInputTokens,
+			"cache_creation_input_tokens": ms.CacheCreationInputTokens,
+			"cache_input_tokens":          ms.CacheInputTokens,
+			"cache_usage_requests":        ms.CacheUsageRequests,
+			"cache_hit_rate":              ms.CacheHitRate,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"summary": gin.H{
-			"today_requests": summary.TodayRequests,
-			"success_rate":   summary.SuccessRate,
-			"active_models":  summary.ActiveModels,
-			"avg_latency_ms": summary.AvgLatency,
-			"uptime":         summary.Uptime,
+			"today_requests":              summary.TodayRequests,
+			"success_rate":                summary.SuccessRate,
+			"active_models":               summary.ActiveModels,
+			"avg_latency_ms":              summary.AvgLatency,
+			"uptime":                      summary.Uptime,
+			"cache_read_input_tokens":     summary.CacheReadInputTokens,
+			"cache_creation_input_tokens": summary.CacheCreationInputTokens,
+			"cache_input_tokens":          summary.CacheInputTokens,
+			"cache_usage_requests":        summary.CacheUsageRequests,
+			"cache_hit_rate":              summary.CacheHitRate,
 		},
 		"providers": providers,
 		"models":    models,
@@ -106,6 +116,11 @@ func (h *AdminHandler) HandleModels(c *gin.Context) {
 			"model": stat.Model, "provider": stat.Provider, "status": "online",
 			"requests": stat.Requests, "total_tokens": stat.TotalTokens,
 			"avg_latency": stat.AvgLatency, "successes": stat.Successes, "errors": stat.Errors,
+			"cache_read_input_tokens":     stat.CacheReadInputTokens,
+			"cache_creation_input_tokens": stat.CacheCreationInputTokens,
+			"cache_input_tokens":          stat.CacheInputTokens,
+			"cache_usage_requests":        stat.CacheUsageRequests,
+			"cache_hit_rate":              stat.CacheHitRate,
 		})
 	}
 
@@ -129,18 +144,28 @@ func (h *AdminHandler) HandleLogs(c *gin.Context) {
 	result := make([]gin.H, 0, len(logs))
 	for _, r := range logs {
 		entry := gin.H{
-			"timestamp":         r.Timestamp,
-			"request_id":        r.RequestID,
-			"method":            r.Method,
-			"path":              r.Path,
-			"model":             r.Model,
-			"provider":          r.Provider,
-			"provider_attempts": r.ProviderAttempts,
-			"status_code":       r.StatusCode,
-			"latency_ms":        r.Latency,
-			"input_tokens":      r.InputTokens,
-			"output_tokens":     r.OutputTokens,
-			"is_stream":         r.IsStream,
+			"timestamp":                   r.Timestamp,
+			"request_id":                  r.RequestID,
+			"method":                      r.Method,
+			"path":                        r.Path,
+			"model":                       r.Model,
+			"provider":                    r.Provider,
+			"provider_attempts":           r.ProviderAttempts,
+			"status_code":                 r.StatusCode,
+			"latency_ms":                  r.Latency,
+			"input_tokens":                r.InputTokens,
+			"output_tokens":               r.OutputTokens,
+			"cache_read_input_tokens":     r.CacheReadInputTokens,
+			"cache_creation_input_tokens": r.CacheCreationInputTokens,
+			"cache_input_tokens":          r.CacheInputTokens,
+			"cache_usage_known":           r.CacheUsageKnown,
+			"is_stream":                   r.IsStream,
+		}
+		if r.CacheUsageKnown && r.CacheInputTokens > 0 {
+			rate := float64(r.CacheReadInputTokens) / float64(r.CacheInputTokens) * 100
+			entry["cache_hit_rate"] = rate
+		} else {
+			entry["cache_hit_rate"] = nil
 		}
 		if r.Error != "" {
 			entry["error"] = r.Error
@@ -362,12 +387,17 @@ func (h *AdminHandler) HandleStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"summary": gin.H{
-			"today_requests": dashboard.TodayRequests,
-			"success_rate":   dashboard.SuccessRate,
-			"active_models":  dashboard.ActiveModels,
-			"avg_latency_ms": dashboard.AvgLatency,
-			"uptime":         dashboard.Uptime,
-			"total_tokens":   totalTokens,
+			"today_requests":              dashboard.TodayRequests,
+			"success_rate":                dashboard.SuccessRate,
+			"active_models":               dashboard.ActiveModels,
+			"avg_latency_ms":              dashboard.AvgLatency,
+			"uptime":                      dashboard.Uptime,
+			"total_tokens":                totalTokens,
+			"cache_read_input_tokens":     dashboard.CacheReadInputTokens,
+			"cache_creation_input_tokens": dashboard.CacheCreationInputTokens,
+			"cache_input_tokens":          dashboard.CacheInputTokens,
+			"cache_usage_requests":        dashboard.CacheUsageRequests,
+			"cache_hit_rate":              dashboard.CacheHitRate,
 		},
 		"models":    modelStats,
 		"providers": providerStats,
@@ -451,17 +481,22 @@ func modelPayload(info provider.ModelInfo, stat metrics.ModelStats, route provid
 		}
 	}
 	entry := gin.H{
-		"model":            info.ID,
-		"provider":         info.Provider,
-		"status":           status,
-		"requests":         stat.Requests,
-		"total_tokens":     stat.TotalTokens,
-		"avg_latency":      stat.AvgLatency,
-		"successes":        stat.Successes,
-		"errors":           stat.Errors,
-		"capabilities":     info.Capabilities,
-		"input_modalities": info.InputModalities,
-		"providers":        providerNames,
+		"model":                       info.ID,
+		"provider":                    info.Provider,
+		"status":                      status,
+		"requests":                    stat.Requests,
+		"total_tokens":                stat.TotalTokens,
+		"avg_latency":                 stat.AvgLatency,
+		"successes":                   stat.Successes,
+		"errors":                      stat.Errors,
+		"cache_read_input_tokens":     stat.CacheReadInputTokens,
+		"cache_creation_input_tokens": stat.CacheCreationInputTokens,
+		"cache_input_tokens":          stat.CacheInputTokens,
+		"cache_usage_requests":        stat.CacheUsageRequests,
+		"cache_hit_rate":              stat.CacheHitRate,
+		"capabilities":                info.Capabilities,
+		"input_modalities":            info.InputModalities,
+		"providers":                   providerNames,
 	}
 	if info.Protocol != "" {
 		entry["protocol"] = info.Protocol

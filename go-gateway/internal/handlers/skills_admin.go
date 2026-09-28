@@ -43,13 +43,17 @@ func (h *SkillsHandler) HandleStatus(c *gin.Context) {
 		})
 		return
 	}
-	manifest, _, err := skills.LoadManifest(h.repo)
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	manifest, _, err := scope.Load()
 	if err != nil {
 		h.logger.Printf("load skills manifest: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	h.writeStatus(c, manifest)
+	h.writeStatus(c, scope, manifest)
 }
 
 // HandleDetail GET /admin/skills/:id — 目录条目 + SKILL.md 原文（前端渲染）。
@@ -108,23 +112,27 @@ func (h *SkillsHandler) HandleUpdateConfig(c *gin.Context) {
 		return
 	}
 	manifest := skills.Manifest{Version: 1, Targets: body.Targets, Enabled: body.Enabled}
-	if err := backupFile(skills.ManifestPath(h.repo)); err != nil {
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	if err := backupFile(scope.Path()); err != nil {
 		h.logger.Printf("backup skills manifest failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "备份清单失败，未保存修改"})
 		return
 	}
-	if err := skills.SaveManifest(h.repo, manifest); err != nil {
+	if err := scope.Save(manifest); err != nil {
 		h.logger.Printf("save skills manifest: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	manifest, _, err := skills.LoadManifest(h.repo)
+	manifest, _, err := scope.Load()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	h.logger.Printf("skills manifest updated: %d enabled, %d targets", len(manifest.Enabled), len(manifest.Targets))
-	h.writeStatus(c, manifest)
+	h.writeStatus(c, scope, manifest)
 }
 
 // HandleSync POST /admin/skills/sync — 按当前清单落盘（建立/清理符号链接）。
@@ -134,7 +142,11 @@ func (h *SkillsHandler) HandleSync(c *gin.Context) {
 	if !h.configured(c) {
 		return
 	}
-	manifest, _, err := skills.LoadManifest(h.repo)
+	scope, ok := h.scope(c)
+	if !ok {
+		return
+	}
+	manifest, _, err := scope.Load()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -146,7 +158,7 @@ func (h *SkillsHandler) HandleSync(c *gin.Context) {
 		return
 	}
 	h.logger.Printf("skills synced to %d target(s)", len(report.Targets))
-	st, err := skills.BuildStatus(h.repo, manifest)
+	st, err := scope.Status(manifest)
 	if err != nil {
 		h.logger.Printf("build skills status: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -154,6 +166,8 @@ func (h *SkillsHandler) HandleSync(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"configured":      true,
+		"project":         scope.Project,
+		"local_skills":    scope.LocalSkills(manifest),
 		"repo":            st.Repo,
 		"registry_path":   st.RegistryPath,
 		"manifest_path":   st.ManifestPath,
@@ -179,8 +193,8 @@ func (h *SkillsHandler) configured(c *gin.Context) bool {
 	return false
 }
 
-func (h *SkillsHandler) writeStatus(c *gin.Context, manifest skills.Manifest) {
-	st, err := skills.BuildStatus(h.repo, manifest)
+func (h *SkillsHandler) writeStatus(c *gin.Context, scope skills.Scope, manifest skills.Manifest) {
+	st, err := scope.Status(manifest)
 	if err != nil {
 		h.logger.Printf("build skills status: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -188,6 +202,8 @@ func (h *SkillsHandler) writeStatus(c *gin.Context, manifest skills.Manifest) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"configured":      true,
+		"project":         scope.Project,
+		"local_skills":    scope.LocalSkills(manifest),
 		"repo":            st.Repo,
 		"registry_path":   st.RegistryPath,
 		"manifest_path":   st.ManifestPath,
@@ -198,4 +214,13 @@ func (h *SkillsHandler) writeStatus(c *gin.Context, manifest skills.Manifest) {
 		"stale_links":     st.StaleLinks,
 		"skills":          st.Skills,
 	})
+}
+
+func (h *SkillsHandler) scope(c *gin.Context) (skills.Scope, bool) {
+	scope, err := skills.ResolveScope(h.repo, c.Query("project"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return scope, false
+	}
+	return scope, true
 }

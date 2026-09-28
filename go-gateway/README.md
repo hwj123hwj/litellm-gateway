@@ -135,6 +135,15 @@ Dashboard 的 Skills 页在设置 `SKILLS_REPO_PATH` 指向 custom-skills 仓库
 
 同步结果中的 `linked/current/removed/skipped/errors` 始终为数组；有同名文件冲突时跳过并保持 `in_sync: false`，其他错误显示在面板。同步只检查当前清单中的目标目录：如需移除旧目标内的技能，先停用并同步旧目标，再修改目标列表。
 
+页面支持 **全局技能 / 项目技能** 两种范围：
+- 全局范围继续使用技能仓库的 `skills.enabled.json` 与配置的目标目录。
+- 项目范围输入现有项目的绝对路径，每个项目独立保存 `.agents/skills.enabled.json`，仅同步到该项目的 `.agents/skills`；不会改变全局启用清单。清单内保存相对目标，便于项目移动。
+- 「本地已有」只读展示未由技能库管理的技能；项目范围检查 `.agents/skills`、`.claude/skills` 和 `.codex/skills`。同名自定义文件和外部链接不会被覆盖；全局与项目技能的实际加载及优先级由客户端决定。
+- `/admin/skills`、`/admin/skills/config`、`/admin/skills/sync` 可携带 `?project=<URL 编码的项目绝对路径>`，省略时保持全局行为。项目目录需存在；项目 `.agents`、安装目录和清单不接受符号链接，以免跨范围写入。
+- 选择技能会先形成草稿。「仅保存」保存清单，「保存并同步」才落盘。同步结果区分新增、清理、同名跳过及错误，空结果返回数组。
+
+`/admin/stats`、`/admin/dashboard`、`/admin/models` 和 `/admin/logs` 会返回聚合指标或请求日志。缓存统计包含 `cache_read_input_tokens`、`cache_creation_input_tokens`、`cache_input_tokens`、`cache_usage_requests` 和 `cache_hit_rate`；命中率按缓存读取 token ÷ 已报告的总输入 token 加权计算。上游没有返回缓存 usage 的请求不计入命中率样本，数据不足时 `cache_hit_rate` 为 `null`。
+
 ### 对话归档与增量导出
 
 默认情况下网关只记录轻量指标（状态码、token、延迟），不存任何请求/响应正文。开启归档后会额外保存脱敏后的完整对话，用于知识库增量同步。

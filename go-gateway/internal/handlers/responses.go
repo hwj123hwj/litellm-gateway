@@ -255,9 +255,14 @@ type responsesResponse struct {
 }
 
 type responsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int                          `json:"input_tokens"`
+	OutputTokens       int                          `json:"output_tokens"`
+	TotalTokens        int                          `json:"total_tokens"`
+	InputTokensDetails *responsesInputTokensDetails `json:"input_tokens_details,omitempty"`
+}
+
+type responsesInputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // outputItem 是 Responses API 响应中的输出项
@@ -360,7 +365,8 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 		}})
 		return
 	}
-	setUsageMetadata(c, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	setUsageMetadata(c, totalPromptTokens(resp), resp.Usage.OutputTokens)
+	setCacheUsageMetadata(c, resp.CacheReadInputTokens, resp.CacheCreationInputTokens, resp.CacheInputTokens, resp.CacheUsageKnown)
 
 	responseObj := providerToResponsesResponse(resp, req.Model)
 	if h.archiver != nil && h.archiver.Enabled() {
@@ -754,6 +760,15 @@ func providerToResponsesResponse(resp *provider.Response, model string) *respons
 		status = "incomplete"
 	}
 
+	promptTokens := totalPromptTokens(resp)
+	usage := responsesUsage{
+		InputTokens:  promptTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+		TotalTokens:  promptTokens + resp.Usage.OutputTokens,
+	}
+	if resp.CacheUsageKnown {
+		usage.InputTokensDetails = &responsesInputTokensDetails{CachedTokens: resp.CacheReadInputTokens}
+	}
 	return &responsesResponse{
 		ID:        resp.ID,
 		Object:    "response",
@@ -761,11 +776,7 @@ func providerToResponsesResponse(resp *provider.Response, model string) *respons
 		Status:    status,
 		Model:     model,
 		Output:    output,
-		Usage: responsesUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			TotalTokens:  resp.Usage.InputTokens + resp.Usage.OutputTokens,
-		},
+		Usage:     usage,
 	}
 }
 
@@ -883,6 +894,12 @@ func (h *responsesHandler) tryChatGPTNonStreamPassthrough(c *gin.Context, req *r
 				recordProviderAttempt(c, p.Name(), started, nil)
 				h.router.RecordProviderSuccessFor(req.Model, p)
 				setUsageMetadata(c, inputTokens, outputTokens)
+				var decoded any
+				if json.Unmarshal(responseBody, &decoded) == nil {
+					if usage, found := findUsageDetails(decoded); found && usage.CacheUsageKnown {
+						setCacheUsageMetadata(c, usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.CacheInputTokens, true)
+					}
+				}
 				if h.archiver != nil && h.archiver.Enabled() {
 					submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody,
 						responseBody, archive.StatusCompleted, http.StatusOK, "")
