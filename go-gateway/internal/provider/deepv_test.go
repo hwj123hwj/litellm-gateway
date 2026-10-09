@@ -697,3 +697,19 @@ func TestDeepVStreamPreservesImageAndText(t *testing.T) {
 		}
 	}
 }
+
+func TestDeepVGeneratedCallIDsAcrossTurns(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+	body := []byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"inspect_file","args":{}}}]}}]}`)
+	first, err := p.parseResponse(body, "deepv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := p.parseResponse(body, "deepv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Content[0].ID == second.Content[0].ID {
+		t.Fatal("generated IDs reused across turns")
+	}
+}

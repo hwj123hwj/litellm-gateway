@@ -584,6 +584,7 @@ func (a *deepVToolCalls) blocks() ([]ContentBlock, error) {
 		}
 	}
 	seq := 0
+	idPrefix := fmt.Sprintf("call_deepv_%d", time.Now().UnixNano())
 	for _, call := range a.calls {
 		if call.name == "" {
 			return nil, fmt.Errorf("DeepV tool call has no name")
@@ -603,9 +604,10 @@ func (a *deepVToolCalls) blocks() ([]ContentBlock, error) {
 		if id == "" {
 			for {
 				seq++
-				id = fmt.Sprintf("%s-%d", call.name, seq)
+				id = fmt.Sprintf("%s_%d", idPrefix, seq)
 				if !used[id] {
 					used[id] = true
+					call.id = id
 					break
 				}
 			}
