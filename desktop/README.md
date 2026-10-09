@@ -1,4 +1,4 @@
-# Gateway 原生桌面客户端
+# EasyGateway 原生桌面客户端
 
 桌面界面使用 MyGo 的 `ui` 控件，以 Go 实现布局、表单、导航、虚拟列表和流式助理。窗口直接显示原生 UI，不启动 WebView，也不依赖 HTML、JavaScript、React 或 Node.js。客户端通过 Go 网络层直接调用网关 Admin API；仓库不再保留浏览器 Dashboard。客户端不安装、启动或替换网关服务。
 
@@ -30,7 +30,7 @@ go run github.com/egoist/mygo/cmd/mygo build
 
 ## macOS 安装与发布
 
-本机只维护 `/Applications/Gateway.app` 一份，通过替换这个固定路径更新。不要打开不同构建目录中的 `.app`，避免 Spotlight 和应用注册重复。构建目录使用 `.noindex` 后缀；单实例锁避免重复运行。
+本机只维护 `/Applications/EasyGateway.app` 一份，通过替换这个固定路径更新。不要打开不同构建目录中的 `.app`，避免 Spotlight 和应用注册重复。构建目录使用 `.noindex` 后缀；单实例锁避免重复运行。
 
 默认构建为 ad-hoc 签名。公开分发需在 `mygo.json` 配置 `macos.signingIdentity` 与 `macos.notarize.keychainProfile`，完成 Developer ID 签名、公证和票据附加；不在仓库保存证书或凭据。桌面客户端尚未配置在线自动更新。
 

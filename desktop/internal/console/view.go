@@ -33,20 +33,33 @@ func (a *App) View(c *ui.Context) {
 	theme.Focus = theme.Accent.Alpha(.4)
 	theme.Selection = theme.Accent.Alpha(.25)
 	if !theme.Dark {
-		theme.Background = ui.Hex("#faf9f7")
-		theme.Surface = ui.Hex("#f1efeb")
-		theme.Border = ui.Hex("#dedad3")
+		theme.Background = ui.Hex("#f7f8fa")
+		theme.Surface = ui.Hex("#eef0f3")
+		theme.Border = ui.Hex("#dce0e5")
+		theme.TextMuted = ui.Hex("#5b6470")
 	}
 	theme.Radius = 8
 	c.SetTheme(&theme)
 	ui.Column(c).Fill().Background(theme.Background).Children(func() {
 		bar := c.TitleBar()
 		ui.Row(c).Height(max(bar.Height, 48)).Padding(0, 16, 0, bar.Left+16).Gap(12).DragWindow().BorderWidth(0, 0, 1, 0).BorderColor(theme.Border).Children(func() {
-			ui.Text(c, "G").Bold().FontSize(22).TextColor(theme.Accent)
-			ui.Text(c, "Gateway").Bold()
+			ui.Box(c).Size(28, 28).Center().Radius(8).Background(theme.Accent).AlignSelf(ui.Center).Children(func() {
+				ui.Text(c, "E").Bold().FontSize(15).TextColor(theme.AccentText)
+			})
+			ui.Text(c, "EasyGateway").Bold().FontSize(16)
 			ui.Spacer(c)
 			profile := a.active()
 			if profile.ID != "" {
+				dot := theme.TextMuted
+				switch {
+				case a.problem != "":
+					dot = theme.Danger
+				case a.busy != "":
+					dot = theme.Accent
+				case a.loaded:
+					dot = okGreen
+				}
+				ui.Box(c).Size(9, 9).Radius(999).Background(dot).AlignSelf(ui.Center)
 				ui.Text(c, profile.Name+" · "+profile.URL).SingleLine().TextColor(theme.TextMuted)
 			}
 		})
@@ -88,6 +101,9 @@ func (a *App) View(c *ui.Context) {
 					if a.page != "connections" {
 						ui.Button(c, "刷新").Disabled(a.busy != "" || a.skillDirty).OnClick(a.reload)
 					}
+					if a.busy != "" {
+						ui.Button(c, "取消").OnClick(a.stop)
+					}
 				})
 				ui.Box(c).Height(3).Children(func() {
 					if a.busy != "" {
@@ -101,13 +117,10 @@ func (a *App) View(c *ui.Context) {
 					})
 				}
 				if a.notice != "" {
-					ui.Row(c).Gap(12).Children(func() {
+					ui.Row(c).Gap(12).Padding(12).Radius(8).Background(theme.Accent.Alpha(.08)).Children(func() {
 						ui.Text(c, a.notice).TextColor(theme.Accent).Grow(1).Selectable()
 						ui.Button(c, "收起").OnClick(func() { a.notice = "" })
 					})
-				}
-				if a.busy != "" {
-					ui.Row(c).Gap(8).Children(func() { muted(c, a.busy+"…"); ui.Button(c, "取消").OnClick(a.stop) })
 				}
 				if a.page != "connections" && !a.loaded {
 					ui.Column(c).Grow(1).Center().Children(func() {
@@ -150,11 +163,26 @@ func (a *App) View(c *ui.Context) {
 	}
 }
 func muted(c *ui.Context, text string) { ui.Text(c, text).TextColor(c.Theme().TextMuted) }
+func chip(c *ui.Context, text string, color ui.Color) {
+	ui.Box(c).Padding(2, 10).Radius(999).Background(color.Alpha(.13)).Shrink(0).Children(func() {
+		ui.Text(c, text).TextColor(color).FontSize(12).SingleLine()
+	})
+}
 func card(c *ui.Context, body func()) {
-	ui.Column(c).Padding(18).Gap(12).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(10).Children(body)
+	ui.Column(c).Padding(18).Gap(12).Background(c.Theme().Surface).Border(1, c.Theme().Border).Radius(12).Children(body)
+}
+func row(c *ui.Context, body func()) {
+	ui.Column(c).Padding(14, 4, 14, 0).Gap(10).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border.Alpha(.7)).Children(body)
+}
+func meta(c *ui.Context, parts ...string) {
+	ui.Row(c).Gap(16).Children(func() {
+		for _, part := range parts {
+			ui.Text(c, part).TextColor(c.Theme().TextMuted).SingleLine()
+		}
+	})
 }
 func empty(c *ui.Context, text string) {
-	ui.Column(c).Grow(1).Center().Children(func() { muted(c, text) })
+	ui.Column(c).Grow(1).Center().Children(func() { ui.Text(c, text).FontSize(14).TextColor(c.Theme().TextMuted) })
 }
 func (a *App) connectionsView(c *ui.Context) {
 	ui.Row(c).Gap(12).Children(func() {
@@ -171,15 +199,15 @@ func (a *App) connectionsView(c *ui.Context) {
 	}
 	ui.List(c, nil, len(a.profiles.Profiles), func(i int) {
 		p := a.profiles.Profiles[i]
-		ui.Column(c.Key(p.ID)).Padding(0, 0, 12).Children(func() {
-			card(c, func() {
+		ui.Column(c.Key(p.ID)).Children(func() {
+			row(c, func() {
 				ui.Row(c).Gap(12).Children(func() {
 					ui.Column(c).Grow(1).Gap(6).Children(func() {
 						ui.Text(c, p.Name).FontSize(18).Bold()
 						ui.Text(c, p.URL).Selectable().TextColor(c.Theme().TextMuted)
 					})
 					if p.ID == a.profiles.ActiveID {
-						ui.Text(c, "当前连接").TextColor(c.Theme().Accent)
+						chip(c, "当前连接", c.Theme().Accent)
 					} else {
 						ui.PrimaryButton(c, "使用").Label("使用 " + p.Name).Disabled(a.busy != "").OnClick(func() { a.selectConnection(p.ID) })
 					}
@@ -339,29 +367,54 @@ func (a *App) saveEditor() {
 		return func() { a.editorOpen = false; a.reload(); a.notice = "配置已保存" }, err
 	})
 }
-func status(c *ui.Context, value string) {
-	color := c.Theme().TextMuted
+
+var okGreen = ui.Hex("#21835a")
+
+func formatLatency(ms float64) string {
+	if ms >= 1000 {
+		return fmt.Sprintf("%.1f s", ms/1000)
+	}
+	return fmt.Sprintf("%.0f ms", ms)
+}
+
+func statusColor(c *ui.Context, value string) ui.Color {
 	if value == "online" || value == "active" || value == "closed" {
-		color = ui.Hex("#21835a")
+		return okGreen
 	}
 	if value == "offline" || value == "open" {
-		color = c.Theme().Danger
+		return c.Theme().Danger
 	}
 	if value == "degraded" || value == "half_open" || value == "candidate" {
-		color = c.Theme().Accent
+		return c.Theme().Accent
 	}
+	return c.Theme().TextMuted
+}
+func status(c *ui.Context, value string) {
 	translations := map[string]string{"online": "在线", "offline": "离线", "unknown": "未探测", "degraded": "降级", "idle": "空闲", "closed": "正常", "open": "熔断", "half_open": "试探中", "active": "已生效", "candidate": "待确认", "retired": "已停用"}
 	text := translations[value]
 	if text == "" {
 		text = value
 	}
-	ui.Text(c, text).TextColor(color).FontSize(13)
+	chip(c, text, statusColor(c, value))
 }
 func (a *App) overviewView(c *ui.Context) {
 	s := a.dashboard.Summary
-	ui.Row(c).Gap(12).Children(func() {
-		for _, metric := range []struct{ Title, Value string }{{"今日请求", shortNumber(int64(s.TodayRequests))}, {"成功率", fmt.Sprintf("%.1f%%", s.SuccessRate)}, {"活跃模型", fmt.Sprint(s.ActiveModels)}, {"平均延迟", fmt.Sprintf("%.0f ms", s.AvgLatency)}} {
-			ui.Column(c).Grow(1).Padding(16).Gap(8).Background(c.Theme().Surface).Radius(10).Border(1, c.Theme().Border).Children(func() { muted(c, metric.Title); ui.Text(c, metric.Value).FontSize(28).Bold() })
+	theme := c.Theme()
+	metrics := []struct{ Title, Value string }{
+		{"今日请求", shortNumber(int64(s.TodayRequests))},
+		{"成功率", fmt.Sprintf("%.1f%%", s.SuccessRate)},
+		{"活跃模型", fmt.Sprint(s.ActiveModels)},
+		{"平均延迟", formatLatency(s.AvgLatency)},
+	}
+	ui.Row(c).Background(theme.Surface).Radius(12).Border(1, theme.Border).AlignItems(ui.Center).Children(func() {
+		for i, metric := range metrics {
+			if i > 0 {
+				ui.Box(c).Width(1).AlignSelf(ui.Stretch).Background(theme.Border)
+			}
+			ui.Row(c.Key(metric.Title)).Grow(1).MinWidth(0).Gap(10).AlignItems(ui.Center).Padding(14, 18).Children(func() {
+				muted(c, metric.Title)
+				ui.Text(c, metric.Value).Bold().FontSize(17).SingleLine()
+			})
 		}
 	})
 	ui.Row(c).Gap(20).Children(func() {
@@ -369,7 +422,36 @@ func (a *App) overviewView(c *ui.Context) {
 		muted(c, "缓存命中  "+percent(s.CacheHitRate))
 		muted(c, "缓存读取  "+shortNumber(s.CacheRead))
 	})
-	ui.Text(c, "上游健康").FontSize(18).Bold()
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "上游健康").FontSize(18).Bold()
+		if count := len(a.dashboard.Providers); count > 0 {
+			tally := map[string]int{}
+			for _, p := range a.dashboard.Providers {
+				switch {
+				case p.Status == "online":
+					tally["online"]++
+				case p.Status == "offline":
+					tally["offline"]++
+				case p.Status == "degraded":
+					tally["degraded"]++
+				default:
+					tally["unknown"]++
+				}
+			}
+			if tally["online"] > 0 {
+				chip(c, fmt.Sprintf("%d 在线", tally["online"]), okGreen)
+			}
+			if tally["degraded"] > 0 {
+				chip(c, fmt.Sprintf("%d 降级", tally["degraded"]), theme.Accent)
+			}
+			if tally["offline"] > 0 {
+				chip(c, fmt.Sprintf("%d 离线", tally["offline"]), theme.Danger)
+			}
+			if tally["unknown"] > 0 {
+				chip(c, fmt.Sprintf("%d 未探测", tally["unknown"]), theme.TextMuted)
+			}
+		}
+	})
 	if len(a.dashboard.Providers) == 0 {
 		empty(c, "网关暂未配置 Provider")
 		return
@@ -384,7 +466,7 @@ func (a *App) overviewView(c *ui.Context) {
 		case 2:
 			ui.Text(c, fmt.Sprint(p.Requests))
 		case 3:
-			ui.Textf(c, "%.0f ms", p.AvgLatency)
+			ui.Text(c, formatLatency(p.AvgLatency))
 		}
 	}).Grow(1)
 }
@@ -402,8 +484,8 @@ func (a *App) modelsView(c *ui.Context) {
 	}
 	ui.List(c, nil, len(filtered), func(i int) {
 		m := filtered[i]
-		ui.Column(c.Key(m.Name)).Padding(0, 0, 12).Children(func() {
-			card(c, func() {
+		ui.Column(c.Key(m.Name)).Children(func() {
+			row(c, func() {
 				ui.Row(c).Gap(12).Children(func() {
 					ui.Column(c).Grow(1).Gap(6).Children(func() {
 						ui.Text(c, m.Name).FontSize(18).Bold().Selectable()
@@ -436,7 +518,7 @@ func (a *App) modelsView(c *ui.Context) {
 						a.editorOpen = true
 					})
 				})
-				muted(c, fmt.Sprintf("%s 请求    %s tokens    %.0f ms    缓存命中 %s", shortNumber(int64(m.Requests)), shortNumber(m.Tokens), m.AvgLatency, percent(m.CacheHitRate)))
+				meta(c, "请求 "+shortNumber(int64(m.Requests)), "Tokens "+shortNumber(m.Tokens), "延迟 "+formatLatency(m.AvgLatency), "缓存命中 "+percent(m.CacheHitRate))
 			})
 		})
 	}).Grow(1)
@@ -448,8 +530,8 @@ func (a *App) providersView(c *ui.Context) {
 	}
 	ui.List(c, nil, len(a.providers), func(i int) {
 		p := a.providers[i]
-		ui.Column(c.Key(p.Name)).Padding(0, 0, 12).Children(func() {
-			card(c, func() {
+		ui.Column(c.Key(p.Name)).Children(func() {
+			row(c, func() {
 				ui.Row(c).Gap(12).Children(func() {
 					ui.Text(c, p.Name).FontSize(18).Bold().Grow(1)
 					status(c, p.Status)
@@ -463,7 +545,7 @@ func (a *App) providersView(c *ui.Context) {
 					})
 					ui.Button(c, "重置熔断").Label("重置熔断 " + p.Name).Disabled(a.busy != "").OnClick(func() { a.mutate("正在重置熔断器", "POST", "/providers/"+url.PathEscape(p.Name)+"/reset", nil) })
 				})
-				muted(c, fmt.Sprintf("%d 请求 · %d 错误 · %.0f ms", p.Requests, p.Errors, p.AvgLatency))
+				meta(c, fmt.Sprintf("请求 %d", p.Requests), fmt.Sprintf("错误 %d", p.Errors), "延迟 "+formatLatency(p.AvgLatency))
 				if p.HasProbe {
 					ui.Text(c, "最近探测："+p.ProbeDetail).Selectable()
 					muted(c, p.LastProbe)
@@ -508,19 +590,27 @@ func (a *App) logsView(c *ui.Context) {
 		case 3:
 			ui.Text(c, fmt.Sprint(l.Code))
 		case 4:
-			ui.Textf(c, "%.0f ms", l.Latency)
+			ui.Text(c, formatLatency(l.Latency))
 		}
 	}).Grow(1).MinHeight(130)
 	if a.logSelected >= 0 && a.logSelected < len(filtered) {
 		l := filtered[a.logSelected]
 		ui.Scroll(c).MaxHeight(220).Gap(6).Padding(12).Background(c.Theme().Surface).Radius(8).Selectable().Children(func() {
 			ui.Text(c, l.Method+" "+l.Path+" · "+l.RequestID).Bold()
-			muted(c, fmt.Sprintf("输入 %s / 输出 %s tokens · 缓存读取 %s · 流式 %t", shortNumber(l.Input), shortNumber(l.Output), shortNumber(l.CacheRead), l.Stream))
+			meta(c, "输入 "+shortNumber(l.Input), "输出 "+shortNumber(l.Output)+" tokens", "缓存读取 "+shortNumber(l.CacheRead), fmt.Sprintf("流式 %t", l.Stream))
 			if l.Error != "" {
 				ui.Text(c, l.Error).TextColor(c.Theme().Danger)
 			}
 			for _, p := range l.Attempts {
-				ui.Textf(c, "%s · %s · HTTP %d · %.0f ms · %s", p.Provider, p.Status, p.Code, p.Latency, p.Error)
+				ui.Row(c).Gap(10).Children(func() {
+					ui.Text(c, p.Provider).SingleLine()
+					muted(c, p.Status)
+					muted(c, fmt.Sprintf("HTTP %d", p.Code))
+					muted(c, formatLatency(p.Latency))
+					if p.Error != "" {
+						ui.Text(c, p.Error).TextColor(c.Theme().Danger).SingleLine()
+					}
+				})
 			}
 		})
 	}
