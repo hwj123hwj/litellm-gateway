@@ -438,6 +438,7 @@ make docker-run    # Docker Compose 启动
 1. 在 `internal/provider/` 新建实现（参考 `anthropic.go` 或 `openai.go`）
 2. 实现 `Provider` 接口；需要流式时同时实现 `StreamProvider`
 3. 在 `providers.yaml` 声明 Provider、模型能力、输入模态和 chain
+   DeepV 使用专用协议，模型及独立路由在 `main.go` 的 `setupDeepVProviders` 中注册；ChatGPT 订阅模型还需同步 `internal/provider/chatgpt.go` 的备用目录。新增后需重新构建并重启对应运行实例才能生效。
 4. 若需要新的密钥环境变量，同步更新 `.env.example` 和配置加载逻辑
 5. 为路由、能力筛选和 fallback 增加测试，并运行 `go vet ./...`、`go test ./...`
 

@@ -62,10 +62,11 @@ func TestExtractAccountIDFromJWTRejectsInvalidToken(t *testing.T) {
 
 func TestChatGPTModelCatalog(t *testing.T) {
 	models := ChatGPTModelCatalog()
-	if len(models) != 6 {
-		t.Fatalf("catalog has %d models, want the six current GPT subscription models", len(models))
+	if len(models) != 7 {
+		t.Fatalf("catalog has %d models, want the seven current GPT subscription models", len(models))
 	}
 	want := map[string]bool{
+		"gpt-6.1-sol":   true,
 		"gpt-6-sol":     true,
 		"gpt-6-luna":    true,
 		"gpt-6-astra":   true,

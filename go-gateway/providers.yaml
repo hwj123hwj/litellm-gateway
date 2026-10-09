@@ -33,6 +33,12 @@ providers:
     models:
       # GPT-6 家族（账号当前主线）。gpt-6-terra 不存在、gpt-6-pro 与各 -wm
       # 变体在 Codex 订阅端点会被拒（HTTP 400 "not supported"），故不登记。
+      - id: gpt-6.1-sol
+        protocol: responses
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 128000
       - id: gpt-6-sol
         protocol: responses
         capabilities: [text, vision, tool_calling, streaming, reasoning]

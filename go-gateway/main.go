@@ -476,8 +476,7 @@ func setupDefaultProviders(router *provider.Router, cfg *config.Config, logger *
 }
 
 // setupDeepVProviders 设置 DeepV Server 提供商（EasyCode/DeepVCode 的聚合后端）。
-// 上游模型名与 dvcode 云端一致：deepseek-flash（DeepSeek-V4.1-Flash）与
-// glm-5.3-flash（GLM-5.3-Flash），两者都是原生多模态模型。
+// 上游模型使用绑定的模型 ID；模型与独立路由在此注册。
 func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *log.Logger) {
 	workDir := cfg.DeepVWorkDir
 	if workDir == "" {
@@ -529,6 +528,23 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 		MaxInputTokens:  160000,
 		MaxOutputTokens: 32000,
 	})
+
+	// 独立模型入口沿用 DeepV 的请求总量预算，不改变 coding 降级顺序。
+	for _, modelID := range []string{"claude-haiku-5.5", "mimo-2.6v-pro"} {
+		router.RegisterProvider(modelID, provider.NewDeepVProvider(&provider.Config{
+			Name: modelID,
+			URL:  deepvURL,
+		}, workDir, modelID))
+		router.RegisterChain(modelID, []string{modelID})
+		router.RegisterModel(provider.ModelInfo{
+			ID:              modelID,
+			Provider:        modelID,
+			Capabilities:    []string{"text", "vision", "tool_calling", "streaming", "reasoning"},
+			InputModalities: []string{"text", "image"},
+			MaxInputTokens:  160000,
+			MaxOutputTokens: 32000,
+		})
+	}
 
 	logger.Printf("DeepV Server enabled, workdir=%s", workDir)
 }
