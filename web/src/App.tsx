@@ -41,7 +41,7 @@ function AuthGate({ onSubmit }: { onSubmit: (key: string) => void }) {
   )
 }
 
-export default function App({ desktop = false }: { desktop?: boolean }) {
+export default function App() {
   const {
     apiKey,
     backendUrl,
@@ -60,7 +60,7 @@ export default function App({ desktop = false }: { desktop?: boolean }) {
 
   const status = health?.status || 'unknown'
 
-  if (!apiKey && !desktop) {
+  if (!apiKey) {
     return <AuthGate onSubmit={(key) => {
       useStore.getState().setApiKey(key)
       window.location.reload()

@@ -46,7 +46,7 @@ go build -o gateway . && ./gateway
 
 ### 桌面管理端
 
-`desktop/` 新增 MyGo 桌面客户端，复用 Web Dashboard，可保存并切换本地和远程网关连接，提供窗口、系统菜单和托盘入口。它管理已有网关，不替换正在运行的服务。构建、连接与安装说明见 [desktop/README.md](desktop/README.md)。
+`desktop/` 使用 MyGo 的 Go 原生控件实现桌面管理界面，提供模型、路由、Provider、日志、技能、记忆与助理管理，可保存并切换本机和远程网关连接。桌面端无需 React、WebView 或 Node.js 构建。它管理已有网关，不替换正在运行的服务。构建、连接与安装说明见 [desktop/README.md](desktop/README.md)。
 
 ### 更新本机 macOS 网关
 

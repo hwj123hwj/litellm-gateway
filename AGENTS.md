@@ -23,7 +23,7 @@ LLM Gateway 是个人 AI 基础设施，不只是 API 转发器。它为 HwjCode
 | docs/ | 详细设计、兼容性和部署文档 |
 | PRD.md | 产品需求和范围边界 |
 
-管理界面统一维护在 web/；desktop/ 使用 MyGo 提供桌面窗口、连接配置与鉴权传输，复用同一套管理界面和 Admin API。桌面端不自行启动或替换网关服务。不再维护手机 App，也不新增静态 mockup 作为正式客户端。
+浏览器管理界面维护在 web/；desktop/ 使用 MyGo 的 ui 原生控件，以 Go 实现桌面界面、连接配置与鉴权传输，两者调用同一 Admin API。桌面端不得恢复为 WebView 包装，不依赖 Node.js、React 或前端构建。桌面端不自行启动或替换网关服务。不再维护手机 App，也不新增静态 mockup 作为正式客户端。
 
 ## 3. 配置和事实来源
 

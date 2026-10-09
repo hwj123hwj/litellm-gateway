@@ -13,11 +13,9 @@ import type {
   AssistantFeedbackEntry,
   SkillsStatusResponse,
 } from './types'
-import { desktopAPIBase, isDesktop } from '../desktop/bridge'
 
 // 获取后端地址（支持运行时配置）
 function getBaseUrl(): string {
-  if (isDesktop()) return desktopAPIBase()
   // 优先使用 localStorage 中配置的地址
   const configured = localStorage.getItem('backend_url')
   if (configured) {
@@ -34,7 +32,7 @@ async function fetchJSON<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
-      ...(!isDesktop() ? { 'Authorization': `Bearer ${apiKey}` } : {}),
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       ...(init.headers || {}),
     },
@@ -194,7 +192,7 @@ export function chatWithAssistant(
   const base = getBaseUrl()
   fetch(`${base}/assistant/chat`, {
     method: 'POST',
-    headers: { ...(!isDesktop() ? { Authorization: `Bearer ${apiKey}` } : {}), 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
     signal: controller.signal,
   })

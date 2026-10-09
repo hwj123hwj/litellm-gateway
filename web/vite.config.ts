@@ -1,15 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import desktopConfig from '../desktop/mygo.json'
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   plugins: [react()],
   base: './',
   define: {
-    __APP_VERSION__: JSON.stringify(mode === 'desktop' ? desktopConfig.version : '1.0.0'),
+    __APP_VERSION__: JSON.stringify('1.0.0'),
   },
   build: {
-    outDir: mode === 'desktop' ? '../desktop/frontend.noindex' : 'dist/renderer',
+    outDir: 'dist/renderer',
     emptyOutDir: true,
   },
   server: {
@@ -21,4 +20,4 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}))
+})

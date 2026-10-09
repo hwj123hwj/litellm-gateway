@@ -159,14 +159,36 @@ func (s *Store) probe(ctx context.Context, p storedProfile) error {
 }
 
 // Save only persists a verified connection. Blank tokens retain an existing secret.
-func (s *Store) Save(ctx context.Context, in Input) (State, error) {
+// VerifySave checks the connection off the UI thread. The returned commit has
+// no network work and is invoked only if the UI still accepts this operation.
+func (s *Store) VerifySave(ctx context.Context, in Input) (func() (State, error), error) {
 	p, err := s.prepare(in)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.probe(ctx, p); err != nil {
+		return nil, err
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	var once sync.Once
+	var state State
+	var commitErr error
+	return func() (State, error) {
+		once.Do(func() { state, commitErr = s.saveProfile(p) })
+		return state, commitErr
+	}, nil
+}
+func (s *Store) Save(ctx context.Context, in Input) (State, error) {
+	commit, err := s.VerifySave(ctx, in)
 	if err != nil {
 		return State{}, err
 	}
-	if err = s.probe(ctx, p); err != nil {
-		return State{}, err
-	}
+	return commit()
+}
+func (s *Store) saveProfile(p storedProfile) (State, error) {
+	var err error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := diskState{ActiveID: p.ID, Profiles: append([]storedProfile(nil), s.state.Profiles...)}
