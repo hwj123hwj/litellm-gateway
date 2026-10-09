@@ -36,7 +36,7 @@ func BearerAuth(masterKey string, logger *log.Logger) gin.HandlerFunc {
 func BearerAuthWithAdminToken(masterKey string, adminToken string, logger *log.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Liveness/readiness probes and CORS preflight do not need credentials.
-		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/readyz" || c.Request.Method == "OPTIONS" || isDashboardPath(c.Request.URL.Path) {
+		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/readyz" || c.Request.Method == "OPTIONS" {
 			c.Next()
 			return
 		}
@@ -63,16 +63,6 @@ func BearerAuthWithAdminToken(masterKey string, adminToken string, logger *log.L
 
 		c.Next()
 	}
-}
-
-// isDashboardPath keeps the embedded UI public so it can show a friendly
-// Token prompt. The UI itself never receives admin data without the Bearer
-// token because every /admin endpoint still runs AdminAuth.
-func isDashboardPath(path string) bool {
-	if path == "/" || path == "/dashboard" || path == "/favicon.ico" || strings.HasPrefix(path, "/dashboard/") || strings.HasPrefix(path, "/assets/") {
-		return true
-	}
-	return false
 }
 
 func isAdminPath(path string) bool {

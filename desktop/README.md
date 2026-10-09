@@ -1,6 +1,6 @@
 # Gateway 原生桌面客户端
 
-桌面界面使用 MyGo 的 `ui` 控件，以 Go 实现布局、表单、导航、虚拟列表和流式助理。窗口直接显示原生 UI，不启动 WebView，也不依赖 HTML、JavaScript、React 或 Node.js。浏览器 Dashboard 继续独立维护在 `../web`；两者调用相同的 Admin API。客户端不安装、启动或替换网关服务。
+桌面界面使用 MyGo 的 `ui` 控件，以 Go 实现布局、表单、导航、虚拟列表和流式助理。窗口直接显示原生 UI，不启动 WebView，也不依赖 HTML、JavaScript、React 或 Node.js。客户端通过 Go 网络层直接调用网关 Admin API；仓库不再保留浏览器 Dashboard。客户端不安装、启动或替换网关服务。
 
 ## 开发与构建
 
@@ -34,4 +34,4 @@ go run github.com/egoist/mygo/cmd/mygo build
 
 默认构建为 ad-hoc 签名。公开分发需在 `mygo.json` 配置 `macos.signingIdentity` 与 `macos.notarize.keychainProfile`，完成 Developer ID 签名、公证和票据附加；不在仓库保存证书或凭据。桌面客户端尚未配置在线自动更新。
 
-复现问题时，可设置 `GATEWAY_DESKTOP_CONFIG_DIR` 到临时目录以隔离连接配置。图标使用 `swift scripts/icon.swift resources/icon.png` 生成。
+复现问题时，可设置 `GATEWAY_DESKTOP_CONFIG_DIR` 到临时目录以隔离连接配置。应用图标保存在 `resources/icon.png`，由 MyGo 打包为各平台资源。

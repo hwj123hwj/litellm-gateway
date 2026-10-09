@@ -40,7 +40,7 @@ go build -o gateway .
 make run
 ```
 
-网关内置 Dashboard，启动后直接访问 <http://localhost:4001/>。发布二进制会携带 Web 静态资源，不需要单独运行 `npm run dev`；后者只用于 Dashboard 开发调试。
+网关仅提供 HTTP API，不携带或提供浏览器页面。使用 `GET /health` 检查状态，通过 [原生 Go 桌面端](../desktop/README.md) 管理连接、模型、路由、日志和助理。
 
 ## 配置 Pi
 

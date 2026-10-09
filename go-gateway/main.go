@@ -20,7 +20,6 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/assistant"
 	"github.com/weijian/go-llm-gateway/internal/auth"
 	"github.com/weijian/go-llm-gateway/internal/config"
-	"github.com/weijian/go-llm-gateway/internal/dashboard"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
 	"github.com/weijian/go-llm-gateway/internal/memory"
 	"github.com/weijian/go-llm-gateway/internal/metrics"
@@ -143,13 +142,13 @@ func main() {
 	// 创建 Gin 引擎
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	// 按原始（未解码）路径路由：provider/模型名含「/」时，前端编码成 %2F
+	// 按原始（未解码）路径路由：provider/模型名含「/」时，客户端编码成 %2F
 	// 才能作为一个 :name 参数段匹配（默认解码后会被拆成多层导致 404）。
 	// 参数值由 admin 组中间件统一解码。
 	engine.UseRawPath = true
 	engine.UnescapePathValues = false
 
-	// CORS 配置（允许 Android WebView 跨域请求）
+	// CORS 配置（兼容外部 API 客户端的跨域请求）
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -230,7 +229,6 @@ func main() {
 		// 助理未启用时 prompt 端点回 503，反馈端点仍可用（sqliteStore 为 nil 时也 503）。
 		assistantAdminHandler = handlers.NewAssistantAdminHandler(nil, sqliteStore, logger)
 	}
-	dashboardHandler := dashboard.NewHandler()
 
 	engine.POST("/v1/messages", msgHandler.Handle)
 	engine.POST("/v1/chat/completions", chatHandler.Handle)
@@ -242,14 +240,6 @@ func main() {
 	engine.POST("/v1/memory", memoryHandler.HandleDraft)
 	engine.GET("/health", healthHandler.Handle)
 	engine.GET("/readyz", healthHandler.HandleReady)
-	// The Dashboard is embedded into release binaries. It is intentionally
-	// public so the page can render its Token login form; all /admin APIs remain
-	// protected by AdminAuth.
-	engine.GET("/", gin.WrapH(dashboardHandler))
-	engine.GET("/dashboard", gin.WrapH(dashboardHandler))
-	engine.GET("/dashboard/*path", gin.WrapH(dashboardHandler))
-	engine.GET("/assets/*filepath", gin.WrapH(dashboardHandler))
-	engine.GET("/favicon.ico", gin.WrapH(dashboard.NewFaviconHandler()))
 	// 兼容不带 /v1 前缀的客户端
 	engine.POST("/messages", msgHandler.Handle)
 	engine.POST("/chat/completions", chatHandler.Handle)

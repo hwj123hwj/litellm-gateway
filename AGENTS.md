@@ -8,7 +8,7 @@ LLM Gateway 是个人 AI 基础设施，不只是 API 转发器。它为 HwjCode
 - OpenAI Chat Completions、Responses、Anthropic Messages 兼容；
 - 模型能力路由、多 Provider fallback、健康检查和熔断；
 - Provider、模型、路由、日志和运行状态管理；
-- Web Dashboard 和跨平台部署；
+- Go 原生桌面管理端和跨平台部署；
 - 可选的对话归档与知识库导出。
 
 需求范围以 [PRD.md](PRD.md) 为准，API 和部署细节以 [go-gateway/README.md](go-gateway/README.md) 与 [docs/](docs/) 为准。
@@ -18,12 +18,12 @@ LLM Gateway 是个人 AI 基础设施，不只是 API 转发器。它为 HwjCode
 | 目录 | 作用 |
 |---|---|
 | go-gateway/ | Go 网关运行时、Provider、路由、认证、指标和 Admin API |
-| web/ | React + Vite Web Dashboard |
+| desktop/ | MyGo 原生 Go 桌面管理端 |
 | scripts/ | 安装、Codex 配置和回归测试脚本 |
 | docs/ | 详细设计、兼容性和部署文档 |
 | PRD.md | 产品需求和范围边界 |
 
-浏览器管理界面维护在 web/；desktop/ 使用 MyGo 的 ui 原生控件，以 Go 实现桌面界面、连接配置与鉴权传输，两者调用同一 Admin API。桌面端不得恢复为 WebView 包装，不依赖 Node.js、React 或前端构建。桌面端不自行启动或替换网关服务。不再维护手机 App，也不新增静态 mockup 作为正式客户端。
+项目运行代码使用 Go。desktop/ 使用 MyGo 的 ui 原生控件，以 Go 实现桌面界面、连接配置与鉴权传输，调用网关 Admin API。浏览器管理界面及其静态资源已移除，不再新增 TypeScript、JavaScript、HTML/CSS、Node.js 构建链或 WebView 包装。桌面端不自行启动或替换网关服务。不再维护手机 App，也不新增静态 mockup 作为正式客户端。
 
 ## 3. 配置和事实来源
 
@@ -76,15 +76,17 @@ go build -o gateway .
 
 生成的二进制、临时数据库和本地配置不要提交。
 
-### Web
+### 原生桌面端
 
 ~~~bash
-cd web
-npm ci
-npm run build
+cd desktop
+go test -race ./...
+go vet ./...
+go run github.com/egoist/mygo/cmd/mygo vet
+go run github.com/egoist/mygo/cmd/mygo build
 ~~~
 
-Web Dashboard 的视觉和前端交互改动必须先阅读并遵循 Taste 与 Impeccable 技能（优先读取仓库 `.agents/skills/` 下的 `SKILL.md`；未随仓库提供时，按当前会话技能目录解析已安装版本，不硬编码个人路径）。优先复用现有产品信息架构，使用统一的图标、状态、键盘焦点和响应式规则；改动完成后运行 Impeccable 提供的检测脚本（若当前技能包包含检测器）。
+界面改动须验证原生控件、键盘输入、取消与主机切换，不能只检查窗口是否打开。
 
 ### 脚本和安装器
 

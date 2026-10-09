@@ -21,9 +21,6 @@ func newTestRouter(masterKey string) *gin.Engine {
 	e.POST("/test", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	e.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	e.GET("/readyz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ready"}) })
-	e.GET("/dashboard", func(c *gin.Context) { c.Status(http.StatusOK) })
-	e.GET("/assets/index.js", func(c *gin.Context) { c.Status(http.StatusOK) })
-	e.GET("/favicon.ico", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	return e
 }
 
@@ -80,24 +77,21 @@ func TestBearerAuthReadinessPublic(t *testing.T) {
 	}
 }
 
-func TestBearerAuthDashboardPublic(t *testing.T) {
+func TestRemovedBrowserPathsHaveNoAuthExemption(t *testing.T) {
 	e := newTestRouter("test-key")
-	e.GET("/", func(c *gin.Context) { c.Status(http.StatusOK) })
-
-	for _, test := range []struct {
-		path   string
-		status int
-	}{
-		{path: "/", status: http.StatusOK},
-		{path: "/assets/index.js", status: http.StatusOK},
-		{path: "/dashboard", status: http.StatusOK},
-		{path: "/favicon.ico", status: http.StatusNoContent},
-	} {
-		req := httptest.NewRequest(http.MethodGet, test.path, nil)
-		w := httptest.NewRecorder()
-		e.ServeHTTP(w, req)
-		if w.Code != test.status {
-			t.Errorf("expected dashboard path %s to be public with status %d, got %d", test.path, test.status, w.Code)
+	for _, path := range []string{"/", "/dashboard", "/dashboard/models", "/assets/index.js", "/favicon.ico"} {
+		for _, token := range []string{"", "test-key"} {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			want := http.StatusUnauthorized
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+				want = http.StatusNotFound
+			}
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, req)
+			if w.Code != want {
+				t.Errorf("%s: expected %d, got %d", path, want, w.Code)
+			}
 		}
 	}
 }

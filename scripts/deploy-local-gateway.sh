@@ -17,7 +17,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
-for command_name in go npm python3 launchctl plutil lsof ps shasum; do
+for command_name in go python3 launchctl plutil lsof ps shasum; do
     if ! command -v "${command_name}" >/dev/null 2>&1; then
         echo "Required command not found: ${command_name}" >&2
         exit 1
@@ -82,7 +82,6 @@ CANDIDATE_DIR=$(mktemp -d "${RUNTIME_BASE}/gateway-local-${BUILD_STAMP}-${SHORT_
 CANDIDATE_BINARY="${CANDIDATE_DIR}/go-llm-gateway"
 
 echo "Building candidate from ${SOURCE_BRANCH:-detached}@${SOURCE_COMMIT}"
-bash "${SCRIPT_DIR}/build-dashboard.sh"
 (cd "${GATEWAY_DIR}" && go build -o "${CANDIDATE_BINARY}" .)
 
 if git -C "${REPO_ROOT}" status --porcelain --untracked-files=normal | grep -q .; then
@@ -97,7 +96,6 @@ source_commit=${SOURCE_COMMIT}
 source_state=${SOURCE_STATE}
 built_at_utc=${BUILD_STAMP}
 binary_sha256=$(shasum -a 256 "${CANDIDATE_BINARY}" | awk '{print $1}')
-dashboard_html_sha256=$(shasum -a 256 "${GATEWAY_DIR}/internal/dashboard/static/index.html" | awk '{print $1}')
 tracked_source_diff_sha256=$(git -C "${REPO_ROOT}" diff --binary HEAD | shasum -a 256 | awk '{print $1}')
 deploy_script_sha256=$(shasum -a 256 "${SCRIPT_DIR}/deploy-local-gateway.sh" | awk '{print $1}')
 EOF
@@ -106,7 +104,6 @@ echo "Preflighting candidate against isolated storage on an unused local port."
 python3 - "${CANDIDATE_BINARY}" "${WORKING_DIR}" "${LAUNCH_AGENT_PLIST}" <<'PY'
 import json
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -187,26 +184,13 @@ try:
     elif status != 200:
         raise RuntimeError(f"/admin/assistant/prompt failed: status={status}")
 
-    status, html = request("/")
-    if status != 200:
-        raise RuntimeError(f"dashboard failed: status={status}")
-    page = html.decode(errors="replace")
-    script_path = next(
-        (path for path in re.findall(r'(?:src|href)="([^"]+\.js)"', page)),
-        None,
-    )
-    if not script_path:
-        raise RuntimeError("dashboard JavaScript bundle is not referenced")
-    status, bundle = request(script_path)
-    bundle_text = bundle.decode(errors="replace")
-    missing_markers = [
-        marker for marker in ("缓存命中率", "记忆管家", "反馈记录", "全局技能", "项目技能")
-        if marker not in bundle_text
-    ]
-    if status != 200 or missing_markers:
-        raise RuntimeError(
-            f"dashboard bundle failed: status={status}, missing={missing_markers}"
-        )
+    for path in ("/", "/dashboard", "/dashboard/models", "/assets/index.js", "/favicon.ico"):
+        status, _ = request(path, authenticated=True)
+        if status != 404:
+            raise RuntimeError(f"removed browser route {path} still responds: status={status}")
+        status, _ = request(path)
+        if status != 401:
+            raise RuntimeError(f"removed browser route {path} bypasses authentication: status={status}")
 except Exception as error:
     print(f"Candidate preflight failed: {error}", file=sys.stderr)
     raise SystemExit(1)
@@ -219,7 +203,7 @@ finally:
         process.wait()
     shutil.rmtree(temp_data, ignore_errors=True)
 
-print("Candidate preflight passed: cache stats, memory, assistant, and dashboard bundle.")
+print("Candidate preflight passed: Admin API, memory, assistant, and API-only routes.")
 PY
 
 PLIST_BACKUP="${CANDIDATE_DIR}/local.go-gateway.plist.before"

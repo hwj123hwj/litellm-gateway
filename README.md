@@ -42,7 +42,7 @@ go build -o gateway . && ./gateway
 
 网关默认监听 `:4001`。
 
-启动后直接访问 <http://localhost:4001/> 即可打开内置 Dashboard。生产版本已将 Dashboard 静态资源嵌入网关二进制，不需要额外启动 Node/Vite 进程；`web/` 下的 `npm run dev` 仅用于前端开发。
+网关只提供 HTTP API，不再提供浏览器管理页面或静态资源。通过 `GET /health` 检查服务状态，使用原生桌面端管理本机或远程网关。
 
 ### 桌面管理端
 
@@ -56,7 +56,7 @@ go build -o gateway . && ./gateway
 bash scripts/deploy-local-gateway.sh
 ```
 
-脚本要求当前分支包含本地已获取的 `origin/main`；更新源码后运行 `git fetch origin main` 再部署。它会重建嵌入式 Dashboard 和 Go 二进制，在隔离端口及临时数据库中检查缓存统计 API、记忆/助理接口和控制台资源；检查通过后才切换 LaunchAgent，并确认 4001 端口由候选二进制提供服务。失败时会恢复之前的 LaunchAgent 配置并重新启动旧版本。每个版本目录记录源码提交、变更摘要和二进制校验和。新增关键功能或接口时，应同步扩展候选检查项。
+脚本要求当前分支包含本地已获取的 `origin/main`；更新源码后运行 `git fetch origin main` 再部署。它会构建 Go 二进制，在隔离端口及临时数据库中检查缓存统计 API、记忆/助理接口，以及旧浏览器入口已移除；检查通过后才切换 LaunchAgent，并确认 4001 端口由候选二进制提供服务。失败时会恢复之前的 LaunchAgent 配置并重新启动旧版本。每个版本目录记录源码提交、变更摘要和二进制校验和。新增关键功能或接口时，应同步扩展候选检查项。
 
 ## 配置 Pi
 
@@ -202,10 +202,11 @@ litellm-gateway/
 │   ├── Dockerfile
 │   └── README.md            # 完整文档
 │
+├── desktop/                 # MyGo 原生 Go 桌面管理端
 ├── scripts/                 # 配套工具脚本
 │   └── codex-model          # Codex CLI 模型切换
 ├── .github/workflows/       # GitHub Actions CI/CD
-├── docs/                    # 项目展示页及补充文档
+├── docs/                    # 补充设计文档
 └── README.md                # 本文件
 ```
 
@@ -216,7 +217,7 @@ litellm-gateway/
 | [PRD.md](PRD.md) | 产品需求、范围和核心验收 |
 | [AGENTS.md](AGENTS.md) | 项目开发准则 |
 | [go-gateway/README.md](go-gateway/README.md) | Go 网关完整文档（架构、模型列表、部署） |
-| [docs/index.html](docs/index.html) | 项目展示页 |
+| [desktop/README.md](desktop/README.md) | 原生桌面端构建、连接与安装 |
 
 ## 环境变量
 
@@ -229,7 +230,7 @@ litellm-gateway/
 | `COPILOT_GITHUB_TOKEN` | 否 | GitHub OAuth token（用于自动刷新 Copilot token） |
 | `HTTP_PROXY` | 否 | ChatGPT Codex 的可选 HTTP 代理地址（如 `http://127.0.0.1:7890`） |
 | `CHATGPT_AUTH_FILE` | 否 | ChatGPT/Pi OAuth `auth.json` 路径；默认自动查找两个标准路径 |
-| `ADMIN_TOKEN` | 否 | Dashboard/Admin API 独立 token；未设置时回退到主 token |
+| `ADMIN_TOKEN` | 否 | 原生管理端/Admin API 独立 token；未设置时回退到主 token |
 | `PORT` | 否 | 监听端口（默认 4001） |
 | `ARCHIVE_ENABLED` | 否 | 对话归档总开关（默认 false）；启用后供知识库增量导出 |
 | `ARCHIVE_MAX_BODY_KB` | 否 | 单条归档 body 安全上限（默认 16384 KB） |
@@ -254,4 +255,4 @@ litellm-gateway/
 
 ### 管理端支持范围
 
-管理端通过 Web Dashboard 提供，支持桌面和手机浏览器访问。原生手机 App 已移除，不再构建或发布 APK。
+管理端只维护 `desktop/` 中的 MyGo 原生 Go 客户端。网关提供受认证保护的 Admin API；浏览器 Dashboard、静态原型及手机 App 已移除。
