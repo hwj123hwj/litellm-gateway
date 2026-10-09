@@ -13,7 +13,7 @@ func TestDeepVNewModelRoutes(t *testing.T) {
 	logger := log.New(io.Discard, "", 0)
 	router := provider.NewRouter(logger)
 	setupDeepVProviders(router, &config.Config{DeepVWorkDir: t.TempDir()}, logger)
-	for _, id := range []string{"claude-haiku-5.5", "mimo-2.6v-pro"} {
+	for _, id := range []string{"claude-haiku-5-5", "mimo-v2.6-pro"} {
 		routes, err := router.Route(id)
 		if err != nil || len(routes) != 1 {
 			t.Fatalf("%s routes = %v, error = %v", id, routes, err)

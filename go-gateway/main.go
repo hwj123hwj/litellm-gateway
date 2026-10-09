@@ -530,7 +530,7 @@ func setupDeepVProviders(router *provider.Router, cfg *config.Config, logger *lo
 	})
 
 	// 独立模型入口沿用 DeepV 的请求总量预算，不改变 coding 降级顺序。
-	for _, modelID := range []string{"claude-haiku-5.5", "mimo-2.6v-pro"} {
+	for _, modelID := range []string{"claude-haiku-5-5", "mimo-v2.6-pro"} {
 		router.RegisterProvider(modelID, provider.NewDeepVProvider(&provider.Config{
 			Name: modelID,
 			URL:  deepvURL,
