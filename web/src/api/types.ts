@@ -145,6 +145,8 @@ export interface PiConfigResponse {
   current_ids: string[]
   missing_ids: string[]
   stale_ids: string[]
+  missing_entries?: string[]
+  skipped_entries?: string[]
   synced?: boolean
   error?: string
 }

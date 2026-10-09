@@ -114,24 +114,24 @@ export function getPiConfig(): Promise<PiConfigResponse> {
   return fetchJSON('/pi')
 }
 
-export function syncPiConfig(): Promise<PiConfigResponse> {
-  return fetchJSON('/pi/sync', { method: 'POST' })
+export function syncPiConfig(modelIDs: string[]): Promise<PiConfigResponse> {
+  return fetchJSON('/pi/sync', { method: 'POST', body: JSON.stringify({ model_ids: modelIDs }) })
 }
 
 export function getZCodeConfig(): Promise<PiConfigResponse> {
   return fetchJSON('/zcode')
 }
 
-export function syncZCodeConfig(): Promise<PiConfigResponse> {
-  return fetchJSON('/zcode/sync', { method: 'POST' })
+export function syncZCodeConfig(modelIDs: string[]): Promise<PiConfigResponse> {
+  return fetchJSON('/zcode/sync', { method: 'POST', body: JSON.stringify({ model_ids: modelIDs }) })
 }
 
 export function getHarnessConfig(): Promise<PiConfigResponse> {
   return fetchJSON('/harness')
 }
 
-export function syncHarnessConfig(): Promise<PiConfigResponse> {
-  return fetchJSON('/harness/sync', { method: 'POST' })
+export function syncHarnessConfig(modelIDs: string[]): Promise<PiConfigResponse> {
+  return fetchJSON('/harness/sync', { method: 'POST', body: JSON.stringify({ model_ids: modelIDs }) })
 }
 
 // ── 技能面板 ──

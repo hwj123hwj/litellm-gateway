@@ -471,3 +471,14 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+.sync-model-picker { border: 0; padding: 0; margin: 0; min-width: 0; }
+.sync-model-picker legend { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.sync-model-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+.sync-model-toolbar .button { padding: 4px 10px; font-size: 12px; }
+.sync-model-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.sync-model-option { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; max-width: 100%; }
+.sync-model-option input { margin: 0; accent-color: var(--accent); flex-shrink: 0; }
+.sync-model-option span { overflow-wrap: anywhere; }
+.sync-model-option:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sync-model-picker:disabled .sync-model-option { cursor: wait; opacity: 0.65; }

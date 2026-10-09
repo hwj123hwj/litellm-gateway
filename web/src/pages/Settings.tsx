@@ -33,7 +33,7 @@ const SYNC_TARGETS = [
   {
     key: 'pi',
     title: 'EasyAgent 模型清单',
-    desc: '把网关精选的模型列表写入 EasyAgent 的 models.json（~/.easyagent，兼容旧 ~/.pi/agent）',
+    desc: '选择要写入 EasyAgent 的 models.json（~/.easyagent，兼容旧 ~/.pi/agent）',
     backupNote: '同步前自动备份为 models.json.pre-sync.bak；完成后重启 EasyAgent 生效',
     buttonLabel: '同步到 EasyAgent',
     getConfig: getPiConfig,
@@ -66,6 +66,7 @@ interface SyncCardProps {
 
 function SyncCard({ target, apiKey }: SyncCardProps) {
   const [config, setConfig] = useState<PiConfigResponse | null>(null)
+  const [selectedIDs, setSelectedIDs] = useState<string[]>([])
   const [syncing, setSyncing] = useState(false)
   const [synced, setSynced] = useState(false)
   const [error, setError] = useState('')
@@ -74,7 +75,12 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
     if (!apiKey) return
     target
       .getConfig()
-      .then(setConfig)
+      .then((next) => {
+        setConfig(next)
+        setSelectedIDs(next.file_exists
+          ? next.current_ids.filter((id) => next.desired_ids.includes(id))
+          : next.desired_ids)
+      })
       .catch(() => setConfig(null))
   }, [apiKey, target])
 
@@ -86,7 +92,7 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
     setSyncing(true)
     setError('')
     try {
-      const next = await target.syncConfig()
+      const next = await target.syncConfig(selectedIDs)
       setConfig(next)
       setSynced(true)
       setTimeout(() => setSynced(false), 2000)
@@ -97,6 +103,8 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
     }
   }
 
+  const selectionInSync = !!config && config.file_exists && !(config.missing_entries?.length) && selectedIDs.length === config.current_ids.length && selectedIDs.every((id) => config.current_ids.includes(id))
+  const removedIDs = config?.current_ids.filter((id) => !selectedIDs.includes(id)) ?? []
   const skippedEntries = (config as { skipped_entries?: string[] } | null)?.skipped_entries
 
   return (
@@ -109,10 +117,10 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
         </div>
         {config && (
           <span
-            className={`status-badge ${config.in_sync ? 'ok' : 'degraded'}`}
+            className={`status-badge ${selectionInSync ? 'ok' : 'degraded'}`}
             style={{ marginLeft: 'auto' }}
           >
-            {config.in_sync ? (
+            {selectionInSync ? (
               <><CheckCircle size={13} weight="bold" aria-hidden="true" /> 已同步</>
             ) : (
               <><WarningCircle size={13} weight="bold" aria-hidden="true" /> 待同步</>
@@ -123,26 +131,32 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
       {config ? (
         <>
           <div className="settings-current">{config.path}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {config.desired.map((m) => {
-              const missing = config.missing_ids.includes(m.id)
-              return (
-                <span
-                  key={m.id}
-                  className={`capability-chip ${missing ? 'available' : 'selected'}`}
-                  style={{ cursor: 'default' }}
-                  title={missing ? '客户端缺失，同步后生效' : m.name}
-                >
-                  {m.id}
-                </span>
-              )
-            })}
-          </div>
-          {config.stale_ids.length > 0 && (
-            <div className="settings-current">
-              客户端多出（同步时将移除）：{config.stale_ids.join('、')}
+          <fieldset className="sync-model-picker" disabled={syncing}>
+            <legend>选择要同步的模型</legend>
+            <div className="sync-model-toolbar">
+              <span>已选 {selectedIDs.length} / {config.desired.length}</span>
+              <button type="button" className="button button-secondary" onClick={() => { setSelectedIDs(config.desired_ids); setSynced(false) }}>全选</button>
+              <button type="button" className="button button-secondary" onClick={() => { setSelectedIDs([]); setSynced(false) }}>清空</button>
             </div>
+            <div className="sync-model-options">
+              {config.desired.map((m) => {
+                const selected = selectedIDs.includes(m.id)
+                return (
+                  <label key={m.id} className={`capability-chip sync-model-option ${selected ? 'selected' : 'available'}`}>
+                    <input type="checkbox" checked={selected} onChange={(event) => {
+                      setSelectedIDs((ids) => event.target.checked ? [...ids, m.id] : ids.filter((id) => id !== m.id))
+                      setSynced(false)
+                    }} />
+                    <span>{m.id}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+          {removedIDs.length > 0 && (
+            <div className="settings-current">同步后从此客户端的网关清单移除：{removedIDs.join('、')}</div>
           )}
+          {selectedIDs.length === 0 && <div className="settings-current">请至少选择一个模型后同步。</div>}
           {skippedEntries && skippedEntries.length > 0 && (
             <div className="settings-current">
               跳过缺失条目：{skippedEntries.join('、')}（对应 bundle 未配置，不盲建）
@@ -152,7 +166,7 @@ function SyncCard({ target, apiKey }: SyncCardProps) {
           <div className="settings-control-row">
             <button
               className={`button ${synced ? 'button-success' : 'button-primary'}`}
-              disabled={syncing}
+              disabled={syncing || selectedIDs.length === 0}
               onClick={handleSync}
             >
               {synced ? (
