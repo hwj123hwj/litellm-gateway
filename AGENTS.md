@@ -27,7 +27,7 @@ EasyGateway 是个人 AI 基础设施，不只是 API 转发器。它为 Claude 
 
 ## 3. 配置和事实来源
 
-- Provider、模型别名、模型能力和路由链以 go-gateway/providers.yaml 为主要配置来源；
+- Provider、模型能力、模型链以 go-gateway/providers.yaml 为主要配置来源；
 - 运行时可用模型以 GET /v1/models 为准；
 - API Key、OAuth Token 和 Admin Token 只能来自环境变量或受保护配置；
 - 不要在客户端、README、PRD、日志或测试数据中硬编码 Provider 密钥；

@@ -89,8 +89,8 @@ providers:
     url: https://api.example.com/v1/chat/completions
     api_key_env: MY_PROVIDER_API_KEY  # 环境变量名
     models:
-      - id: my-model
-        aliases: [my-model-alias]  # 模型别名
+      - id: my-model                # 模型名即上游模型 ID，不设别名
+        capabilities: [text]        # 按需声明能力
 ```
 
 然后在 `.env` 中添加 API key：
@@ -104,6 +104,8 @@ MY_PROVIDER_API_KEY=sk-xxx
 ### 服务器部署
 
 部署由用户手动执行。推送到 `main` 或提交 Pull Request 仅运行 CI 检查；版本标签继续触发 Release 构建和发布，不会自动部署到服务器或 Mini PC。
+
+版本线自 `v0.1.0` 重新开始（2026-10-10，产品更名 EasyGateway）；旧 `v1.x` 标签与 Release 已移除，迷你主机更新器只部署与 main 一致的最新构建，不受影响。
 
 ## 对外接口
 
