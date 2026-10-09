@@ -1,0 +1,10 @@
+{
+  "name": "Gateway",
+  "identifier": "com.hwj.llm-gateway.desktop",
+  "version": "0.1.0",
+  "buildCommand": "npm --prefix ../web run build:desktop",
+  "frontendDist": "frontend.noindex",
+  "bindings": "generated.ts",
+  "out": "build.noindex",
+  "macos": { "minimumSystemVersion": "13.0" }
+}

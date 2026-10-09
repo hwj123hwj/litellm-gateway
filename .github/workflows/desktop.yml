@@ -1,0 +1,32 @@
+name: Desktop client
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/**', 'web/**', '.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['desktop/**', 'web/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: go test -race ./... && go vet ./...
+        working-directory: desktop
+      - run: go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64 -skip-dmg
+        working-directory: desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Gateway-macos-arm64
+          path: desktop/build.noindex/darwin-arm64/

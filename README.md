@@ -44,6 +44,10 @@ go build -o gateway . && ./gateway
 
 启动后直接访问 <http://localhost:4001/> 即可打开内置 Dashboard。生产版本已将 Dashboard 静态资源嵌入网关二进制，不需要额外启动 Node/Vite 进程；`web/` 下的 `npm run dev` 仅用于前端开发。
 
+### 桌面管理端
+
+`desktop/` 新增 MyGo 桌面客户端，复用 Web Dashboard，可保存并切换本地和远程网关连接，提供窗口、系统菜单和托盘入口。它管理已有网关，不替换正在运行的服务。构建、连接与安装说明见 [desktop/README.md](desktop/README.md)。
+
 ### 更新本机 macOS 网关
 
 维护本机 `local.go-gateway` LaunchAgent 时，在仓库根目录运行：

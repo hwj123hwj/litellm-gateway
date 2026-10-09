@@ -27,6 +27,7 @@ import type { AssistantFeedbackEntry } from '../api/types'
 import { useStore } from '../store'
 import PageHeader from '../components/PageHeader'
 import type { PiConfigResponse } from '../api/types'
+import { isDesktop, manageConnections } from '../desktop/bridge'
 
 // 三张「同步模型清单到客户端」卡片共用一套状态与交互。
 const SYNC_TARGETS = [
@@ -335,7 +336,13 @@ export default function Settings() {
     <>
       <PageHeader title="设置" subtitle="网关配置与管理" />
 
-      <div className="settings-group">
+      {isDesktop() ? <div className="settings-group">
+        <div className="sg-title">连接配置</div>
+        <div className="settings-item">
+          <div className="si-info"><div className="si-label">当前网关</div><div className="si-desc">{backendUrl}</div></div>
+          <button className="button button-secondary" type="button" onClick={manageConnections}>管理连接</button>
+        </div>
+      </div> : <div className="settings-group">
         <div className="sg-title">连接配置</div>
         <div className="settings-item settings-stack">
           <div className="settings-heading">
@@ -383,7 +390,7 @@ export default function Settings() {
             onChange={(e) => setApiKey(e.target.value)}
           />
         </div>
-      </div>
+      </div>}
 
       <AssistantPersona />
 
@@ -418,7 +425,7 @@ export default function Settings() {
           <div className="si-icon violet"><Info size={18} weight="duotone" aria-hidden="true" /></div>
           <div className="si-info">
             <div className="si-label">版本信息</div>
-            <div className="si-desc">litellm-gateway / admin v1.0.0</div>
+            <div className="si-desc">{isDesktop() ? `Gateway 桌面端 v${__APP_VERSION__}` : 'litellm-gateway / admin v1.0.0'}</div>
           </div>
         </div>
       </div>

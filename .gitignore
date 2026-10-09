@@ -18,3 +18,9 @@ runner/
 # Go gateway runtime data
 go-gateway/data/
 go-gateway/go-llm-gateway
+
+# MyGo desktop output (excluded from Spotlight indexing)
+desktop/build.noindex/
+desktop/frontend.noindex/
+desktop/.mygo/
+desktop/generated.ts
