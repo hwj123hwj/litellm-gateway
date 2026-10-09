@@ -75,3 +75,10 @@ Admin API 是两者之间唯一的契约边界：网关不感知客户端的存�
 - 迷你主机 Linux：systemd 服务 + timer 每 10 分钟拉取 CI 发布的校验产物，健康检查失败自动回退；
 - 服务器 / 其他设备：`scripts/install.sh|bat|ps1` 一键安装，版本标签触发 Release；
 - 所有部署均为手动或半自动确认，推送 main 不触发部署。
+
+## 6. 命名与版本
+
+- **产品名**：EasyGateway（2026-10-10 起），前身 litellm-gateway / LLM Gateway；
+- **版本线**：自 `v0.1.0` 重新开始，旧 `v1.x` 标签与 Release 已移除；
+- **刻意保留的基础设施标识**：二进制名 `gateway`、安装目录 `~/.llm-gateway`、systemd 服务 `llm-gateway.service`、LaunchAgent `local.go-gateway`、环境变量前缀 `LITELLM_*`、Pi/ZCode 客户端配置中的 Provider 显示名——重命名这些会破坏现有部署、更新链和客户端配置匹配；
+- **未迁移项**：GitHub 仓库名仍为 `litellm-gateway`，安装脚本 URL 与 Go module 路径随之保留。
