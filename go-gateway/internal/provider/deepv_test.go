@@ -524,3 +524,35 @@ func TestDeepVEmptyToolArgsOmitted(t *testing.T) {
 		t.Fatalf("empty args must be omitted, got %s", data)
 	}
 }
+
+func TestDeepVHaikuOmitsTemperature(t *testing.T) {
+	for _, model := range []string{"claude-haiku-5-5", "mimo-v2.6-pro", "deepseek-flash"} {
+		t.Run(model, func(t *testing.T) {
+			p := NewDeepVProvider(&Config{Name: model}, "", model)
+			req := &Request{}
+			if err := json.Unmarshal([]byte(`{"model":"coding","max_tokens":256,"temperature":0.7,"messages":[{"role":"user","content":"hi"}]}`), req); err != nil {
+				t.Fatal(err)
+			}
+			converted, err := p.convertRequest(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(converted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire struct {
+				Config map[string]json.RawMessage `json:"config"`
+			}
+			json.Unmarshal(body, &wire)
+			_, present := wire.Config["temperature"]
+			if present != (model != "claude-haiku-5-5") {
+				t.Fatalf("%s temperature presence=%v: %s", model, present, body)
+			}
+			raw, ok := req.RawField("temperature")
+			if !ok || string(raw) != "0.7" {
+				t.Fatal("client request mutated")
+			}
+		})
+	}
+}

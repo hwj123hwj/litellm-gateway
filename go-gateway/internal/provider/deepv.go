@@ -396,7 +396,8 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 	}
 
 	result.Config = &deepVConfig{MaxOutputTokens: req.MaxTokens}
-	if temperatureRaw, ok := req.RawField("temperature"); ok {
+	// Claude Haiku 5.5 rejects temperature; adapt only this bound upstream model.
+	if temperatureRaw, ok := req.RawField("temperature"); ok && model != "claude-haiku-5-5" {
 		var temperature float64
 		if json.Unmarshal(temperatureRaw, &temperature) == nil {
 			result.Config.Temperature = temperature
