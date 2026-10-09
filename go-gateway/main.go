@@ -185,7 +185,7 @@ func main() {
 	passthroughHandler := handlers.NewPassthroughHandler(router, logger)
 	healthHandler := handlers.NewHealthHandler(router, logger)
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
-	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger)
+	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger, router)
 	clientConfigHandler := handlers.NewClientConfigHandler(defaultGatewayHome(), defaultZCodeHome(), defaultDshHome(), router, logger)
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)

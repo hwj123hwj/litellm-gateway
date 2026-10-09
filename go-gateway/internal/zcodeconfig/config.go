@@ -107,9 +107,11 @@ func mergeRule(document map[string]any, options SetupOptions) error {
 			"providerId":   newUUID(),
 			"providerName": DefaultProviderName,
 			"config": map[string]any{
-				"group":  defaultGroup,
-				"access": map[string]any{"type": "api-key", "apiKey": options.APIKey},
-				"api":    map[string]any{"type": defaultAPIType, "baseUrl": options.Endpoint},
+				"group":            defaultGroup,
+				"personalModelIds": append([]string(nil), options.ModelIDs...),
+				"modelOrder":       append([]string(nil), options.ModelIDs...),
+				"access":           map[string]any{"type": "api-key", "apiKey": options.APIKey},
+				"api":              map[string]any{"type": defaultAPIType, "baseUrl": options.Endpoint},
 			},
 		}
 		rulesWrapper["providerRules"] = append(rules, rule)

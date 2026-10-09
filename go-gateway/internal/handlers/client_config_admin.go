@@ -143,6 +143,10 @@ func (h *ClientConfigHandler) HandleZCodeStatus(c *gin.Context) {
 
 // HandleZCodeSync POST /admin/zcode/sync（写入前轮转备份）
 func (h *ClientConfigHandler) HandleZCodeSync(c *gin.Context) {
+	models, ok := h.selectedModels(c)
+	if !ok {
+		return
+	}
 	path := zcodeconfig.ConfigPath(h.zcodeHome)
 	if err := backupFile(path); err != nil {
 		h.logger.Printf("backup ZCode provider config failed: %v", err)
@@ -158,7 +162,7 @@ func (h *ClientConfigHandler) HandleZCodeSync(c *gin.Context) {
 		ZCodeHome: h.zcodeHome,
 		Endpoint:  h.endpoint(),
 		APIKey:    apiKey,
-		ModelIDs:  desiredIDs(h.desiredModels()),
+		ModelIDs:  modelSelectionIDs(models),
 	})
 	if err != nil {
 		h.logger.Printf("sync ZCode provider config failed: %v", err)
@@ -205,6 +209,10 @@ func (h *ClientConfigHandler) HandleHarnessStatus(c *gin.Context) {
 
 // HandleHarnessSync POST /admin/harness/sync（写入前轮转备份）
 func (h *ClientConfigHandler) HandleHarnessSync(c *gin.Context) {
+	models, ok := h.selectedModels(c)
+	if !ok {
+		return
+	}
 	path := dshconfig.PatchPath(h.dshHome)
 	if err := backupFile(path); err != nil {
 		h.logger.Printf("backup dsh patch config failed: %v", err)
@@ -215,7 +223,7 @@ func (h *ClientConfigHandler) HandleHarnessSync(c *gin.Context) {
 	_, _, skipped, err := dshconfig.Setup(dshconfig.SetupOptions{
 		DshHome:  h.dshHome,
 		Endpoint: h.endpoint(),
-		ModelIDs: desiredIDs(h.desiredModels()),
+		ModelIDs: modelSelectionIDs(models),
 	})
 	if err != nil {
 		h.logger.Printf("sync dsh patch config failed: %v", err)
@@ -296,4 +304,19 @@ func extractZCodeModelIDs(rules []any, endpoint string) []string {
 		return result
 	}
 	return nil
+}
+
+func (h *ClientConfigHandler) selectedModels(c *gin.Context) ([]map[string]any, bool) {
+	available := []map[string]any{}
+	for _, model := range h.desiredModels() {
+		available = append(available, map[string]any(model))
+	}
+	return selectSyncModels(c, available)
+}
+func modelSelectionIDs(models []map[string]any) []string {
+	ids := []string{}
+	for _, m := range models {
+		ids = append(ids, m["id"].(string))
+	}
+	return ids
 }

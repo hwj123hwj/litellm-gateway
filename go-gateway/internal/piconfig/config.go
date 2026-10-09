@@ -19,6 +19,7 @@ type SetupOptions struct {
 	PiHome      string
 	Endpoint    string
 	DryRun      bool
+	Models      []map[string]any
 }
 
 // ModelsFilePath 返回客户端模型清单的实际路径。
@@ -46,7 +47,7 @@ func Setup(options SetupOptions) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("read Pi models config: %w", err)
 	}
 
-	merged, err := MergeModelsConfig(existing, endpoint, DefaultTokenCommand)
+	merged, err := mergeModelsConfig(existing, endpoint, DefaultTokenCommand, options.Models)
 	if err != nil {
 		return nil, "", err
 	}
@@ -63,6 +64,10 @@ func Setup(options SetupOptions) ([]byte, string, error) {
 }
 
 func MergeModelsConfig(existing []byte, endpoint, tokenCommand string) ([]byte, error) {
+	return mergeModelsConfig(existing, endpoint, tokenCommand, nil)
+}
+
+func mergeModelsConfig(existing []byte, endpoint, tokenCommand string, models []map[string]any) ([]byte, error) {
 	document := map[string]any{}
 	if len(existing) > 0 {
 		if err := json.Unmarshal(existing, &document); err != nil {
@@ -76,7 +81,11 @@ func MergeModelsConfig(existing []byte, endpoint, tokenCommand string) ([]byte, 
 		document["providers"] = providers
 	}
 
-	providers[ProviderID] = gatewayProvider(normalizeEndpoint(endpoint), tokenCommand)
+	gateway := gatewayProvider(normalizeEndpoint(endpoint), tokenCommand)
+	if models != nil {
+		gateway["models"] = models
+	}
+	providers[ProviderID] = gateway
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode Pi models.json: %w", err)

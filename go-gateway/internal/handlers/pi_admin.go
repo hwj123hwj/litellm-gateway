@@ -3,12 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/piconfig"
+	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
 // PiConfigHandler 把 Pi 客户端的模型清单同步搬进控制面板：
@@ -17,11 +19,16 @@ type PiConfigHandler struct {
 	gatewayHome string
 	piHome      string
 	logger      *log.Logger
+	router      *provider.Router
 }
 
 // NewPiConfigHandler 创建 Pi 配置面板 handler
-func NewPiConfigHandler(gatewayHome, piHome string, logger *log.Logger) *PiConfigHandler {
-	return &PiConfigHandler{gatewayHome: gatewayHome, piHome: piHome, logger: logger}
+func NewPiConfigHandler(gatewayHome, piHome string, logger *log.Logger, routers ...*provider.Router) *PiConfigHandler {
+	h := &PiConfigHandler{gatewayHome: gatewayHome, piHome: piHome, logger: logger}
+	if len(routers) > 0 {
+		h.router = routers[0]
+	}
+	return h
 }
 
 func (h *PiConfigHandler) modelsPath() string {
@@ -30,7 +37,7 @@ func (h *PiConfigHandler) modelsPath() string {
 
 // piStatus 汇总看板需要展示的状态。currentIDs 为空表示 Pi 配置还不存在。
 func (h *PiConfigHandler) piStatus() gin.H {
-	desired := piconfig.DesiredModels()
+	desired := h.desiredModels()
 	desiredIDs := make([]string, 0, len(desired))
 	for _, m := range desired {
 		desiredIDs = append(desiredIDs, m["id"].(string))
@@ -70,6 +77,10 @@ func (h *PiConfigHandler) HandleStatus(c *gin.Context) {
 // HandleSync POST /admin/pi/sync
 // 与 `llm-gateway setup pi` 完全同一合并逻辑；写入前把现有文件轮转备份一份。
 func (h *PiConfigHandler) HandleSync(c *gin.Context) {
+	models, ok := selectSyncModels(c, h.desiredModels())
+	if !ok {
+		return
+	}
 	path := h.modelsPath()
 	if raw, err := os.ReadFile(path); err == nil {
 		backup := path + ".pre-sync.bak"
@@ -83,6 +94,7 @@ func (h *PiConfigHandler) HandleSync(c *gin.Context) {
 	merged, _, err := piconfig.Setup(piconfig.SetupOptions{
 		GatewayHome: h.gatewayHome,
 		PiHome:      h.piHome,
+		Models:      models,
 	})
 	if err != nil {
 		h.logger.Printf("sync Pi models.json failed: %v", err)
@@ -149,4 +161,70 @@ func difference(a, b []string) []string {
 		}
 	}
 	return missing
+}
+
+func (h *PiConfigHandler) desiredModels() []map[string]any {
+	if h.router == nil {
+		return piconfig.DesiredModels()
+	}
+	models := []map[string]any{}
+	for _, info := range h.router.ListModelInfos() {
+		if !hasTextCapability(info.Capabilities) || hasCapabilityFlagValue(info.Capabilities) {
+			continue
+		}
+		model := map[string]any{"id": info.ID, "name": info.ID}
+		if info.Protocol == "responses" {
+			model["api"] = "openai-responses"
+		}
+		if info.MaxInputTokens > 0 {
+			model["contextWindow"] = info.MaxInputTokens
+		}
+		if info.MaxOutputTokens > 0 {
+			model["maxTokens"] = info.MaxOutputTokens
+		}
+		if len(info.InputModalities) > 0 {
+			model["input"] = info.InputModalities
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
+// Validate a selection before touching client files. Omitted bodies retain legacy sync behavior.
+func selectSyncModels(c *gin.Context, available []map[string]any) ([]map[string]any, bool) {
+	var request struct {
+		ModelIDs *[]string `json:"model_ids"`
+	}
+	if c.Request.Body != nil {
+		err := json.NewDecoder(c.Request.Body).Decode(&request)
+		if err != nil && err != io.EOF {
+			c.JSON(400, gin.H{"error": "模型选择格式无效"})
+			return nil, false
+		}
+	}
+	if request.ModelIDs == nil {
+		return available, true
+	}
+	if len(*request.ModelIDs) == 0 {
+		c.JSON(400, gin.H{"error": "请至少选择一个模型"})
+		return nil, false
+	}
+	selected := []map[string]any{}
+	byID := map[string]map[string]any{}
+	seen := map[string]bool{}
+	for _, m := range available {
+		byID[m["id"].(string)] = m
+	}
+	for _, id := range *request.ModelIDs {
+		m, ok := byID[id]
+		if !ok {
+			c.JSON(400, gin.H{"error": "不可同步的模型: " + id})
+			return nil, false
+		}
+		if !seen[id] {
+			selected = append(selected, m)
+			seen[id] = true
+		}
+	}
+	return selected, true
 }
