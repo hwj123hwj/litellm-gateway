@@ -40,6 +40,14 @@ type ChatGPTModel struct {
 }
 
 var chatGPTModelCatalog = []ChatGPTModel{
+	{
+		ID:              "gpt-6.1-sol",
+		Name:            "GPT-6.1 Sol",
+		Capabilities:    []string{CapabilityText, CapabilityVision, CapabilityToolCall, CapabilityStreaming, CapabilityReasoning},
+		InputModalities: []string{"text", "image"},
+		MaxInputTokens:  272000,
+		MaxOutputTokens: 128000,
+	},
 	// GPT-6 家族。Codex 订阅端点只接受 sol/luna/astra：gpt-6-terra 不存在，
 	// gpt-6-pro 与各 -wm 变体返回 400 not supported。
 	{
