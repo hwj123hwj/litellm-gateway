@@ -494,9 +494,8 @@ func TestDeepVRewriteQuotaError(t *testing.T) {
 	}
 }
 
-// TestDeepVEmptyToolArgsOmitted 回归：空 input 的 tool_use 不能下发 "args":{}，
-// 上游会报「contents 数组包含无效元素」；省略字段才合法。
-func TestDeepVEmptyToolArgsOmitted(t *testing.T) {
+// DeepV requires args to be an object, including for empty tool inputs.
+func TestDeepVEmptyToolArgsPreserved(t *testing.T) {
 	p := NewDeepVProvider(&Config{Name: "deepv", URL: "https://example.com/v1/chat/messages"}, "", "deepseek-v4.1-flash")
 
 	raw := `{
@@ -520,8 +519,8 @@ func TestDeepVEmptyToolArgsOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), `"args":{}`) {
-		t.Fatalf("empty args must be omitted, got %s", data)
+	if !strings.Contains(string(data), `"args":{}`) {
+		t.Fatalf("empty args must remain an object, got %s", data)
 	}
 }
 
@@ -554,5 +553,163 @@ func TestDeepVHaikuOmitsTemperature(t *testing.T) {
 				t.Fatal("client request mutated")
 			}
 		})
+	}
+}
+
+// Exercise the wire events clients consume, then return their tool inputs as history.
+func TestDeepVToolStreamRoundTrip(t *testing.T) {
+	cases := []struct {
+		name, parts string
+		count       int
+	}{
+		{"string fragments", `[{"functionCall":{"id":"call_a","name":"edit"}},{"functionCall":{"id":"call_a","args":"{\"path\":\"/tmp/"}},{"functionCall":{"id":"call_a","args":"probe.txt\"}"}}]`, 1},
+		{"repeated object frames", `[{"functionCall":{"id":"call_a","name":"edit","args":{"path":"/tmp/probe.txt"}}},{"functionCall":{"id":"call_a","name":"edit","args":{"path":"/tmp/probe.txt"}}}]`, 1},
+		{"parallel same tool", `[{"functionCall":{"id":"call_a","name":"edit","args":{"path":"/tmp/probe.txt"}}},{"functionCall":{"id":"call_b","name":"edit","args":{"path":"/tmp/probe.txt"}}}]`, 2},
+		{"missing ids", `[{"functionCall":{"name":"edit","args":{"path":"/tmp/probe.txt"}}},{"functionCall":{"name":"edit","args":{"path":"/tmp/probe.txt"}}}]`, 2},
+		{"omitted continuation id", `[{"functionCall":{"id":"call_a","name":"edit"}},{"functionCall":{"args":"{\"path\":\"/tmp/probe.txt\"}"}}]`, 1},
+		{"late id", `[{"functionCall":{"name":"edit"}},{"functionCall":{"id":"call_a","args":"{\"path\":\"/tmp/probe.txt\"}"}}]`, 1},
+		{"missing id continuation", `[{"functionCall":{"name":"edit"}},{"functionCall":{"args":"{\"path\":\"/tmp/probe.txt\"}"}}]`, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parts []json.RawMessage
+			if err := json.Unmarshal([]byte(tc.parts), &parts); err != nil {
+				t.Fatal(err)
+			}
+			var source strings.Builder
+			for _, part := range parts {
+				source.WriteString(`data: {"candidates":[{"content":{"parts":[` + string(part) + `]}}]}` + "\n\n")
+			}
+			source.WriteString("data: [DONE]\n\n")
+			p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+			var output strings.Builder
+			if err := p.convertStream(strings.NewReader(source.String()), &output, "deepv-glm-5.3-flash"); err != nil {
+				t.Fatal(err)
+			}
+			var blocks []ContentBlock
+			ids := map[string]bool{}
+			for _, line := range strings.Split(output.String(), "\n") {
+				if !strings.HasPrefix(line, "data: ") {
+					continue
+				}
+				var event struct {
+					Type         string       `json:"type"`
+					ContentBlock ContentBlock `json:"content_block"`
+				}
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+					t.Fatal(err)
+				}
+				if event.Type == "content_block_start" && event.ContentBlock.Type == "tool_use" {
+					b := event.ContentBlock
+					if b.ID == "" || ids[b.ID] {
+						t.Fatalf("missing or repeated id %q", b.ID)
+					}
+					ids[b.ID] = true
+					var input map[string]interface{}
+					if err := json.Unmarshal(b.Input, &input); err != nil || input["path"] != "/tmp/probe.txt" {
+						t.Fatalf("tool input lost: %s (%v)", b.Input, err)
+					}
+					blocks = append(blocks, b)
+				}
+			}
+			if len(blocks) != tc.count {
+				t.Fatalf("calls=%d want=%d", len(blocks), tc.count)
+			}
+			if !strings.Contains(output.String(), `"stop_reason":"tool_use"`) {
+				t.Fatal("missing tool_use finish reason")
+			}
+			history, _ := json.Marshal(map[string]interface{}{"model": "deepv-glm-5.3-flash", "messages": []interface{}{map[string]interface{}{"role": "assistant", "content": blocks}}})
+			var req Request
+			if err := json.Unmarshal(history, &req); err != nil {
+				t.Fatal(err)
+			}
+			converted, err := p.convertRequest(&req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, part := range converted.Contents[0].Parts {
+				if part.FunctionCall != nil && part.FunctionCall.Args["path"] != "/tmp/probe.txt" {
+					t.Fatal("history lost path")
+				}
+			}
+		})
+	}
+}
+
+func TestDeepVStreamRejectsBrokenToolArguments(t *testing.T) {
+	for _, args := range []string{`"{\"path\":"`, `"[]"`, `[]`} {
+		t.Run(args, func(t *testing.T) {
+			source := `data: {"candidates":[{"content":{"parts":[{"functionCall":{"id":"call_a","name":"edit","args":` + args + `}}]}}]}` + "\n\ndata: [DONE]\n\n"
+			var output strings.Builder
+			p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+			if err := p.convertStream(strings.NewReader(source), &output, "deepv"); err == nil {
+				t.Fatal("broken args accepted")
+			}
+			if strings.Contains(output.String(), "event: message_stop") {
+				t.Fatal("error reported as success")
+			}
+		})
+	}
+}
+
+func TestDeepVParseResponseStringAndDuplicateCalls(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+	body := `{"candidates":[{"content":{"parts":[{"functionCall":{"id":"call_a","name":"edit","args":"{\"path\":\"/tmp/probe.txt\"}"}},{"functionCall":{"id":"call_a","name":"edit","args":{"path":"/tmp/probe.txt"}}}]}}]}`
+	response, err := p.parseResponse([]byte(body), "deepv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Content) != 1 || response.Content[0].ID != "call_a" {
+		t.Fatalf("duplicate calls: %+v", response.Content)
+	}
+	if string(response.Content[0].Input) != `{"path":"/tmp/probe.txt"}` {
+		t.Fatalf("input=%s", response.Content[0].Input)
+	}
+}
+
+func TestDeepVStreamRejectsErrors(t *testing.T) {
+	for _, source := range []string{
+		"data: broken JSON\n\n",
+		"data: {\"error\":\"upstream failed\"}\n\n",
+		"data: " + strings.Repeat("x", 1024*1024) + "\n\n",
+	} {
+		var output strings.Builder
+		p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+		if err := p.convertStream(strings.NewReader(source), &output, "deepv"); err == nil {
+			t.Fatal("stream failure accepted")
+		}
+		if strings.Contains(output.String(), "event: message_stop") {
+			t.Fatal("error reported as success")
+		}
+	}
+}
+
+func TestDeepVStreamPreservesImageAndText(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+	source := `data: {"candidates":[{"content":{"parts":[{"text":"generated"},{"inlineData":{"mimeType":"image/png","data":"cGl4ZWxz"}}]}}]}` + "\n\ndata: [DONE]\n\n"
+	var output strings.Builder
+	if err := p.convertStream(strings.NewReader(source), &output, "deepv"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"type":"text_delta"`, `"text":"generated"`, `"type":"image"`, `"media_type":"image/png"`, `"data":"cGl4ZWxz"`, `event: message_stop`} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+}
+
+func TestDeepVGeneratedCallIDsAcrossTurns(t *testing.T) {
+	p := NewDeepVProvider(&Config{Name: "deepv"}, "", "glm-5.3-flash")
+	body := []byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"inspect_file","args":{}}}]}}]}`)
+	first, err := p.parseResponse(body, "deepv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := p.parseResponse(body, "deepv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Content[0].ID == second.Content[0].ID {
+		t.Fatal("generated IDs reused across turns")
 	}
 }
