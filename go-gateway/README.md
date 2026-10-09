@@ -335,6 +335,8 @@ provider 实例名同样用上游模型 ID；只有不同供应商提供同名�
 | `deepseek-flash`（兼容名 `deepseek-v4.1-flash`） | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
 | `deepv-glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
 
+DeepV 工具调用适配会合并 JSON 字符串参数分片及同一调用 ID 的重复帧，完整参数收齐后再交给客户端执行；历史调用即使没有参数也保留 `args: {}`。不完整或非对象参数会明确报错，避免静默丢失后继续执行工具。
+
 DeepV 上游按单请求 token 总量（输入 + `max_output_tokens`）不超过 200000 校验，两个模型的目录条目声明 `max_input_tokens: 160000`、`max_output_tokens: 32000`。超过该限制的请求会被上游以配额错误拒绝，网关识别后转换为 400 并附处置说明，避免客户端把参数问题当成欠费（402 Payment Required）。
 
 配置了 ChatGPT Codex OAuth 凭证或 GitHub Copilot 后，额外模型会动态加入目录；ChatGPT 的代理是可选的。不要在客户端硬编码版本，直接读取 `/v1/models`。

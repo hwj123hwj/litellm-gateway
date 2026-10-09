@@ -83,7 +83,7 @@ type deepVFileData struct {
 type deepVFunctionCall struct {
 	ID   string                 `json:"id,omitempty"`
 	Name string                 `json:"name,omitempty"`
-	Args map[string]interface{} `json:"args,omitempty"`
+	Args map[string]interface{} `json:"args"`
 }
 
 // deepVFunctionResponse GenAI function response 格式
@@ -115,13 +115,14 @@ type deepVFunctionDecl struct {
 
 // deepVResponse DeepV Server 响应格式
 type deepVResponse struct {
+	Error      json.RawMessage `json:"error,omitempty"`
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
-				Reasoning    string             `json:"reasoning,omitempty"`
-				Text         string             `json:"text,omitempty"`
-				InlineData   *deepVInlineData   `json:"inlineData,omitempty"`
-				FunctionCall *deepVFunctionCall `json:"functionCall,omitempty"`
+				Reasoning    string                     `json:"reasoning,omitempty"`
+				Text         string                     `json:"text,omitempty"`
+				InlineData   *deepVInlineData           `json:"inlineData,omitempty"`
+				FunctionCall *deepVResponseFunctionCall `json:"functionCall,omitempty"`
 			} `json:"parts"`
 		} `json:"content"`
 		FinishReason string `json:"finishReason"`
@@ -304,15 +305,9 @@ func (p *DeepVProvider) convertRequest(req *Request) (*deepVRequest, error) {
 				content.Parts = append(content.Parts, deepVPart{Text: block.Text})
 			case "tool_use":
 				toolUseIDToName[block.ID] = block.Name
-				var args map[string]interface{}
-				if len(block.Input) > 0 {
-					_ = json.Unmarshal(block.Input, &args)
-				}
-				// args 为空时保持 nil，让 omitempty 省略字段：上游对
-				// "args":{} 会报「contents 数组包含无效元素」（2026-09-26 实测），
-				// 省略字段则所有后端都接受。
-				if len(args) == 0 {
-					args = nil
+				args, err := deepVToolArguments(block.Input)
+				if err != nil {
+					return nil, fmt.Errorf("invalid DeepV tool input for %s: %w", block.Name, err)
 				}
 				content.Parts = append(content.Parts, deepVPart{
 					FunctionCall: &deepVFunctionCall{ID: block.ID, Name: block.Name, Args: args},
@@ -492,21 +487,136 @@ func guessImageMime(url string) string {
 	}
 }
 
-// deepVToolCallID 返回回给客户端的 tool_use id。优先用上游自带 id；缺失时
-// 本地生成，并用 seen/seq 保证同一响应内多个并行调用不会重号。
-func deepVToolCallID(call *deepVFunctionCall, seen map[string]bool, seq *int) string {
-	if call.ID != "" && !seen[call.ID] {
-		seen[call.ID] = true
-		return call.ID
+// Responses use object args or JSON string fragments, unlike request history.
+type deepVResponseFunctionCall struct {
+	ID   string          `json:"id,omitempty"`
+	Name string          `json:"name,omitempty"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+func deepVToolArguments(raw json.RawMessage) (map[string]interface{}, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return map[string]interface{}{}, nil
 	}
-	for {
-		*seq++
-		candidate := fmt.Sprintf("%s-%d", call.Name, *seq)
-		if !seen[candidate] {
-			seen[candidate] = true
-			return candidate
+	var args map[string]interface{}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		// Do not include raw arguments (which may contain private file content) in errors.
+		return nil, fmt.Errorf("arguments must be a JSON object")
+	}
+	if args == nil {
+		args = map[string]interface{}{}
+	}
+	return args, nil
+}
+
+type deepVAccumulatedCall struct {
+	id, name  string
+	fragments strings.Builder
+	args      map[string]interface{}
+}
+
+type deepVToolCalls struct {
+	calls []*deepVAccumulatedCall
+	byID  map[string]*deepVAccumulatedCall
+}
+
+func (a *deepVToolCalls) add(part *deepVResponseFunctionCall) error {
+	if a.byID == nil {
+		a.byID = make(map[string]*deepVAccumulatedCall)
+	}
+	call := a.byID[part.ID]
+	raw := bytes.TrimSpace(part.Args)
+	isFragment := len(raw) > 0 && raw[0] == '"'
+	if call == nil && len(a.calls) > 0 {
+		last := a.calls[len(a.calls)-1]
+		// Anonymous name/argument deltas continue the active anonymous call.
+		// Complete named object calls remain distinct, even with the same name.
+		if (part.ID == "" && (part.Name == "" || (isFragment && last.name == part.Name))) ||
+			(last.id == "" && (part.Name == "" || ((isFragment || len(raw) == 0) && last.name == part.Name))) {
+			call = last
+			if part.ID != "" {
+				call.id = part.ID
+				a.byID[part.ID] = call
+			}
 		}
 	}
+	if call == nil {
+		call = &deepVAccumulatedCall{id: part.ID, name: part.Name, args: make(map[string]interface{})}
+		a.calls = append(a.calls, call)
+		if part.ID != "" {
+			a.byID[part.ID] = call
+		}
+	}
+	if part.Name != "" {
+		if call.name != "" && call.name != part.Name {
+			return fmt.Errorf("DeepV tool call changed name")
+		}
+		call.name = part.Name
+	}
+	if isFragment {
+		var fragment string
+		if err := json.Unmarshal(raw, &fragment); err != nil {
+			return fmt.Errorf("invalid DeepV tool argument fragment")
+		}
+		if call.fragments.Len()+len(fragment) > 1024*1024 {
+			return fmt.Errorf("DeepV tool arguments exceed 1 MiB")
+		}
+		call.fragments.WriteString(fragment)
+	} else {
+		args, err := deepVToolArguments(raw)
+		if err != nil {
+			return err
+		}
+		for key, value := range args {
+			call.args[key] = value
+		}
+	}
+	return nil
+}
+
+func (a *deepVToolCalls) blocks() ([]ContentBlock, error) {
+	var result []ContentBlock
+	used := make(map[string]bool)
+	// Reserve upstream IDs so generated IDs cannot collide with later calls.
+	for _, call := range a.calls {
+		if call.id != "" {
+			used[call.id] = true
+		}
+	}
+	seq := 0
+	for _, call := range a.calls {
+		if call.name == "" {
+			return nil, fmt.Errorf("DeepV tool call has no name")
+		}
+		args := make(map[string]interface{})
+		if call.fragments.Len() > 0 {
+			var err error
+			args, err = deepVToolArguments(json.RawMessage(call.fragments.String()))
+			if err != nil {
+				return nil, fmt.Errorf("invalid DeepV tool arguments for %s: %w", call.name, err)
+			}
+		}
+		for key, value := range call.args {
+			args[key] = value
+		}
+		id := call.id
+		if id == "" {
+			for {
+				seq++
+				id = fmt.Sprintf("%s-%d", call.name, seq)
+				if !used[id] {
+					used[id] = true
+					break
+				}
+			}
+		}
+		input, err := json.Marshal(args)
+		if err != nil {
+			return nil, fmt.Errorf("encode DeepV tool arguments: %w", err)
+		}
+		result = append(result, ContentBlock{Type: "tool_use", ID: id, Name: call.name, Input: input})
+	}
+	return result, nil
 }
 
 // parseResponse 将 GenAI 响应转换为 Anthropic 格式
@@ -522,6 +632,9 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 		Role:  "assistant",
 		Model: model,
 	}
+	if len(genaiResp.Error) > 0 && string(genaiResp.Error) != "null" {
+		return nil, fmt.Errorf("DeepV response returned an error")
+	}
 	if len(genaiResp.Candidates) > 0 {
 		result.StopReason = mapDeepVFinishReason(genaiResp.Candidates[0].FinishReason)
 	}
@@ -535,11 +648,7 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 		}
 	}
 
-	// 上游的 functionCall 自带唯一 id，必须原样保留：同一轮并行调用如果回给
-	// 客户端两个相同 id，客户端后续的 tool_result 就无法区分是哪一个的结果。
-	// 个别响应不带 id 时才本地生成，并保证同一响应内不重号。
-	seenToolCallIDs := make(map[string]bool)
-	toolCallSeq := 0
+	var toolCalls deepVToolCalls
 
 	for _, candidate := range genaiResp.Candidates {
 		for _, part := range candidate.Content.Parts {
@@ -549,13 +658,9 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 			case part.Text != "":
 				result.Content = append(result.Content, ContentBlock{Type: "text", Text: part.Text})
 			case part.FunctionCall != nil:
-				inputJSON, _ := json.Marshal(part.FunctionCall.Args)
-				result.Content = append(result.Content, ContentBlock{
-					Type:  "tool_use",
-					ID:    deepVToolCallID(part.FunctionCall, seenToolCallIDs, &toolCallSeq),
-					Name:  part.FunctionCall.Name,
-					Input: inputJSON,
-				})
+				if err := toolCalls.add(part.FunctionCall); err != nil {
+					return nil, err
+				}
 			case part.InlineData != nil:
 				source, _ := json.Marshal(map[string]interface{}{
 					"type":       "base64",
@@ -568,6 +673,15 @@ func (p *DeepVProvider) parseResponse(body []byte, model string) (*Response, err
 				})
 			}
 		}
+	}
+
+	blocks, err := toolCalls.blocks()
+	if err != nil {
+		return nil, err
+	}
+	result.Content = append(result.Content, blocks...)
+	if len(blocks) > 0 {
+		result.StopReason = "tool_use"
 	}
 
 	return result, nil
@@ -770,6 +884,7 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 	openThinkingIndex := -1
 	stopReason := "end_turn"
 	var outputTokens int
+	var toolCalls deepVToolCalls
 
 	openBlock := func(block map[string]interface{}) int {
 		blockIndex++
@@ -797,17 +912,23 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "" || !strings.HasPrefix(line, "data: ") {
+		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
 		if data == "[DONE]" {
 			break
 		}
 
 		var genaiResp deepVResponse
 		if err := json.Unmarshal([]byte(data), &genaiResp); err != nil {
-			continue
+			return fmt.Errorf("invalid DeepV stream event")
+		}
+		if len(genaiResp.Error) > 0 && string(genaiResp.Error) != "null" {
+			return fmt.Errorf("DeepV stream returned an error")
 		}
 		if genaiResp.UsageMetadata != nil {
 			outputTokens = genaiResp.UsageMetadata.CandidatesTokenCount
@@ -841,13 +962,9 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 				case part.FunctionCall != nil:
 					flushTextBlock()
 					flushThinkingBlock()
-					inputJSON, _ := json.Marshal(part.FunctionCall.Args)
-					closeBlock(openBlock(map[string]interface{}{
-						"type":  "tool_use",
-						"id":    part.FunctionCall.ID,
-						"name":  part.FunctionCall.Name,
-						"input": json.RawMessage(inputJSON),
-					}))
+					if err := toolCalls.add(part.FunctionCall); err != nil {
+						return err
+					}
 				case part.InlineData != nil:
 					flushTextBlock()
 					flushThinkingBlock()
@@ -864,8 +981,21 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read DeepV stream: %w", err)
+	}
+	blocks, err := toolCalls.blocks()
+	if err != nil {
+		return err
+	}
 	flushTextBlock()
 	flushThinkingBlock()
+	for _, block := range blocks {
+		closeBlock(openBlock(map[string]interface{}{"type": "tool_use", "id": block.ID, "name": block.Name, "input": block.Input}))
+	}
+	if len(blocks) > 0 {
+		stopReason = "tool_use"
+	}
 
 	p.writeAnthropicEvent(writer, "message_delta", map[string]interface{}{
 		"delta": map[string]interface{}{"stop_reason": stopReason, "stop_sequence": nil},
@@ -873,7 +1003,7 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 	})
 	p.writeAnthropicEvent(writer, "message_stop", map[string]interface{}{})
 
-	return scanner.Err()
+	return nil
 }
 
 // writeAnthropicEvent 写入 Anthropic SSE 事件
