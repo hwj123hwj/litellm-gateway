@@ -31,7 +31,7 @@ fail()  { echo -e "${RED}✗${NC}  $*"; exit 1; }
 # ── Banner ──
 echo ""
 echo -e "${BOLD}  ╔══════════════════════════════════════╗${NC}"
-echo -e "${BOLD}  ║      LLM Gateway Installer          ║${NC}"
+echo -e "${BOLD}  ║     EasyGateway Installer           ║${NC}"
 echo -e "${BOLD}  ║   轻量级 LLM API 网关 (18MB 内存)   ║${NC}"
 echo -e "${BOLD}  ╚══════════════════════════════════════╝${NC}"
 echo ""
@@ -167,7 +167,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     MASTER_KEY="sk-$(head -c 24 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)"
 
     echo ""
-    echo -e "${BOLD}  ── 配置 LLM Gateway ──${NC}"
+    echo -e "${BOLD}  ── 配置 EasyGateway ──${NC}"
     echo ""
     echo -e "  选择要启用的提供商:"
     echo -e "  ${CYAN}1${NC}) 智谱 GLM（glm-5.3 / glm-5.3-flash）"
@@ -188,7 +188,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     fi
 
     cat > "${CONFIG_FILE}" << EOF
-# LLM Gateway 配置文件
+# EasyGateway 配置文件
 # 网关认证 token（自动生成，用于 Claude Code 等客户端连接）
 LITELLM_MASTER_KEY=${MASTER_KEY}
 

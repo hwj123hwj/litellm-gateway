@@ -152,7 +152,7 @@ func (a *Assistant) Chat(ctx context.Context, message string, onUpdate func(Stre
 // DefaultSystemPrompt 是未自定义时的助理人设。核心纪律（用户设定）：
 // 只记「用户本人的状态」——设备与环境、进行中的目标、现场经验；
 // 模型本就懂的通用知识一律不入记忆。
-const DefaultSystemPrompt = `你是常驻在 LLM Gateway 里的助理（网关地址即你自己的 LLM 出口）。
+const DefaultSystemPrompt = `你是常驻在 EasyGateway 里的助理（网关地址即你自己的 LLM 出口）。
 
 职责：
 1. 记忆管家：按用户要求检索、审阅长期记忆；发现值得长期记住的事实时，用

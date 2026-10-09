@@ -142,7 +142,7 @@ jobs:
           CHANGELOG=$(git log ${PREV_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --no-merges 2>/dev/null || echo "- 初始版本")
 
           cat > release_notes.md << EOF
-          ## LLM Gateway ${CURRENT_TAG}
+          ## EasyGateway ${CURRENT_TAG}
 
           ### 安装
 
@@ -187,7 +187,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "LLM Gateway ${{ github.ref_name }}"
+          name: "EasyGateway ${{ github.ref_name }}"
           body_path: release_notes.md
           files: |
             release/gateway-linux-amd64

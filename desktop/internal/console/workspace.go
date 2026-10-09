@@ -54,8 +54,8 @@ func (a *App) skillsView(c *ui.Context) {
 	}
 	ui.List(c, nil, len(a.skills.Skills), func(i int) {
 		s := a.skills.Skills[i]
-		ui.Column(c.Key(s.ID)).Padding(0, 0, 8).Children(func() {
-			card(c, func() {
+		ui.Column(c.Key(s.ID)).Children(func() {
+			row(c, func() {
 				name := s.Name
 				if name == "" {
 					name = s.ID
@@ -71,7 +71,7 @@ func (a *App) skillsView(c *ui.Context) {
 						installed = installed && s.Installed[target]
 					}
 					if installed {
-						ui.Text(c, "已安装").TextColor(c.Theme().Accent)
+						chip(c, "已安装", okGreen)
 					} else {
 						muted(c, "未安装")
 					}
@@ -151,8 +151,8 @@ func (a *App) memoryView(c *ui.Context) {
 	})
 	ui.List(c, nil, len(a.memories), func(i int) {
 		m := a.memories[i]
-		ui.Column(c.Key(fmt.Sprint(m.ID))).Padding(0, 0, 10).Children(func() {
-			card(c, func() {
+		ui.Column(c.Key(fmt.Sprint(m.ID))).Children(func() {
+			row(c, func() {
 				ui.Row(c).Gap(12).Children(func() {
 					status(c, m.Status)
 					muted(c, m.Scope+" · "+m.ScopeKey)
@@ -170,7 +170,7 @@ func (a *App) memoryView(c *ui.Context) {
 					})
 				})
 				ui.Text(c, m.Statement).Selectable()
-				muted(c, fmt.Sprintf("来源 %s · 置信度 %.2f · 命中 %d 次 · %s", m.Source, m.Confidence, m.Hits, m.Updated))
+				meta(c, "来源 "+m.Source, fmt.Sprintf("置信度 %.2f", m.Confidence), fmt.Sprintf("命中 %d 次", m.Hits), m.Updated)
 			})
 		})
 	}).Grow(1).Children(func() {
@@ -228,9 +228,9 @@ func (a *App) settingsView(c *ui.Context) {
 						ui.Text(c, strings.ToUpper(target)).FontSize(18).Bold()
 						ui.Spacer(c)
 						if configInSync(cfg, choices) {
-							ui.Text(c, "已同步").TextColor(c.Theme().Accent)
+							chip(c, "已同步", okGreen)
 						} else {
-							muted(c, "待同步")
+							chip(c, "待同步", c.Theme().Accent)
 						}
 					})
 					if cfg.Error != "" {
@@ -300,18 +300,36 @@ func (a *App) settingsView(c *ui.Context) {
 		})
 	})
 }
+func bubble(c *ui.Context, who, text string, user bool) {
+	theme := c.Theme()
+	background := theme.Surface
+	labelColor := theme.TextMuted
+	if user {
+		background = theme.Accent.Alpha(.08)
+		labelColor = theme.Accent
+	}
+	ui.Column(c).Padding(14).Gap(6).Background(background).Border(1, theme.Border).Radius(10).Children(func() {
+		ui.Text(c, who).Bold().FontSize(13).TextColor(labelColor)
+		ui.Text(c, text).Selectable()
+	})
+}
 func (a *App) assistantView(c *ui.Context) {
 	ui.Scroll(c).Grow(1).TrackScroll(&a.chatList).Gap(18).Selectable().Children(func() {
 		if a.chatUser == "" {
 			ui.Text(c, "你的网关助理").FontSize(22).Bold()
 			muted(c, "可以询问模型、路由与运行状态，或整理工作区记忆。")
+			ui.Row(c).Wrap().Gap(8).Children(func() {
+				for _, suggestion := range []string{"今天网关运行得怎么样？", "哪些 Provider 熔断了？", "总结待确认的记忆"} {
+					prompt := suggestion
+					ui.Button(c, prompt).OnClick(func() { a.chatInput = prompt })
+				}
+			})
 		}
 		if a.chatUser != "" {
-			card(c, func() { ui.Text(c, "你").Bold(); ui.Text(c, a.chatUser) })
+			bubble(c, "你", a.chatUser, true)
 		}
 		if a.chatReply != "" {
-			ui.Text(c, "助理").Bold()
-			ui.Text(c, a.chatReply)
+			bubble(c, "助理", a.chatReply, false)
 		}
 		if a.chatStatus != "" {
 			muted(c, a.chatStatus)

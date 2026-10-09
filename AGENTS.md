@@ -2,7 +2,7 @@
 
 ## 1. 项目定位
 
-LLM Gateway 是个人 AI 基础设施，不只是 API 转发器。它为 HwjCode、Claude Code、Codex CLI、Pi、飞书及其他 AI 应用提供：
+EasyGateway 是个人 AI 基础设施，不只是 API 转发器。它为 Claude Code、Codex CLI、Pi、飞书及其他 AI 应用提供：
 
 - 统一 API 入口和认证；
 - OpenAI Chat Completions、Responses、Anthropic Messages 兼容；

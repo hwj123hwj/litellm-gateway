@@ -391,7 +391,7 @@ function New-GatewayConfig {
 
     $masterKey = New-RandomMasterKey
     $configLines = @(
-        '# LLM Gateway configuration'
+        '# EasyGateway configuration'
         '# Gateway authentication token'
         "LITELLM_MASTER_KEY=$masterKey"
         ''
@@ -582,7 +582,7 @@ function Invoke-GatewayInstaller {
 
     Write-Host ''
     Write-Host '  ========================================'
-    Write-Host '       LLM Gateway Windows Installer'
+    Write-Host '       EasyGateway Windows Installer'
     Write-Host '  ========================================'
     Write-Host ''
     Write-InstallerMessage Info 'Platform: windows/amd64'

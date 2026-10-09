@@ -6,7 +6,7 @@ The gateway is the capture and routing layer for the personal AI infrastructure:
 AI clients
    │  OpenAI / Responses / Anthropic
    ▼
-LLM Gateway ── sanitized conversation_archives ──▶ /admin/archives/export
+EasyGateway ── sanitized conversation_archives ──▶ /admin/archives/export
                                                         │
                          ┌──────────────────────────────┴──────────────────────────────┐
                          ▼                                                             ▼
@@ -16,7 +16,7 @@ LLM Gateway ── sanitized conversation_archives ──▶ /admin/archives/exp
                  knowledge cards + INDEX.md                              ~/.openwiki/wiki Markdown
                          └──────────────────────────────┬──────────────────────────────┘
                                                         ▼
-                                           HwjCode `/knowledge search`
+                                           openwiki `search`（统一检索入口）
 ```
 
 ## Gateway contract
@@ -49,8 +49,11 @@ The companion `agent-lessons` repository provides
 `scripts/gateway-sync.mjs`, which writes private raw pages and stable compiler
 inputs and can invoke the existing `kb-llm-compile.mjs --platform gateway` and
 `kb-index.mjs` pipeline. The companion `hwj-wiki` repository provides the
-`gateway` OpenWiki connector and the read-only unified search command. HwjCode
-can invoke that command through `/knowledge search <query>` or `/kb search`.
+`gateway` OpenWiki connector and the read-only unified search command. The
+search entry is `openwiki search <query>` (add `--json` for structured
+output); it is deterministic, read-only, and does not issue another model
+prompt. The former HwjCode `/knowledge search` entry was removed with that
+project (2026-09-27).
 
 ## Manual smoke test
 
