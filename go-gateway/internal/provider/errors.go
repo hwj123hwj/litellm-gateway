@@ -62,14 +62,20 @@ func (e *ProviderError) HTTPStatus() int {
 //   - 429 / 5xx / 网络类：上游暂时不可用，等下一档。
 //   - 401/402/403/404：凭据失效、额度用尽、账号对该模型无权限、模型不存在，
 //     都是该 provider 的固有限制，换 provider 才可能成功。
-// 只有 400/422 这类「请求本身不合法」才终止降级——换个 provider 也还是同样的
+//
+// 已知的 400 地区限制属于供应商不可用，允许继续降级。
+// 其他 400/422 这类「请求本身不合法」才终止降级——换个 provider 也还是同样的
 // 请求错误，继续重试只会掩盖问题。
 func (e *ProviderError) Retryable() bool {
 	if e == nil {
 		return false
 	}
 	switch e.StatusCode {
-	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+	case http.StatusBadRequest:
+		// Gemini may encode regional availability as 400 rather than 403.
+		// Match its explicit service restriction; generic parameter errors still stop.
+		return strings.Contains(strings.ToLower(e.Message), "user location is not supported for the api use")
+	case http.StatusUnprocessableEntity:
 		return false
 	}
 	return true

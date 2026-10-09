@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -153,6 +155,11 @@ func TestRouterFallbackFaultMatrix(t *testing.T) {
 			wantFallback: true,
 		},
 		{
+			name:         "regional availability restriction",
+			err:          &ProviderError{Provider: "antigravity", StatusCode: 400, Message: "User location is not supported for the API use."},
+			wantFallback: true,
+		},
+		{
 			name:         "invalid request",
 			err:          &ProviderError{Provider: "first", StatusCode: http.StatusBadRequest, Message: "bad request"},
 			wantFallback: false,
@@ -186,5 +193,26 @@ func TestRouterFallbackFaultMatrix(t *testing.T) {
 				t.Fatalf("fallback calls = %d, want 0", second.calls)
 			}
 		})
+	}
+}
+
+func TestRegionalRestrictionClassification(t *testing.T) {
+	for _, tt := range []struct {
+		status  int
+		message string
+		want    bool
+	}{
+		{400, "User location is not supported for the API use.", true},
+		{400, "USER LOCATION IS NOT SUPPORTED FOR THE API USE.", true},
+		{400, "location field is invalid", false},
+		{400, "unsupported image format", false},
+		{422, "User location is not supported for the API use.", false},
+	} {
+		resp := &http.Response{StatusCode: tt.status, Header: http.Header{}}
+		body, _ := json.Marshal(map[string]any{"error": map[string]string{"message": tt.message}})
+		err := NewHTTPError("antigravity", resp, body)
+		if got := ShouldFallback(fmt.Errorf("wrapped: %w", err)); got != tt.want {
+			t.Errorf("%d %q fallback=%v want=%v", tt.status, tt.message, got, tt.want)
+		}
 	}
 }
