@@ -103,10 +103,6 @@ providers:
       - id: BAAI/bge-m3
         capabilities: [embedding]
         description: "免费嵌入模型（1024 维），知识库向量化用"
-      # 免费兜底：带语种检测字段，多语言混杂音频首选
-      - id: FunAudioLLM/SenseVoiceSmall
-        capabilities: [audio_transcription]
-        description: "免费兜底，带语种检测；多语言/不确定来源音频首选"
       # 日常主力：准确流畅，常规录音转写
       - id: XingChenAGI/XingChenASR-V3.2
         capabilities: [audio_transcription]
