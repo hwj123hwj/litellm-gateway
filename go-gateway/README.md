@@ -602,3 +602,5 @@ docker-compose up -d
 | Docker 镜像 | ~50 MB | ~711 MB |
 
 客户端集成面板支持分别勾选 EasyAgent、ZCode 和 Harness 要同步的聊天模型。默认勾选客户端当前已有的模型，新增模型不会自动加入；首次配置默认全选。同步只替换该客户端的网关模型清单，并在写入前备份。取消勾选的模型会从清单移除；至少选择一个模型才能同步。
+
+降级链遇到 Gemini 的 `400 User location is not supported for the API use` 时，会继续尝试下一供应商；其他 HTTP 400 参数错误与 HTTP 422 仍终止降级。
