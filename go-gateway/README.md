@@ -129,7 +129,7 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 
 ### 技能面板（custom-skills 技能市场）
 
-Dashboard 的 Skills 页在设置 `SKILLS_REPO_PATH` 指向 custom-skills 仓库根目录后可用。仓库内的 `registry/skills.json` 是技能目录（`generate:registry` 生成），`skills.enabled.json` 是启用清单（声明哪些技能装到哪些目录）。同步用**符号链接**把仓库的 `skills/<id>` 铺进目标目录：仓库更新即时生效，重装系统后一条同步命令即可恢复；清理时只移除指向技能仓库的链接，目标目录里的其他文件一律不动。
+桌面端的 Skills 页在设置 `SKILLS_REPO_PATH` 指向 custom-skills 仓库根目录后可用。仓库内的 `registry/skills.json` 是技能目录（`generate:registry` 生成），`skills.enabled.json` 是启用清单（声明哪些技能装到哪些目录）。同步用**符号链接**把仓库的 `skills/<id>` 铺进目标目录：仓库更新即时生效，重装系统后一条同步命令即可恢复；清理时只移除指向技能仓库的链接，目标目录里的其他文件一律不动。
 
 目标目录属于**运行网关的主机**，使用绝对路径或 `~/`（网关进程用户的 home）；不支持相对目标路径。技能 ID 必须是 registry 内不含路径分隔符的目录名。保存与同步均校验清单，保存采用临时文件替换，并串行处理管理端的保存/同步请求。`targets` 和 `enabled` 都必须显式传入数组，全部停用用 `enabled: []`。
 
@@ -456,7 +456,7 @@ make docker-run    # Docker Compose 启动
 
 ### 方式一：迷你主机自动同步（推荐）
 
-.github/workflows/ci.yml 在每个 PR 上运行 Go 检查、Dashboard 嵌入检查、Windows 安装器回归和 Linux x86_64 构建；合并到 main 后，只有这些检查全通过，GitHub Actions 才会发布迷你主机使用的构建产物。PR 构建不会发布给更新器。
+.github/workflows/ci.yml 在每个 PR 上运行 Go 检查、迷你主机更新器回归、Windows 安装器回归和 Linux x86_64 构建；合并到 main 后，只有这些检查全通过，GitHub Actions 才会发布迷你主机使用的构建产物。PR 构建不会发布给更新器。
 
 迷你主机上的用户级 systemd timer 每 10 分钟检查一次 GitHub。主机只会部署与当前 main 完全一致、CI 成功且摘要校验通过的构建产物；安装后会检查网关健康状态，并触发现有 systemd 服务重启。如果更新后健康检查失败，会恢复上一份二进制。构建失败、检查进行中或 main 已继续前进时，现有网关不变。
 

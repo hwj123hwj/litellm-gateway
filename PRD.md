@@ -10,7 +10,7 @@
 
 ## 2. 背景
 
-目前同时使用 HwjCode、Claude Code、Codex CLI、Pi、飞书内置能力等多个 AI 应用，也使用智谱、阿里以及其他模型 Provider。
+目前同时使用 Claude Code、Codex CLI、Pi、飞书内置能力等多个 AI 应用，也使用智谱、阿里以及其他模型 Provider。
 
 如果每个应用都直接连接 Provider，会产生以下问题：
 
@@ -25,7 +25,7 @@
 
 ## 3. 产品定位
 
-LLM Gateway 负责四件事：
+EasyGateway 负责四件事：
 
 1. 统一接入：为所有 AI 应用提供统一地址、认证和模型目录；
 2. 统一调度：根据模型能力和运行状态选择 Provider；
@@ -170,8 +170,7 @@ Admin API 和管理端至少支持：
 
 - 网关：采集、保护、归档、导出；
 - agent-lessons：多源采集、清洗、编译和分类；
-- hwj-wiki personal：个人知识库和检索；
-- EasyAgent .llm-wiki：代码事实和项目技术知识。
+- hwj-wiki personal：个人知识库和检索。
 
 ### R8：管理端与部署
 

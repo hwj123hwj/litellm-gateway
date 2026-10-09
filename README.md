@@ -1,6 +1,6 @@
-# LLM Gateway
+# EasyGateway
 
-轻量级 LLM API 网关，用 Go 编写。支持智谱 GLM、GitHub Copilot、ChatGPT 等提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
+轻量级个人 LLM API 网关，用 Go 编写（前身 litellm-gateway / LLM Gateway）。支持智谱 GLM、GitHub Copilot、ChatGPT 等提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
 
 ## 一键安装
 
@@ -218,6 +218,9 @@ litellm-gateway/
 | [AGENTS.md](AGENTS.md) | 项目开发准则 |
 | [go-gateway/README.md](go-gateway/README.md) | Go 网关完整文档（架构、模型列表、部署） |
 | [desktop/README.md](desktop/README.md) | 原生桌面端构建、连接与安装 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 纯 Go 架构总览与 TS → Go 迁移记录 |
+| [docs/MEMORY_DESIGN.md](docs/MEMORY_DESIGN.md) | Agent 长期记忆层设计 |
+| [docs/knowledge-flywheel.md](docs/knowledge-flywheel.md) | 知识飞轮与归档导出接入手册 |
 
 ## 环境变量
 

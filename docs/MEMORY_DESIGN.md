@@ -11,7 +11,7 @@
 |---|---|
 | 网关（本仓库） | 记忆存储、作用域路由、命中观测、治理 API、（后续）请求注入 |
 | agent-lessons | 从归档流编译候选知识（后续接入：编译产物以 candidate 落回本层） |
-| hwj-wiki / .llm-wiki | 长文档与代码事实的检索，与本层互补不重叠 |
+| hwj-wiki personal | 长文档与代码事实的检索，与本层互补不重叠 |
 
 设计原则：
 
@@ -110,5 +110,5 @@
 **配置**：`ASSISTANT_ENABLED` + `ASSISTANT_MODEL`（/v1/models 中的 ID），
 `ASSISTANT_BASE_URL` / `ASSISTANT_API_KEY` 可选（默认自环 + MasterKey）。
 
-**与面板的关系**：localhost:4001 的 web 面板后续加对话页即可消费该 SSE
-端点，助手即"住在网关里的记忆管家"。
+**与管理端的关系**：desktop/ 原生桌面端的流式助理页直接消费该 SSE 端点，
+助手即"住在网关里的记忆管家"；浏览器面板已随前端工具链一并移除。
