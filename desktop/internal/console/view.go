@@ -279,16 +279,38 @@ func (a *App) editor(c *ui.Context) {
 					input(c, "输入模态", &a.editorModalities, "text, image, audio, video, file")
 				case "route":
 					ui.Text(c, a.editorID).Bold().Selectable()
-					input(c, "Provider 顺序", &a.editorRoute, "多个名称用逗号分隔")
-					muted(c, "从左到右依次尝试，只填写该模型已配置的 Provider。")
-					for _, r := range a.routes {
-						if r.Model == a.editorID {
-							names := []string{}
-							for _, p := range r.Providers {
-								names = append(names, p.Name)
+					muted(c, "从上到下依次尝试；某一档失败自动落到下一档。")
+					if len(a.editorOrder) == 0 {
+						muted(c, "回退链为空。")
+					}
+					for i, name := range a.editorOrder {
+						last := i == len(a.editorOrder)-1
+						ui.Row(c.Key("entry-" + name)).Gap(8).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, fmt.Sprintf("%d. %s", i+1, name)).Grow(1).MinWidth(0).SingleLine()
+							if i > 0 {
+								ui.Button(c, "上移 "+name).Disabled(a.busy != "").OnClick(func() {
+									a.editorOrder[i-1], a.editorOrder[i] = a.editorOrder[i], a.editorOrder[i-1]
+								})
 							}
-							muted(c, "当前链："+strings.Join(names, " → "))
-						}
+							if !last {
+								ui.Button(c, "下移 "+name).Disabled(a.busy != "").OnClick(func() {
+									a.editorOrder[i+1], a.editorOrder[i] = a.editorOrder[i], a.editorOrder[i+1]
+								})
+							}
+							ui.Button(c, "移除 "+name).Disabled(a.busy != "").OnClick(func() {
+								a.editorOrder = append(a.editorOrder[:i], a.editorOrder[i+1:]...)
+							})
+						})
+					}
+					if candidates := a.routeCandidates(a.editorID, a.editorOrder); len(candidates) > 0 {
+						muted(c, "可加入回退链：")
+						ui.Row(c).Wrap().Gap(8).Children(func() {
+							for _, name := range candidates {
+								ui.Button(c, "添加 "+name).Disabled(a.busy != "").OnClick(func() {
+									a.editorOrder = append(a.editorOrder, name)
+								})
+							}
+						})
 					}
 				}
 			}).Disabled(a.busy != "")
@@ -391,8 +413,12 @@ func (a *App) saveEditor() {
 	endpoint := "/models/" + url.PathEscape(a.editorID)
 	body := map[string]any{"capabilities": sortedSelection(a.editorCaps), "input_modalities": split(a.editorModalities)}
 	if a.editorKind == "route" {
+		if len(a.editorOrder) == 0 {
+			a.problem = "回退链不能为空；至少保留一个条目，或取消编辑。"
+			return
+		}
 		endpoint = "/routes/" + url.PathEscape(a.editorID)
-		body = map[string]any{"providers": split(a.editorRoute)}
+		body = map[string]any{"providers": a.editorOrder}
 	}
 	a.work("正在保存", 35*time.Second, func(ctx context.Context, client *connection.Client) (func(), error) {
 		err := client.JSON(ctx, "PUT", endpoint, body, nil)
@@ -532,21 +558,17 @@ func (a *App) modelsView(c *ui.Context) {
 						a.editorModalities = strings.Join(m.Modalities, ", ")
 						a.editorOpen = true
 					})
-					ui.Button(c, "路由顺序").Label(m.Name + " 路由顺序").Disabled(a.busy != "").OnClick(func() {
-						a.editorKind = "route"
-						a.editorID = m.Name
-						names := append([]string{}, m.Providers...)
-						for _, r := range a.routes {
-							if r.Model == m.Name {
-								names = nil
-								for _, p := range r.Providers {
-									names = append(names, p.Name)
-								}
-							}
-						}
-						a.editorRoute = strings.Join(names, ", ")
-						a.editorOpen = true
-					})
+					if chain := a.routeOrderFor(m.Name); len(chain) > 1 {
+						// 只有存在多档回退链的模型（如 coding）才需要调整顺序；
+						// 单 Provider 模型没有回退可言，不显示入口。
+						ordered := append([]string(nil), chain...)
+						ui.Button(c, "路由顺序").Label(m.Name + " 路由顺序").Disabled(a.busy != "").OnClick(func() {
+							a.editorKind = "route"
+							a.editorID = m.Name
+							a.editorOrder = ordered
+							a.editorOpen = true
+						})
+					}
 				})
 				meta(c, "请求 "+shortNumber(int64(m.Requests)), "Tokens "+shortNumber(m.Tokens), "延迟 "+formatLatency(m.AvgLatency), "缓存命中 "+percent(m.CacheHitRate))
 			})
