@@ -15,52 +15,53 @@ import (
 )
 
 type App struct {
-	Version                                                                            string
-	store                                                                              *connection.Store
-	profiles                                                                           connection.State
-	page                                                                               string
-	dispatch                                                                           func(func())
-	sequence                                                                           uint64
-	cancel                                                                             context.CancelFunc
-	busy, notice, problem                                                              string
-	loaded                                                                             bool
-	dashboard                                                                          Dashboard
-	providers                                                                          []Provider
-	models                                                                             []Model
-	routes                                                                             []Route
-	logs                                                                               []Log
-	logLimit, logFilter                                                                string
-	logSelected                                                                        int
-	table                                                                              ui.ListState
-	listViews                                                                          listViewState
-	modelFilter                                                                        string
-	skills                                                                             Skills
-	project, loadedProject, targets                                                    string
-	skillSelection                                                                     map[string]bool
-	skillDirty                                                                         bool
-	memories                                                                           []Memory
-	memoryFilter                                                                       string
-	memoryScope, memoryKey, memoryText                                                 string
-	prompt                                                                             Prompt
-	promptDraft                                                                        string
-	configs                                                                            map[string]ClientConfig
-	configSelection                                                                    map[string]map[string]bool
-	feedback                                                                           []Feedback
-	chatInput, chatReply, chatUser, chatStatus, feedbackNote                           string
-	chatModels                                                                         []string
-	chatModel, chatDefault                                                             string
-	chatList                                                                           ui.ScrollState
-	editorOpen                                                                         bool
-	editorKind, editorTitle, editorID, editorName, editorURL, editorToken, editorRoute string
-	editorCaps                                                                         map[string]bool
-	editorModalities                                                                   string
-	deleteOpen                                                                         bool
-	deleteAction                                                                       func()
-	browserOpen                                                                        bool
-	browserKind                                                                        string
-	PickFolder                                                                         func(done func(path string, ok bool))
-	browserPath, browserParent                                                         string
-	browserDirs                                                                        []string
+	Version                                                               string
+	store                                                                 *connection.Store
+	profiles                                                              connection.State
+	page                                                                  string
+	dispatch                                                              func(func())
+	sequence                                                              uint64
+	cancel                                                                context.CancelFunc
+	busy, notice, problem                                                 string
+	loaded                                                                bool
+	dashboard                                                             Dashboard
+	providers                                                             []Provider
+	models                                                                []Model
+	routes                                                                []Route
+	logs                                                                  []Log
+	logLimit, logFilter                                                   string
+	logSelected                                                           int
+	table                                                                 ui.ListState
+	listViews                                                             listViewState
+	modelFilter                                                           string
+	skills                                                                Skills
+	project, loadedProject, targets                                       string
+	skillSelection                                                        map[string]bool
+	skillDirty                                                            bool
+	memories                                                              []Memory
+	memoryFilter                                                          string
+	memoryScope, memoryKey, memoryText                                    string
+	prompt                                                                Prompt
+	promptDraft                                                           string
+	configs                                                               map[string]ClientConfig
+	configSelection                                                       map[string]map[string]bool
+	feedback                                                              []Feedback
+	chatInput, chatReply, chatUser, chatStatus, feedbackNote              string
+	chatModels                                                            []string
+	chatModel, chatDefault                                                string
+	chatList                                                              ui.ScrollState
+	editorOpen                                                            bool
+	editorKind, editorTitle, editorID, editorName, editorURL, editorToken string
+	editorOrder                                                           []string
+	editorCaps                                                            map[string]bool
+	editorModalities                                                      string
+	deleteOpen                                                            bool
+	deleteAction                                                          func()
+	browserOpen                                                           bool
+	browserKind                                                           string
+	PickFolder                                                            func(done func(path string, ok bool))
+	browserPath, browserParent                                            string
+	browserDirs                                                           []string
 }
 
 func New(store *connection.Store) *App {
@@ -319,6 +320,47 @@ func (a *App) pickLocalFolder() {
 			a.dispatch(func() { a.project = trimmed })
 		}
 	})
+}
+
+// routeCandidates 返回模型配置过、但尚未加入当前回退链的 Provider。
+func (a *App) routeCandidates(model string, order []string) []string {
+	inChain := map[string]bool{}
+	for _, name := range order {
+		inChain[name] = true
+	}
+	candidates := []string{}
+	seen := map[string]bool{}
+	for _, r := range a.routes {
+		if r.Model != model {
+			continue
+		}
+		for _, p := range r.Providers {
+			if !inChain[p.Name] && !seen[p.Name] {
+				seen[p.Name] = true
+				candidates = append(candidates, p.Name)
+			}
+		}
+	}
+	return candidates
+}
+
+// routeOrderFor 返回模型当前回退链顺序；无路由时回退到模型自带 Provider。
+func (a *App) routeOrderFor(model string) []string {
+	for _, r := range a.routes {
+		if r.Model == model {
+			names := make([]string, 0, len(r.Providers))
+			for _, p := range r.Providers {
+				names = append(names, p.Name)
+			}
+			return names
+		}
+	}
+	for _, m := range a.models {
+		if m.Name == model {
+			return append([]string(nil), m.Providers...)
+		}
+	}
+	return nil
 }
 
 func (a *App) chatModelParam() string {

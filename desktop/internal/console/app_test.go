@@ -115,7 +115,7 @@ func TestNativeModelEditorSendsCapabilitiesAndRoute(t *testing.T) {
 		t.Fatal("model save not sent")
 	}
 	click(t, tt, "coding 路由顺序")
-	a.editorRoute = "beta, alpha"
+	click(t, tt, "下移 alpha") // [alpha, beta] → [beta, alpha]
 	tt.Frame()
 	click(t, tt, "保存")
 	await(t, a, queue)
