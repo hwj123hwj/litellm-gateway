@@ -547,6 +547,64 @@ providers:
         capabilities: [text, tool_calling, streaming, reasoning]
         max_input_tokens: 200000
         max_output_tokens: 64000
+  - name: loomy
+    type: channel
+    channel: loomy
+    #
+    # Loomy（讯飞）桌面客户端。推理端点是普通 OpenAI Chat Completions
+    # （POST {apiBase}/chat/completions），因此复用 OpenAIProvider；渠道侧多做的三件事：
+    #   1. 鉴权 Authorization: Bearer <token>（由 AuthSource 提供）；
+    #   2. 业务端点只认自定义头 token，chat 端点两个都发——当前账号令牌通过
+    #      DynamicHeaders 每请求写进 `token` 头（静态 ExtraHeaders 表达不了随账号变化的值）；
+    #   3. 模型 ID 带 `loomy/` 前缀避免与既有供应商重名，请求体里再剥掉前缀（Transform）。
+    #
+    # 登录是「微信扫码 + 回环服务」：网关在 127.0.0.1 随机端口起一个小服务，/wechat/qr 渲染
+    # 扫码页，页面内轮询 /wechat/poll；已绑定微信的账号扫完直接出会话令牌，新账号则跳
+    # /wechat/complete 补手机号（短信验证码）或跳过绑定。
+    # ⚠️ 网关需要讯飞账号侧应用凭据（accessKeyId/accessKeySecret）才能调用账号接口：
+    # 通过 LOOMY_ACCESS_KEY_ID / LOOMY_ACCESS_KEY_SECRET（可选 LOOMY_APP_ID /
+    # LOOMY_WECHAT_APP_ID）环境变量，或 <LLM_GATEWAY_HOME>/loomy-client.json
+    # （{"access_key_id":..,"access_key_secret":..}）提供，二者都没有时登录会直接报错并给出指引
+    # （第三方客户端密钥不进公开仓库）。
+    #
+    # ⚠️ 同其它账号渠道：这是复刻官方客户端的非官方用法，可能违反服务条款并导致账号被封。
+    # 仅用于本机个人测试，不要对外分发。
+    #
+    # 模型清单取自客户端自带的 LOOMY_FALLBACK_MODELS（含上下文档位）。全为文本模型；
+    # 客户端会发 reasoning_effort，故标注 reasoning。模型 ID 加 `loomy/` 前缀。
+    models:
+      - id: loomy/deepseek-v4-flash-0731
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1048576
+        max_output_tokens: 65536
+      - id: loomy/MiniMax-M3
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1048576
+        max_output_tokens: 65536
+      - id: loomy/Kimi-k2.6
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 262144
+        max_output_tokens: 65536
+      - id: loomy/qwen-3.8-max
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+      - id: loomy/GLM-5.3-Flash
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1048576
+        max_output_tokens: 65536
+      - id: loomy/qwen3.8-flash
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+      - id: loomy/spark-x
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1048576
+        max_output_tokens: 65536
+      - id: loomy/mimo-v2.5
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1048576
+        max_output_tokens: 65536
 
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、

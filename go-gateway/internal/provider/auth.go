@@ -76,6 +76,20 @@ func (c *Config) applyAuth(req *http.Request, bearer bool) bool {
 	return true
 }
 
+// applyDynamicHeaders 写入按请求动态求值的头（见 Config.DynamicHeaders）。
+// 在 applyAuth 之后调用：applyAuth 在未登录时会提前返回、连 ExtraHeaders 都不写，
+// 而动态头单独处理，语义清晰且不受该早退影响。值为空串时跳过。
+func applyDynamicHeaders(req *http.Request, source func() map[string]string) {
+	if source == nil {
+		return
+	}
+	for name, value := range source() {
+		if value != "" {
+			req.Header.Set(name, value)
+		}
+	}
+}
+
 // refreshAuth 在 AuthSource 存在且上游返回鉴权失败时尝试续期一次。
 // 返回 true 表示令牌已更新，调用方应重建请求重试。
 func (c *Config) refreshAuth(ctx context.Context, status int) bool {
