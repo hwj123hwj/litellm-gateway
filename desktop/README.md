@@ -32,6 +32,8 @@ go run github.com/egoist/mygo/cmd/mygo build
 
 本机只维护 `/Applications/EasyGateway.app` 一份，通过替换这个固定路径更新。不要打开不同构建目录中的 `.app`，避免 Spotlight 和应用注册重复。构建目录使用 `.noindex` 后缀；单实例锁避免重复运行。
 
+推送版本标签后，Release 流程会验证标签与 `mygo.json` 版本一致，并上传 macOS Apple Silicon 桌面 DMG、网关二进制及 `SHA256SUMS`；任一构建失败时不会发布缺少客户端的 Release。桌面安装包当前仅提供 macOS arm64，其他平台仍需单独验收。
+
 默认构建为 ad-hoc 签名。公开分发需在 `mygo.json` 配置 `macos.signingIdentity` 与 `macos.notarize.keychainProfile`，完成 Developer ID 签名、公证和票据附加；不在仓库保存证书或凭据。桌面客户端尚未配置在线自动更新。
 
 复现问题时，可设置 `GATEWAY_DESKTOP_CONFIG_DIR` 到临时目录以隔离连接配置。应用图标保存在 `resources/icon.png`，由 MyGo 打包为各平台资源。
