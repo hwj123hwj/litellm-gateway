@@ -252,3 +252,94 @@ func mustRequest(t *testing.T, body string) *provider.Request {
 	}
 	return &req
 }
+
+// lobsterProvider 复刻 channels.go 里 lobster 的装配：OpenAI 协议 + 客户端复刻头。
+func lobsterProvider(accounts *Accounts, url string, headers map[string]string) *provider.OpenAIProvider {
+	return provider.NewOpenAIProvider(&provider.Config{
+		Name:         "kimi-k2.7-code",
+		URL:          url,
+		Auth:         accounts,
+		ExtraHeaders: headers,
+	})
+}
+
+// TestLobsterProviderSendsBearerAndClientHeaders 验证 lobster 上游要求
+// Authorization: Bearer 且三个客户端复刻头齐全（缺版本头会被当非官方客户端拒）。
+func TestLobsterProviderSendsBearerAndClientHeaders(t *testing.T) {
+	var gotAuth string
+	gotHeaders := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		for name := range lobsterClientHeadersForTest() {
+			gotHeaders[name] = r.Header.Get(name)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c","object":"chat.completion","model":"kimi-k2.7-code","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	accounts := channelAccounts(t, "lobster", "lobster-token")
+	headers := lobsterClientHeadersForTest()
+	p := lobsterProvider(accounts, server.URL, headers)
+
+	req := mustRequest(t, `{"model":"kimi-k2.7-code","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	if _, err := p.ForwardRequest(context.Background(), req); err != nil {
+		t.Fatalf("ForwardRequest failed: %v", err)
+	}
+	if gotAuth != "Bearer lobster-token" {
+		t.Fatalf("lobster 必须用 Authorization: Bearer，得到 %q", gotAuth)
+	}
+	for name, want := range headers {
+		if gotHeaders[name] != want {
+			t.Fatalf("lobster 客户端头 %s 应为 %q，得到 %q", name, want, gotHeaders[name])
+		}
+	}
+}
+
+// lobsterClientHeadersForTest 返回与生产一致的复刻头（版本用固定值，避免测试触网）。
+func lobsterClientHeadersForTest() map[string]string {
+	return map[string]string{
+		"User-Agent":                      "LobsterAI/0.1.0",
+		"X-LobsterAI-Client-Capabilities": "kimi-k3-agentic-v1,thinking-level-control-v1",
+		"X-LobsterAI-Client-Version":      "2026.9.4",
+	}
+}
+
+// TestChannelProviderRefreshOn401Lobster 验证 lobster 同样受益于账号池续期：
+// 401 后 provider 用注入的 refresh 换新令牌并重试一次。
+func TestChannelProviderRefreshOn401Lobster(t *testing.T) {
+	var auths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		if len(auths) == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"expired"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	store := NewStore(t.TempDir())
+	writeCreds(t, store, "lobster", Credential{
+		AccessToken:  "old-token",
+		RefreshToken: "r",
+		ExpiresAt:    time.Now().Add(-time.Hour),
+	})
+	accounts := NewAccounts("lobster", store, newOAuthClient(), func(_ context.Context, cred Credential) (Credential, error) {
+		next := cred
+		next.AccessToken = "new-token"
+		next.ExpiresAt = time.Now().Add(2 * time.Hour)
+		return next, nil
+	})
+
+	p := lobsterProvider(accounts, server.URL, nil)
+	req := mustRequest(t, `{"model":"kimi-k2.7-code","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+	if _, err := p.ForwardRequest(context.Background(), req); err != nil {
+		t.Fatalf("续期后应成功，得到 %v", err)
+	}
+	if len(auths) != 2 || auths[0] != "Bearer old-token" || auths[1] != "Bearer new-token" {
+		t.Fatalf("续期前后令牌不正确: %v", auths)
+	}
+}
