@@ -58,6 +58,7 @@ type App struct {
 	deleteOpen                                                                         bool
 	deleteAction                                                                       func()
 	browserOpen                                                                        bool
+	browserKind                                                                        string
 	browserPath, browserParent                                                         string
 	browserDirs                                                                        []string
 }
@@ -383,8 +384,12 @@ func split(value string) []string {
 // 留空时由网关返回其主目录。本机网关浏览的就是本机文件系统，
 // 远程网关则与 Termius 的远程浏览同构——路径语义始终属于网关主机。
 func (a *App) openBrowser() {
+	a.openBrowserFor("project", a.project)
+}
+func (a *App) openBrowserFor(kind, start string) {
+	a.browserKind = kind
 	a.browserOpen = true
-	a.browseHost(strings.TrimSpace(a.project))
+	a.browseHost(strings.TrimSpace(start))
 }
 func (a *App) browseHost(path string) {
 	a.work("正在读取目录", 20*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
@@ -407,8 +412,38 @@ func (a *App) pickBrowserDir() {
 	if a.browserPath == "" {
 		return
 	}
-	a.project = a.browserPath
+	a.applyPickedDir(a.browserPath)
 	a.browserOpen = false
+}
+func (a *App) applyPickedDir(path string) {
+	switch a.browserKind {
+	case "memory":
+		a.memoryKey = path
+	default:
+		a.project = path
+	}
+}
+
+// clientSuggestions 汇总记忆范围键的可选客户端：已有 client 作用域
+// 记忆里的键 + 已知客户端默认项。
+func (a *App) clientSuggestions() []string {
+	clients := []string{}
+	seen := map[string]bool{}
+	add := func(v string) {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			clients = append(clients, v)
+		}
+	}
+	for _, m := range a.memories {
+		if m.Scope == "client" {
+			add(m.ScopeKey)
+		}
+	}
+	for _, c := range []string{"claude-code", "codex", "pi", "zcode", "harness"} {
+		add(c)
+	}
+	return clients
 }
 func configInSync(cfg ClientConfig, choices map[string]bool) bool {
 	if !cfg.Exists || len(cfg.MissingEntries) > 0 || len(cfg.Current) != len(sortedSelection(choices)) {

@@ -230,6 +230,42 @@ func TestLocalNativePickFillsProjectPath(t *testing.T) {
 	}
 }
 
+func TestMemoryScopeKeyControls(t *testing.T) {
+	a, queue, _ := fixture(t)
+	a.page = "memory"
+	a.loaded = true
+	a.memories = []Memory{{ID: 7, Scope: "client", ScopeKey: "claude-code", Status: "active", Statement: "x"}}
+	a.memoryScope = "client"
+	tt := ui.NewTester(a.View, 1100, 800)
+	tt.Frame()
+	click(t, tt, "客户端")
+	if !tt.HasText("claude-code") || !tt.HasText("pi") {
+		t.Fatal("client suggestions missing")
+	}
+	a.memoryScope = "project"
+	tt.Frame()
+	if !tt.HasText("浏览记忆项目") || !tt.HasText("本机选择记忆项目") {
+		t.Fatal("project scope controls missing")
+	}
+	saved := pickNativeFolder
+	pickNativeFolder = func() (string, bool) { return "/tmp/picked-native", true }
+	click(t, tt, "本机选择记忆项目")
+	pickNativeFolder = saved
+	tt.Frame()
+	if a.memoryKey != "/tmp/picked-native" {
+		t.Fatal("native pick did not fill memory key:", a.memoryKey)
+	}
+	a.profiles.Profiles[0].URL = "https://gateway.example.com"
+	tt.Frame()
+	click(t, tt, "浏览记忆项目")
+	await(t, a, queue)
+	tt.Frame()
+	click(t, tt, "选择此目录")
+	if a.browserOpen || a.memoryKey != "/tmp/root" {
+		t.Fatal("remote browser did not fill memory key:", a.memoryKey, a.browserOpen)
+	}
+}
+
 func TestDirtySkillsPreventScopeAndHostNavigation(t *testing.T) {
 	a, _, _ := fixture(t)
 	a.page = "skills"
