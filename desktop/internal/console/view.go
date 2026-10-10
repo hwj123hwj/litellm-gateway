@@ -156,6 +156,7 @@ func (a *App) View(c *ui.Context) {
 		})
 	})
 	a.editor(c)
+	a.browserModal(c)
 	if ui.AlertDialog(c, &a.deleteOpen, "确认移除？", a.editorTitle, "取消", "移除") == 1 && a.deleteAction != nil {
 		action := a.deleteAction
 		a.deleteAction = nil
@@ -307,6 +308,37 @@ func (a *App) editor(c *ui.Context) {
 		a.stop()
 		a.editorToken = ""
 	}
+}
+
+// browserModal 网关主机目录浏览器：点击目录名进入，"选择此目录"把当前
+// 路径写回项目路径输入框。本机与远程连接走同一套 Admin API。
+func (a *App) browserModal(c *ui.Context) {
+	ui.Modal(c, &a.browserOpen, func() {
+		theme := c.Theme()
+		ui.Column(c).Width(620).Gap(14).Children(func() {
+			ui.Text(c, "浏览网关主机目录").FontSize(20).Bold()
+			muted(c, "浏览的是当前连接的网关主机上的目录；本机网关即本机目录。")
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, a.browserPath).FontSize(13).Grow(1).MinWidth(0).SingleLine().TextColor(theme.TextMuted)
+				if a.browserParent != "" {
+					ui.Button(c, "上级").Label("返回上级目录").Disabled(a.busy != "").OnClick(func() { a.browseHost(a.browserParent) })
+				}
+			})
+			if len(a.browserDirs) == 0 {
+				empty(c, "此目录没有子目录")
+			}
+			ui.List(c, nil, len(a.browserDirs), func(i int) {
+				name := a.browserDirs[i]
+				ui.Row(c.Key(name)).Padding(0, 0, 4).Children(func() {
+					ui.Button(c, "打开 "+name).OnClick(func() { a.browseHost(a.browserPath + "/" + name) })
+				})
+			}).Grow(1).MinHeight(180).MaxHeight(380)
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				ui.Button(c, "取消浏览").OnClick(func() { a.browserOpen = false })
+				ui.PrimaryButton(c, "选择此目录").Disabled(a.busy != "" || a.browserPath == "").OnClick(a.pickBrowserDir)
+			})
+		})
+	})
 }
 func (a *App) saveConnection(save bool) {
 	in := connection.Input{ID: a.editorID, Name: a.editorName, URL: a.editorURL, Token: a.editorToken}

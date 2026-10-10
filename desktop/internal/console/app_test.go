@@ -32,6 +32,12 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 			requests <- r.Method + " " + r.URL.Path + " " + string(data)
 		}
 		switch r.URL.Path {
+		case "/admin/fs/dirs":
+			if r.URL.Query().Get("path") == "/tmp/root/sub" {
+				w.Write([]byte(`{"path":"/tmp/root/sub","parent":"/tmp/root","dirs":[]}`))
+			} else {
+				w.Write([]byte(`{"path":"/tmp/root","parent":"/tmp","dirs":["sub"]}`))
+			}
 		case "/admin/models":
 			w.Write([]byte(`{"models":[{"model":"coding","provider":"alpha","providers":["alpha","beta"],"status":"online","capabilities":["text","audio_transcription"],"input_modalities":["text"]}]}`))
 		case "/admin/routes":
@@ -179,6 +185,26 @@ func TestNativeViewsAndVirtualLists(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestSkillsProjectBrowserPicksHostDirectory(t *testing.T) {
+	a, queue, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "浏览项目路径")
+	await(t, a, queue)
+	tt.Frame()
+	if a.browserPath != "/tmp/root" || !a.browserOpen {
+		t.Fatal("browser did not open at gateway home:", a.browserPath)
+	}
+	click(t, tt, "打开 sub")
+	await(t, a, queue)
+	tt.Frame()
+	click(t, tt, "选择此目录")
+	if a.browserOpen || a.project != "/tmp/root/sub" {
+		t.Fatal("directory not picked:", a.project, a.browserOpen)
 	}
 }
 

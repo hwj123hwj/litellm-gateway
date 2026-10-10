@@ -35,6 +35,7 @@ func sortedSelection(m map[string]bool) []string {
 func (a *App) skillsView(c *ui.Context) {
 	ui.Row(c).Gap(10).Children(func() {
 		ui.TextInput(c, &a.project).Grow(1).Label("项目路径").Placeholder("留空管理全局技能；填写网关主机上的项目绝对路径").Disabled(a.busy != "" || a.skillDirty)
+		ui.Button(c, "浏览").Label("浏览项目路径").Disabled(a.busy != "" || a.skillDirty).OnClick(a.openBrowser)
 		ui.Button(c, "读取范围").Disabled(a.busy != "" || a.skillDirty).OnClick(func() { a.loadedProject = strings.TrimSpace(a.project); a.loaded = false; a.reload() })
 	})
 	if !a.skills.Configured {
