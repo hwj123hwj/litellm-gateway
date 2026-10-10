@@ -161,13 +161,13 @@ jobs:
           cp artifacts/gateway-windows-amd64/gateway-windows-amd64.exe release/
           # 复制配置文件
           cp go-gateway/providers.yaml release/
-          cp go-gateway/.env.example release/
+          cp go-gateway/.env.example release/default.env.example
           # 复制安装脚本
           cp scripts/install.sh release/
           cp scripts/install.bat release/
           cp scripts/install.ps1 release/
           cp artifacts/desktop-darwin-arm64/*.dmg release/
-          (cd release && sha256sum gateway-* *.dmg providers.yaml .env.example install.* > SHA256SUMS)
+          (cd release && sha256sum gateway-* *.dmg providers.yaml default.env.example install.* > SHA256SUMS)
           # 列出文件
           ls -lh release/
 
@@ -219,7 +219,7 @@ jobs:
           chmod +x gateway-*
 
           # 创建配置
-          cp .env.example .env
+          cp default.env.example .env
           nano .env  # 填入 API Key
 
           # 启动
@@ -239,7 +239,7 @@ jobs:
             release/gateway-darwin-arm64
             release/gateway-windows-amd64.exe
             release/providers.yaml
-            release/.env.example
+            release/default.env.example
             release/install.sh
             release/install.bat
             release/install.ps1
