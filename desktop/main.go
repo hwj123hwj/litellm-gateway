@@ -16,7 +16,7 @@ import (
 
 func main() {
 	app := mygo.App
-	app.SetName("Gateway")
+	app.SetName("EasyGateway")
 	dir, err := app.Path(mygo.PathUserData)
 	if err != nil {
 		log.Fatal(err)
@@ -36,7 +36,7 @@ func main() {
 	state.Version = app.Version()
 	show := func() {
 		if win == nil || win.IsDestroyed() {
-			win = mygo.NewWindow(mygo.WindowOptions{Title: "Gateway", Content: ui.View(state.View), Width: 1280, Height: 850, MinWidth: 900, MinHeight: 680, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 48, TrafficLightPosition: &mygo.Point{X: 18, Y: 18}, BackgroundColor: "light-dark(#faf9f7, #18181b)", StateKey: "main"})
+			win = mygo.NewWindow(mygo.WindowOptions{Title: "EasyGateway", Content: ui.View(state.View), Width: 1280, Height: 850, MinWidth: 900, MinHeight: 680, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 48, TrafficLightPosition: &mygo.Point{X: 18, Y: 18}, BackgroundColor: "light-dark(#f7f8fa, #18181b)", StateKey: "main"})
 			current := win
 			state.SetDispatcher(func(fn func()) {
 				current.Update(func() {

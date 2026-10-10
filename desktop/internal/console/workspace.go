@@ -186,11 +186,37 @@ func (a *App) memoryView(c *ui.Context) {
 		ui.Text(c, "添加记忆").Bold()
 		ui.Row(c).Gap(10).Children(func() {
 			ui.Select(c, &a.memoryScope, []string{"global", "client", "project"}).Label("记忆范围").Disabled(a.busy != "")
-			ui.TextInput(c, &a.memoryKey).Label("范围键").Placeholder("客户端名称或项目路径").Grow(1).Disabled(a.busy != "" || a.memoryScope == "global")
+			switch a.memoryScope {
+			case "client":
+				ui.Combobox(c, &a.memoryKey, a.clientSuggestions()).Grow(1).Label("客户端")
+			case "project":
+				ui.TextInput(c, &a.memoryKey).Label("项目路径").Placeholder("网关主机上的项目绝对路径").Grow(1).Disabled(a.busy != "")
+			default:
+				muted(c, "全局记忆对所有客户端生效，不需要范围键")
+			}
 		})
+		if a.memoryScope == "project" {
+			ui.Row(c).Gap(10).Children(func() {
+				if a.localConnection() {
+					ui.Button(c, "本机选择记忆项目").Disabled(a.busy != "").OnClick(a.pickMemoryProjectFolder)
+				}
+				ui.Button(c, "浏览记忆项目").Disabled(a.busy != "").OnClick(func() { a.openBrowserFor("memory", a.memoryKey) })
+			})
+		}
 		ui.TextInput(c, &a.memoryText).Label("记忆内容").Placeholder("输入希望助理记住的事实").Disabled(a.busy != "")
 		ui.PrimaryButton(c, "添加记忆").Disabled(a.busy != "" || strings.TrimSpace(a.memoryText) == "" || (a.memoryScope != "global" && strings.TrimSpace(a.memoryKey) == "")).OnClick(a.addMemory)
 	})
+}
+
+// pickMemoryProjectFolder 本机连接时用原生面板选择记忆的项目路径。
+func (a *App) pickMemoryProjectFolder() {
+	path, ok := pickNativeFolder()
+	if !ok {
+		return
+	}
+	if trimmed := strings.TrimSpace(path); trimmed != "" {
+		a.memoryKey = trimmed
+	}
 }
 func (a *App) addMemory() {
 	key := strings.TrimSpace(a.memoryKey)
