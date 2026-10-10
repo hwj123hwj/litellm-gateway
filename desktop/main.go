@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/connection"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/console"
+	"github.com/hwj123hwj/litellm-gateway/desktop/internal/nativefolder"
 	"image"
 	"image/color"
 	"image/png"
@@ -45,6 +46,13 @@ func main() {
 					}
 				})
 			})
+			state.PickFolder = func(done func(path string, ok bool)) {
+				current.Update(func() {
+					if !current.IsDestroyed() {
+						nativefolder.PickSheet(current.NativeHandle(), done)
+					}
+				})
+			}
 			current.OnClosed(state.Close)
 			state.Start()
 		}

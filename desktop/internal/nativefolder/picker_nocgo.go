@@ -1,10 +1,12 @@
-//go:build darwin && !cgo
+//go:build !cgo || !darwin
 
-// Package nativefolder: CGO 禁用的构建（如 mygo build 的沙箱/交叉环境）
-// 无法调用 AppKit，回退为不可用，桌面端继续用应用内的网关主机目录浏览器。
+// Package nativefolder：本构建（CGO_ENABLED=0 的 mygo build 或非 macOS）
+// 不含原生面板，PickSheet 以取消结束；界面回退到应用内目录浏览器。
 package nativefolder
 
-// Pick is unavailable without cgo and always reports cancelled.
-func Pick() (string, bool) {
-	return "", false
+// PickSheet 不可用，立即以取消回调结束。
+func PickSheet(handle uintptr, done func(path string, ok bool)) {
+	if done != nil {
+		go done("", false)
+	}
 }

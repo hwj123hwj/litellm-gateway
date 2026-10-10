@@ -35,7 +35,7 @@ func sortedSelection(m map[string]bool) []string {
 func (a *App) skillsView(c *ui.Context) {
 	ui.Row(c).Gap(10).Children(func() {
 		ui.TextInput(c, &a.project).Grow(1).Label("项目路径").Placeholder("留空管理全局技能；填写网关主机上的项目绝对路径").Disabled(a.busy != "" || a.skillDirty)
-		if a.localConnection() {
+		if a.localConnection() && a.PickFolder != nil {
 			ui.Button(c, "本机选择").Label("本机选择目录").Disabled(a.busy != "" || a.skillDirty).OnClick(a.pickLocalFolder)
 		}
 		ui.Button(c, "浏览").Label("浏览项目路径").Disabled(a.busy != "" || a.skillDirty).OnClick(a.openBrowser)
@@ -197,7 +197,7 @@ func (a *App) memoryView(c *ui.Context) {
 		})
 		if a.memoryScope == "project" {
 			ui.Row(c).Gap(10).Children(func() {
-				if a.localConnection() {
+				if a.localConnection() && a.PickFolder != nil {
 					ui.Button(c, "本机选择记忆项目").Disabled(a.busy != "").OnClick(a.pickMemoryProjectFolder)
 				}
 				ui.Button(c, "浏览记忆项目").Disabled(a.busy != "").OnClick(func() { a.openBrowserFor("memory", a.memoryKey) })
@@ -208,15 +208,20 @@ func (a *App) memoryView(c *ui.Context) {
 	})
 }
 
-// pickMemoryProjectFolder 本机连接时用原生面板选择记忆的项目路径。
+// pickMemoryProjectFolder 用原生面板（sheet 挂主窗口）选择记忆的项目
+// 路径；取消或未注入面板能力时保持原值不变。
 func (a *App) pickMemoryProjectFolder() {
-	path, ok := pickNativeFolder()
-	if !ok {
+	if a.PickFolder == nil {
 		return
 	}
-	if trimmed := strings.TrimSpace(path); trimmed != "" {
-		a.memoryKey = trimmed
-	}
+	a.PickFolder(func(path string, ok bool) {
+		if !ok {
+			return
+		}
+		if trimmed := strings.TrimSpace(path); trimmed != "" {
+			a.dispatch(func() { a.memoryKey = trimmed })
+		}
+	})
 }
 func (a *App) addMemory() {
 	key := strings.TrimSpace(a.memoryKey)
