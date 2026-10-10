@@ -24,7 +24,9 @@ import (
 // lobster/gemini 是授权码 + 本机回环回调（见 channel.callbackServer）；codebuddy/
 // workbuddy 是「申请 state + 轮询」，登录地址由网关向 /v2/plugin/auth/state 取得；
 // trae 是「授权页 + 固定端口回环回调」（18080，占用则退回系统分配端口，见
-// channel.traeCallbackServer）。这些渠道都把登录地址放进 DeviceCode.
+// channel.traeCallbackServer）；loomy / raccoon 是「网关自建登录页 + 随机端口回环」
+// （loomy 扫码后可能要求补绑手机号；raccoon 提供微信扫码与短信两条路径，二维码
+// 由网关本地渲染）。这些渠道都把登录地址放进 DeviceCode.
 // VerificationURIComplete，Admin API 原样回成 login_url，因此登录入口与前端都不需要
 // 按渠道分支。
 func setupChannelProviders(router *provider.Router, registry *channel.Registry, logger *log.Logger) {
@@ -39,9 +41,10 @@ func setupChannelProviders(router *provider.Router, registry *channel.Registry, 
 		workbuddy: channel.NewWorkBuddyChannel(dir),
 		trae:      channel.NewTraeChannel(dir),
 		loomy:     channel.NewLoomyChannel(dir),
+		raccoon:   channel.NewRaccoonChannel(dir),
 	}
 
-	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae, instances.loomy} {
+	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae, instances.loomy, instances.raccoon} {
 		registry.Register(c)
 		logger.Printf("Account channel registered: %s (credentials: %s)", c.Name(), filepath.Join(dir, c.Name()+".json"))
 	}
@@ -70,6 +73,7 @@ type channelInstances struct {
 	workbuddy *channel.BuddyChannel
 	trae      *channel.TraeChannel
 	loomy     *channel.LoomyChannel
+	raccoon   *channel.RaccoonChannel
 }
 
 // buildChannelProvider 是渠道 → provider 的装配开关，独立成函数以便测试直接断言
@@ -159,6 +163,23 @@ func buildChannelProvider(channelName, modelID string, ch channelInstances) (pro
 			ExtraHeaders:   ch.loomy.ClientHeaders(),
 			DynamicHeaders: ch.loomy.DynamicHeaders(),
 			Transform:      channel.LoomyTransformRequest,
+		}), true
+	case "raccoon":
+		// 上游是标准 OpenAI Chat Completions 协议（/api/web/llm/v2/chat/completions），
+		// 复用 OpenAIProvider。三处渠道特有逻辑必须齐全，缺一上游会拒绝或静默忽略：
+		//   - Authorization: Bearer 由 applyAuth 写；
+		//   - X-Org-Code 必须是**当前账号**的 office_identity（个人账号为空），每个
+		//     请求都要重新求值，故走 DynamicHeaders；其余固定头（Accept: text/event-stream、
+		//     X-Raccoon-Language、X-Client-Platform）放 ExtraHeaders；
+		//   - Transform 把思考档位折进 extra_body.thinking（顶层放会被静默忽略）。
+		// 模型 ID 用上游原生的 `sn-` 前缀，与既有供应商无重名，无需命名空间。
+		return provider.NewOpenAIProvider(&provider.Config{
+			Name:           modelID,
+			URL:            ch.raccoon.ChatURL(),
+			Auth:           ch.raccoon.Accounts(),
+			ExtraHeaders:   ch.raccoon.ClientHeaders(),
+			DynamicHeaders: ch.raccoon.DynamicHeaders(),
+			Transform:      channel.RaccoonTransformRequest,
 		}), true
 	}
 	return nil, false
