@@ -20,20 +20,24 @@ import (
 // 两者在 provider 包与 channel 包之间不产生 import 依赖：provider 只认 AuthSource
 // 接口，channel.Accounts 结构化满足它。
 //
-// 登录方式分两类，但对 Admin API 暴露成一回事：minimax/cline 是设备码轮询，
-// lobster/gemini 是授权码 + 本机回环回调（见 channel.callbackServer）。回调登录
-// 把登录地址放进 DeviceCode.VerificationURIComplete，Admin API 原样回成 login_url。
+// 登录方式分三类，但对 Admin API 暴露成一回事：minimax/cline 是设备码轮询；
+// lobster/gemini 是授权码 + 本机回环回调（见 channel.callbackServer）；codebuddy/
+// workbuddy 是「申请 state + 轮询」，登录地址由网关向 /v2/plugin/auth/state 取得。
+// 后两类都把登录地址放进 DeviceCode.VerificationURIComplete，Admin API 原样回成
+// login_url，因此登录入口与前端都不需要按渠道分支。
 func setupChannelProviders(router *provider.Router, registry *channel.Registry, logger *log.Logger) {
 	dir := filepath.Join(defaultGatewayHome(), "channels")
 
 	instances := channelInstances{
-		minimax: channel.NewMiniMaxChannel(dir),
-		cline:   channel.NewClineChannel(dir),
-		lobster: channel.NewLobsterChannel(dir),
-		gemini:  channel.NewGeminiChannel(dir),
+		minimax:   channel.NewMiniMaxChannel(dir),
+		cline:     channel.NewClineChannel(dir),
+		lobster:   channel.NewLobsterChannel(dir),
+		gemini:    channel.NewGeminiChannel(dir),
+		codebuddy: channel.NewCodeBuddyChannel(dir),
+		workbuddy: channel.NewWorkBuddyChannel(dir),
 	}
 
-	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini} {
+	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy} {
 		registry.Register(c)
 		logger.Printf("Account channel registered: %s (credentials: %s)", c.Name(), filepath.Join(dir, c.Name()+".json"))
 	}
@@ -54,10 +58,12 @@ func setupChannelProviders(router *provider.Router, registry *channel.Registry, 
 // 收敛成一个结构体而不是逐个传参：新增渠道时只改这里与 switch，不必再改所有
 // 调用点的签名。
 type channelInstances struct {
-	minimax *channel.MiniMaxChannel
-	cline   *channel.ClineChannel
-	lobster *channel.LobsterChannel
-	gemini  *channel.GeminiChannel
+	minimax   *channel.MiniMaxChannel
+	cline     *channel.ClineChannel
+	lobster   *channel.LobsterChannel
+	gemini    *channel.GeminiChannel
+	codebuddy *channel.BuddyChannel
+	workbuddy *channel.BuddyChannel
 }
 
 // buildChannelProvider 是渠道 → provider 的装配开关，独立成函数以便测试直接断言
@@ -102,6 +108,26 @@ func buildChannelProvider(channelName, modelID string, ch channelInstances) (pro
 		return provider.NewCloudCodeProvider(&provider.Config{
 			Name: modelID,
 			Auth: ch.gemini.AuthSource(),
+		}), true
+	case "codebuddy", "workbuddy":
+		// CodeBuddy（腾讯）/ WorkBuddy（国际版）共用一份实现，只是产品常量不同。
+		// 上游是 OpenAI Chat Completions 协议（/v2/chat/completions），复用
+		// OpenAIProvider。三处渠道特有逻辑必须齐全，缺一上游都会拒绝：
+		//   - ExtraHeaders 复刻官方客户端头（X-Domain/X-Product-Code/X-IDE-*/UA），
+		//     User-Agent 还需按模型家族解析；
+		//   - Transform 把对外模型名的 `codebuddy/`、`workbuddy/` 前缀剥掉再发上游。
+		// 注意 ExtraHeaders 里也含 User-Agent：provider.applyAuth 在默认 UA 之后
+		// 才写 ExtraHeaders，因此这里能覆盖掉网关默认 UA。
+		channel := ch.codebuddy
+		if channelName == "workbuddy" {
+			channel = ch.workbuddy
+		}
+		return provider.NewOpenAIProvider(&provider.Config{
+			Name:         modelID,
+			URL:          channel.ChatURL(),
+			Auth:         channel.Accounts(),
+			ExtraHeaders: channel.ClientHeaders(modelID),
+			Transform:    channel.TransformRequest,
 		}), true
 	}
 	return nil, false
