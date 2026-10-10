@@ -419,6 +419,11 @@ type Config struct {
 	// ExtraHeaders 是渠道特有的固定请求头（例如复刻官方客户端的 X-Title）。
 	// 在每个请求上设置，值非空才写入。
 	ExtraHeaders map[string]string
+	// DynamicHeaders 是按请求动态求值的请求头，与 ExtraHeaders 互补：ExtraHeaders
+	// 在构造 Config 时就固定，而这里每次请求都重新调用（例如把当前账号的令牌再写
+	// 进一个上游要求的自定义头）。返回 nil 表示不写；同名头在 ExtraHeaders 之后
+	// 应用，因此可覆盖它。实现必须并发安全。
+	DynamicHeaders func() map[string]string
 	// Transform 在请求体序列化后、发送前做最后一次改写（例如按模型补 thinking）。
 	// 为 nil 时原样发送。
 	Transform RequestTransform

@@ -38,9 +38,10 @@ func setupChannelProviders(router *provider.Router, registry *channel.Registry, 
 		codebuddy: channel.NewCodeBuddyChannel(dir),
 		workbuddy: channel.NewWorkBuddyChannel(dir),
 		trae:      channel.NewTraeChannel(dir),
+		loomy:     channel.NewLoomyChannel(dir),
 	}
 
-	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae} {
+	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae, instances.loomy} {
 		registry.Register(c)
 		logger.Printf("Account channel registered: %s (credentials: %s)", c.Name(), filepath.Join(dir, c.Name()+".json"))
 	}
@@ -68,6 +69,7 @@ type channelInstances struct {
 	codebuddy *channel.BuddyChannel
 	workbuddy *channel.BuddyChannel
 	trae      *channel.TraeChannel
+	loomy     *channel.LoomyChannel
 }
 
 // buildChannelProvider 是渠道 → provider 的装配开关，独立成函数以便测试直接断言
@@ -141,6 +143,22 @@ func buildChannelProvider(channelName, modelID string, ch channelInstances) (pro
 		return provider.NewTraeProvider(&provider.Config{
 			Name: modelID,
 			Auth: ch.trae.AuthSource(),
+		}), true
+	case "loomy":
+		// 上游是标准 OpenAI Chat Completions 协议（/api/v1/chat/completions），
+		// 复用 OpenAIProvider。三处渠道特有逻辑必须齐全，缺一上游都会拒绝：
+		//   - Authorization: Bearer 由 applyAuth 写；
+		//   - 自定义头 `token` 必须是当前账号令牌，且每个请求都重新求值，故走
+		//     DynamicHeaders（静态 ExtraHeaders 表达不了）；
+		//   - Transform 把对外模型名的 `loomy/` 前缀剥掉再发上游（8 个模型 ID
+		//     与既有供应商重名，不加前缀会与路由器注册表冲突）。
+		return provider.NewOpenAIProvider(&provider.Config{
+			Name:           modelID,
+			URL:            ch.loomy.ChatURL(),
+			Auth:           ch.loomy.Accounts(),
+			ExtraHeaders:   ch.loomy.ClientHeaders(),
+			DynamicHeaders: ch.loomy.DynamicHeaders(),
+			Transform:      channel.LoomyTransformRequest,
 		}), true
 	}
 	return nil, false

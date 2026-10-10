@@ -483,6 +483,8 @@ func (p *OpenAIProvider) setHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", "go-llm-gateway/1.0")
 	// applyAuth 处理静态 api_key 与渠道动态令牌二选一，并补渠道附加头。
 	p.config.applyAuth(req, true)
+	// 动态头最后应用：loomy 这类渠道要求把当前账号令牌再写进自定义头（token）。
+	applyDynamicHeaders(req, p.config.DynamicHeaders)
 }
 
 // ─── 始终思考模型处理 ──────────────────────────────────────────────────────────
