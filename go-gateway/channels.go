@@ -22,9 +22,11 @@ import (
 //
 // 登录方式分三类，但对 Admin API 暴露成一回事：minimax/cline 是设备码轮询；
 // lobster/gemini 是授权码 + 本机回环回调（见 channel.callbackServer）；codebuddy/
-// workbuddy 是「申请 state + 轮询」，登录地址由网关向 /v2/plugin/auth/state 取得。
-// 后两类都把登录地址放进 DeviceCode.VerificationURIComplete，Admin API 原样回成
-// login_url，因此登录入口与前端都不需要按渠道分支。
+// workbuddy 是「申请 state + 轮询」，登录地址由网关向 /v2/plugin/auth/state 取得；
+// trae 是「授权页 + 固定端口回环回调」（18080，占用则退回系统分配端口，见
+// channel.traeCallbackServer）。这些渠道都把登录地址放进 DeviceCode.
+// VerificationURIComplete，Admin API 原样回成 login_url，因此登录入口与前端都不需要
+// 按渠道分支。
 func setupChannelProviders(router *provider.Router, registry *channel.Registry, logger *log.Logger) {
 	dir := filepath.Join(defaultGatewayHome(), "channels")
 
@@ -35,9 +37,10 @@ func setupChannelProviders(router *provider.Router, registry *channel.Registry, 
 		gemini:    channel.NewGeminiChannel(dir),
 		codebuddy: channel.NewCodeBuddyChannel(dir),
 		workbuddy: channel.NewWorkBuddyChannel(dir),
+		trae:      channel.NewTraeChannel(dir),
 	}
 
-	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy} {
+	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae} {
 		registry.Register(c)
 		logger.Printf("Account channel registered: %s (credentials: %s)", c.Name(), filepath.Join(dir, c.Name()+".json"))
 	}
@@ -64,6 +67,7 @@ type channelInstances struct {
 	gemini    *channel.GeminiChannel
 	codebuddy *channel.BuddyChannel
 	workbuddy *channel.BuddyChannel
+	trae      *channel.TraeChannel
 }
 
 // buildChannelProvider 是渠道 → provider 的装配开关，独立成函数以便测试直接断言
@@ -128,6 +132,15 @@ func buildChannelProvider(channelName, modelID string, ch channelInstances) (pro
 			Auth:         channel.Accounts(),
 			ExtraHeaders: channel.ClientHeaders(modelID),
 			Transform:    channel.TransformRequest,
+		}), true
+	case "trae":
+		// 上游是 TRAE 私有 SOLO 协议（/api/agent/v3/llm_utils_chat）：请求体是
+		// SOLO 形态，鉴权是 Authorization: Cloud-IDE-JWT（applyAuth 表达不了），
+		// 响应是私有 SSE，故用专门的 TraeProvider。Auth 用渠道的 AuthSource
+		// （账号池 + 复刻客户端身份头），模型名的 `trae/` 前缀由 provider 侧剥掉。
+		return provider.NewTraeProvider(&provider.Config{
+			Name: modelID,
+			Auth: ch.trae.AuthSource(),
 		}), true
 	}
 	return nil, false
