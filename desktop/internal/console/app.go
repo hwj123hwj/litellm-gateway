@@ -12,7 +12,6 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/connection"
-	"github.com/hwj123hwj/litellm-gateway/desktop/internal/nativefolder"
 )
 
 type App struct {
@@ -59,6 +58,7 @@ type App struct {
 	deleteAction                                                                       func()
 	browserOpen                                                                        bool
 	browserKind                                                                        string
+	PickFolder                                                                         func(done func(path string, ok bool))
 	browserPath, browserParent                                                         string
 	browserDirs                                                                        []string
 }
@@ -288,9 +288,6 @@ func (a *App) selectConnection(id string) {
 
 const chatDefaultOption = "网关默认"
 
-// pickNativeFolder 可在测试中替换；生产环境打开 macOS 原生目录面板。
-var pickNativeFolder = nativefolder.Pick
-
 // localConnection 判断当前连接的网关是否跑在本机（回环地址）——只有
 // 这种情况下原生目录面板选择的路径才属于网关主机。
 func (a *App) localConnection() bool {
@@ -308,15 +305,20 @@ func (a *App) localConnection() bool {
 	return false
 }
 
-// pickLocalFolder 用原生面板选择本机目录；取消则保持原值不变。
+// pickLocalFolder 用原生面板（sheet 挂主窗口）选择本机目录；取消或未
+// 注入面板能力（无 cgo 构建）时保持原值不变。
 func (a *App) pickLocalFolder() {
-	path, ok := pickNativeFolder()
-	if !ok {
+	if a.PickFolder == nil {
 		return
 	}
-	if trimmed := strings.TrimSpace(path); trimmed != "" {
-		a.project = trimmed
-	}
+	a.PickFolder(func(path string, ok bool) {
+		if !ok {
+			return
+		}
+		if trimmed := strings.TrimSpace(path); trimmed != "" {
+			a.dispatch(func() { a.project = trimmed })
+		}
+	})
 }
 
 func (a *App) chatModelParam() string {

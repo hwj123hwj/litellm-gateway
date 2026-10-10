@@ -60,6 +60,20 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 	t.Cleanup(a.Close)
 	return a, queue, requests
 }
+
+// drainDispatcher 执行 dispatcher 队列中待处理的 UI 回调（如 sheet 完成
+// 回调经 dispatch 回填的字段赋值）。
+func drainDispatcher(a *App, queue chan func()) {
+	for {
+		select {
+		case fn := <-queue:
+			fn()
+		default:
+			return
+		}
+	}
+}
+
 func await(t *testing.T, a *App, queue chan func()) {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
@@ -209,22 +223,24 @@ func TestSkillsProjectBrowserPicksHostDirectory(t *testing.T) {
 }
 
 func TestLocalNativePickFillsProjectPath(t *testing.T) {
-	a, _, _ := fixture(t)
+	a, queue, _ := fixture(t)
 	a.page = "skills"
 	a.loaded = true
 	if !a.localConnection() {
 		t.Fatal("fixture connection should count as local")
 	}
-	previous := pickNativeFolder
-	pickNativeFolder = func() (string, bool) { return "/Users/demo/project", true }
-	defer func() { pickNativeFolder = previous }()
+	previous := a.PickFolder
+	a.PickFolder = func(done func(path string, ok bool)) { done("/Users/demo/project", true) }
+	defer func() { a.PickFolder = previous }()
 	tt := ui.NewTester(a.View, 1100, 800)
 	click(t, tt, "本机选择目录")
+	drainDispatcher(a, queue)
 	if a.project != "/Users/demo/project" {
 		t.Fatal("native pick not applied:", a.project)
 	}
-	pickNativeFolder = func() (string, bool) { return "", false }
+	a.PickFolder = func(done func(path string, ok bool)) { done("", false) }
 	click(t, tt, "本机选择目录")
+	drainDispatcher(a, queue)
 	if a.project != "/Users/demo/project" {
 		t.Fatal("cancel must keep the old value:", a.project)
 	}
@@ -243,14 +259,15 @@ func TestMemoryScopeKeyControls(t *testing.T) {
 		t.Fatal("client suggestions missing")
 	}
 	a.memoryScope = "project"
+	saved := a.PickFolder
+	a.PickFolder = func(done func(path string, ok bool)) { done("/tmp/picked-native", true) }
 	tt.Frame()
 	if !tt.HasText("浏览记忆项目") || !tt.HasText("本机选择记忆项目") {
 		t.Fatal("project scope controls missing")
 	}
-	saved := pickNativeFolder
-	pickNativeFolder = func() (string, bool) { return "/tmp/picked-native", true }
 	click(t, tt, "本机选择记忆项目")
-	pickNativeFolder = saved
+	drainDispatcher(a, queue)
+	a.PickFolder = saved
 	tt.Frame()
 	if a.memoryKey != "/tmp/picked-native" {
 		t.Fatal("native pick did not fill memory key:", a.memoryKey)
