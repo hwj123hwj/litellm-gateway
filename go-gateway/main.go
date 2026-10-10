@@ -19,6 +19,7 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/assistant"
 	"github.com/weijian/go-llm-gateway/internal/auth"
+	"github.com/weijian/go-llm-gateway/internal/channel"
 	"github.com/weijian/go-llm-gateway/internal/config"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
 	"github.com/weijian/go-llm-gateway/internal/memory"
@@ -104,6 +105,11 @@ func main() {
 		RecoveryTimeout:  time.Duration(cfg.CircuitRecoverySeconds) * time.Second,
 		SuccessThreshold: cfg.CircuitSuccessThreshold,
 	})
+
+	// 账号渠道（第二类）：交互式登录取得凭据的渠道。必须先于 providers.yaml
+	// 装载注册工厂，因为 type: channel 的条目在装载时就要构造 provider 实例。
+	channelRegistry := channel.NewRegistry()
+	setupChannelProviders(router, channelRegistry, logger)
 
 	// 尝试从 providers.yaml 加载配置
 	configPath := "providers.yaml"
@@ -191,6 +197,7 @@ func main() {
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
 	skillsHandler := handlers.NewSkillsHandler(skillsRepoPath(), logger)
 	fsHandler := handlers.NewFSHandler()
+	channelAdminHandler := handlers.NewChannelAdminHandler(channelRegistry, logger)
 
 	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
 	var assistantHandler *handlers.AssistantHandler
@@ -302,6 +309,12 @@ func main() {
 		admin.PUT("/skills/config", skillsHandler.HandleUpdateConfig)
 		admin.POST("/skills/sync", skillsHandler.HandleSync)
 		admin.GET("/fs/dirs", fsHandler.HandleDirs)
+		admin.GET("/channels", channelAdminHandler.HandleList)
+		admin.GET("/channels/:channel", channelAdminHandler.HandleStatus)
+		admin.POST("/channels/:channel/login", channelAdminHandler.HandleLoginStart)
+		admin.GET("/channels/:channel/login/:id", channelAdminHandler.HandleLoginPoll)
+		admin.DELETE("/channels/:channel", channelAdminHandler.HandleLogout)
+		admin.DELETE("/channels/:channel/accounts/:index", channelAdminHandler.HandleRemoveAccount)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -176,4 +178,85 @@ func writeTempProvidersConfig(t *testing.T, body string) string {
 		t.Fatalf("write providers.yaml: %v", err)
 	}
 	return path
+}
+
+// 账号渠道（type: channel）在 providers.yaml 里声明，但实例必须由注入的工厂构造。
+// 这条路径曾经失效：channel 不是 registry 认识的类型，若先走 registry.Create 会
+// 报 "unknown provider type: channel" 并 continue，导致渠道模型一个都注册不上。
+func TestSetupProvidersRegistersChannelModels(t *testing.T) {
+	previous := channelProviderFactory
+	SetChannelProviderFactory(func(channelName, modelID string) (Provider, bool) {
+		if channelName != "minimax" {
+			return nil, false
+		}
+		return &stubChatProvider{name: "channel-" + modelID}, true
+	})
+	t.Cleanup(func() { channelProviderFactory = previous })
+
+	router := NewRouter(log.New(io.Discard, "", 0))
+	path := writeTempProvidersConfig(t, `
+providers:
+  - name: minimax
+    type: channel
+    models:
+      - id: MiniMax-M3
+        aliases: [minimax-m3-alias]
+        capabilities: [text]
+`)
+
+	if _, err := SetupProvidersFromConfig(router, path, log.New(io.Discard, "", 0)); err != nil {
+		t.Fatalf("setup providers: %v", err)
+	}
+
+	for _, modelName := range []string{"MiniMax-M3", "minimax-m3-alias"} {
+		providers, err := router.Route(modelName)
+		if err != nil {
+			t.Fatalf("route %s: %v (渠道模型未注册)", modelName, err)
+		}
+		if len(providers) != 1 {
+			t.Fatalf("route %s returned %d providers, want 1", modelName, len(providers))
+		}
+		bound, ok := providers[0].(BoundModelProvider)
+		if !ok {
+			t.Fatalf("route %s provider does not implement BoundModelProvider", modelName)
+		}
+		if got := bound.BoundModel(); got != "MiniMax-M3" {
+			t.Fatalf("route %s bound model = %q, want MiniMax-M3", modelName, got)
+		}
+	}
+}
+
+// 没有工厂时不应 panic，也不应把 channel 当成普通 provider 硬造一个实例。
+func TestSetupProvidersSkipsChannelWithoutFactory(t *testing.T) {
+	previous := channelProviderFactory
+	channelProviderFactory = nil
+	t.Cleanup(func() { channelProviderFactory = previous })
+
+	router := NewRouter(log.New(io.Discard, "", 0))
+	path := writeTempProvidersConfig(t, `
+providers:
+  - name: minimax
+    type: channel
+    models:
+      - id: MiniMax-M3
+`)
+
+	if _, err := SetupProvidersFromConfig(router, path, log.New(io.Discard, "", 0)); err != nil {
+		t.Fatalf("setup providers: %v", err)
+	}
+	if _, err := router.Route("MiniMax-M3"); err == nil {
+		t.Fatalf("无工厂时渠道模型不应可路由")
+	}
+}
+
+// stubChatProvider 是测试用的最小 Provider，仅用于断言注册/路由结果。
+type stubChatProvider struct{ name string }
+
+func (p *stubChatProvider) Name() string                   { return p.name }
+func (p *stubChatProvider) URL() string                    { return "" }
+func (p *stubChatProvider) APIKey() string                 { return "" }
+func (p *stubChatProvider) UseBearer() bool                { return false }
+func (p *stubChatProvider) IsHealthy(context.Context) bool { return true }
+func (p *stubChatProvider) ForwardRequest(context.Context, *Request) (*Response, error) {
+	return nil, errors.New("stub")
 }

@@ -13,12 +13,28 @@ import (
 
 // ProviderConfig 提供商配置
 type ProviderConfig struct {
-	Name                  string        `yaml:"name"`
-	Type                  string        `yaml:"type"` // openai 或 anthropic
-	URL                   string        `yaml:"url"`
-	APIKeyEnv             string        `yaml:"api_key_env"`
-	RequestTimeoutSeconds int           `yaml:"request_timeout_seconds,omitempty"`
-	Models                []ModelConfig `yaml:"models"`
+	Name                  string `yaml:"name"`
+	Type                  string `yaml:"type"` // openai / anthropic / chatgpt / channel
+	URL                   string `yaml:"url"`
+	APIKeyEnv             string `yaml:"api_key_env"`
+	RequestTimeoutSeconds int    `yaml:"request_timeout_seconds,omitempty"`
+	// Channel 是账号渠道名（type: channel 时必填）。账号渠道的凭据由交互式登录
+	// 产生，不存在 api_key_env，因此构造实例由 main 注入的工厂完成。
+	Channel string        `yaml:"channel,omitempty"`
+	Models  []ModelConfig `yaml:"models"`
+}
+
+// ChannelProviderFactory 由 main 注入：给定渠道名与模型 ID，构造一个绑定该模型的
+// provider（内部使用账号池作为 AuthSource）。provider 包因此不必 import channel，
+// 保持「provider 不感知渠道」的边界。
+type ChannelProviderFactory func(channelName, modelID string) (Provider, bool)
+
+var channelProviderFactory ChannelProviderFactory
+
+// SetChannelProviderFactory 注册账号渠道 provider 工厂。必须在
+// SetupProvidersFromConfig 之前调用，否则 type: channel 的条目会被跳过。
+func SetChannelProviderFactory(factory ChannelProviderFactory) {
+	channelProviderFactory = factory
 }
 
 // ModelConfig 模型配置
@@ -171,6 +187,51 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 
 	// 注册提供商
 	for _, pc := range cfg.Providers {
+		// 账号渠道必须先于 registry.Create 处理：channel 不是 registry 认识的
+		// provider 类型，实例由 main 注入的工厂按渠道名构造，凭据来自交互式登录。
+		if pc.Type == "channel" {
+			if channelProviderFactory == nil {
+				logger.Printf("Warning: provider %s is a channel but no channel factory is registered", pc.Name)
+				continue
+			}
+			for _, mc := range pc.Models {
+				base, ok := channelProviderFactory(pc.Name, mc.ID)
+				if !ok {
+					logger.Printf("Warning: channel %s not registered, skipping model %s", pc.Name, mc.ID)
+					continue
+				}
+				capabilities := normalizeModelCapabilities(mc.Capabilities)
+				bound := NewBoundModelProviderWrapper(base, mc.ID, capabilities)
+				providerName := providerInstanceName(pc.Name, mc.ID, usedProviderNames)
+				usedProviderNames[providerName] = true
+				router.RegisterProvider(providerName, bound)
+
+				// 渠道模型不必声明 protocol：入站协议由客户端端点决定，
+				// 出站协议由渠道 provider 自行转换，留空即不对外标注。
+				protocol := mc.Protocol
+				registerModel := func(modelName string) {
+					router.RegisterChain(modelName, []string{providerName})
+					router.RegisterModel(ModelInfo{
+						ID:              modelName,
+						Provider:        pc.Name,
+						Protocol:        protocol,
+						Capabilities:    capabilities,
+						InputModalities: modelInputModalities(capabilities, mc.InputModalities),
+						MaxInputTokens:  mc.MaxInputTokens,
+						MaxOutputTokens: mc.MaxOutputTokens,
+						Description:     mc.Description,
+					})
+					modelToProvider[modelName] = providerName
+				}
+				registerModel(mc.ID)
+				for _, alias := range mc.Aliases {
+					registerModel(alias)
+				}
+				logger.Printf("Registered channel model: %s (channel=%s, provider=%s)", mc.ID, pc.Name, providerName)
+			}
+			continue
+		}
+
 		// 创建基础 provider
 		baseProvider, err := registry.Create(&pc)
 		if err != nil {
@@ -292,6 +353,15 @@ func NewBoundModelProviderWrapper(p Provider, model string, declared ...[]string
 // BoundModel 返回绑定的模型名
 func (w *BoundModelProviderWrapper) BoundModel() string {
 	return w.boundModel
+}
+
+// Available 转发底层 provider 的凭据可用性。账号渠道未登录时底层报告不可用，
+// 路由层据此跳过，避免每次请求都先撞一次「凭据缺失」再降级。
+func (w *BoundModelProviderWrapper) Available() bool {
+	if av, ok := w.Provider.(availabilityProvider); ok {
+		return av.Available()
+	}
+	return true
 }
 
 func (w *BoundModelProviderWrapper) Capabilities() []string {

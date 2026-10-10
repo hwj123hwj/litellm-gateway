@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,20 +44,18 @@ func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w i
 	if err != nil {
 		return fmt.Errorf("marshal stream request: %w", err)
 	}
+	reqBody, err = p.config.applyTransform(reqBody)
+	if err != nil {
+		return fmt.Errorf("transform stream request: %w", err)
+	}
 
 	// 派生可取消 context：空闲看门狗超时触发 cancel，中止停滞的上游流
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, p.config.URL, bytes.NewReader(reqBody))
+	resp, err := postWithAuth(streamCtx, p.client, p.Name(), p.config.URL, p.config, p.setHeaders, reqBody)
 	if err != nil {
-		return fmt.Errorf("create stream request: %w", err)
-	}
-	p.setHeaders(httpReq)
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("send stream request: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -87,16 +84,14 @@ func (p *AnthropicProvider) ForwardRequest(ctx context.Context, req *Request) (*
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.URL, bytes.NewReader(reqBody))
+	reqBody, err = p.config.applyTransform(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("transform request: %w", err)
 	}
-	p.setHeaders(httpReq)
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := postWithAuth(ctx, p.client, p.Name(), p.config.URL, p.config, p.setHeaders, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -138,9 +133,6 @@ func (p *AnthropicProvider) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "go-llm-gateway/1.0")
 	req.Header.Set("anthropic-version", "2023-06-01")
-	if p.config.UseBearer {
-		req.Header.Set("Authorization", "Bearer "+p.config.APIKey)
-	} else {
-		req.Header.Set("x-api-key", p.config.APIKey)
-	}
+	// applyAuth 处理静态 api_key 与渠道动态令牌二选一，并补渠道附加头。
+	p.config.applyAuth(req, p.config.UseBearer)
 }
