@@ -35,6 +35,9 @@ func sortedSelection(m map[string]bool) []string {
 func (a *App) skillsView(c *ui.Context) {
 	ui.Row(c).Gap(10).Children(func() {
 		ui.TextInput(c, &a.project).Grow(1).Label("项目路径").Placeholder("留空管理全局技能；填写网关主机上的项目绝对路径").Disabled(a.busy != "" || a.skillDirty)
+		if a.localConnection() {
+			ui.Button(c, "本机选择").Label("本机选择目录").Disabled(a.busy != "" || a.skillDirty).OnClick(a.pickLocalFolder)
+		}
 		ui.Button(c, "浏览").Label("浏览项目路径").Disabled(a.busy != "" || a.skillDirty).OnClick(a.openBrowser)
 		ui.Button(c, "读取范围").Disabled(a.busy != "" || a.skillDirty).OnClick(func() { a.loadedProject = strings.TrimSpace(a.project); a.loaded = false; a.reload() })
 	})
@@ -315,6 +318,18 @@ func bubble(c *ui.Context, who, text string, user bool) {
 	})
 }
 func (a *App) assistantView(c *ui.Context) {
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		options := append([]string{chatDefaultOption}, a.chatModels...)
+		if a.chatModel == "" {
+			a.chatModel = chatDefaultOption
+		}
+		ui.Select(c, &a.chatModel, options).Label("模型").Disabled(a.busy != "")
+		if a.chatDefault != "" {
+			muted(c, "默认 "+a.chatDefault)
+		}
+		ui.Spacer(c)
+		muted(c, "助理可用 gateway_status / gateway_logs 查询实时运行状态")
+	})
 	ui.Scroll(c).Grow(1).TrackScroll(&a.chatList).Gap(18).Selectable().Children(func() {
 		if a.chatUser == "" {
 			ui.Text(c, "你的网关助理").FontSize(22).Bold()
@@ -372,7 +387,11 @@ func (a *App) sendChat() {
 		done := false
 		var streamError error
 		size := 0
-		err := c.Stream(ctx, "/assistant/chat", map[string]string{"message": message}, func(data []byte) bool {
+		body := map[string]string{"message": message}
+		if model := a.chatModelParam(); model != "" {
+			body["model"] = model
+		}
+		err := c.Stream(ctx, "/assistant/chat", body, func(data []byte) bool {
 			var e Event
 			if json.Unmarshal(data, &e) != nil {
 				return true

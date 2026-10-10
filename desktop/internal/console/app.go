@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/connection"
+	"github.com/hwj123hwj/litellm-gateway/desktop/internal/nativefolder"
 )
 
 type App struct {
@@ -45,6 +47,8 @@ type App struct {
 	configSelection                                                                    map[string]map[string]bool
 	feedback                                                                           []Feedback
 	chatInput, chatReply, chatUser, chatStatus, feedbackNote                           string
+	chatModels                                                                         []string
+	chatModel, chatDefault                                                             string
 	chatList                                                                           ui.ScrollState
 	editorOpen                                                                         bool
 	editorKind, editorTitle, editorID, editorName, editorURL, editorToken, editorRoute string
@@ -236,7 +240,27 @@ func (a *App) reload() {
 				a.loaded = true
 			}, err
 		case "assistant":
-			return func() { a.loaded = true }, nil
+			var m struct {
+				Default string   `json:"default"`
+				Models  []string `json:"models"`
+			}
+			err := c.JSON(ctx, "GET", "/assistant/models", nil, &m)
+			return func() {
+				a.chatModels = m.Models
+				a.chatDefault = m.Default
+				if a.chatModel != chatDefaultOption {
+					found := false
+					for _, id := range m.Models {
+						if id == a.chatModel {
+							found = true
+						}
+					}
+					if !found {
+						a.chatModel = chatDefaultOption
+					}
+				}
+				a.loaded = true
+			}, err
 		}
 		return nil, nil
 	})
@@ -259,6 +283,47 @@ func (a *App) selectConnection(id string) {
 	a.page = "overview"
 	a.reload()
 }
+
+const chatDefaultOption = "网关默认"
+
+// pickNativeFolder 可在测试中替换；生产环境打开 macOS 原生目录面板。
+var pickNativeFolder = nativefolder.Pick
+
+// localConnection 判断当前连接的网关是否跑在本机（回环地址）——只有
+// 这种情况下原生目录面板选择的路径才属于网关主机。
+func (a *App) localConnection() bool {
+	u, err := url.Parse(strings.TrimSpace(a.active().URL))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// pickLocalFolder 用原生面板选择本机目录；取消则保持原值不变。
+func (a *App) pickLocalFolder() {
+	path, ok := pickNativeFolder()
+	if !ok {
+		return
+	}
+	if trimmed := strings.TrimSpace(path); trimmed != "" {
+		a.project = trimmed
+	}
+}
+
+func (a *App) chatModelParam() string {
+	if a.chatModel == chatDefaultOption {
+		return ""
+	}
+	return a.chatModel
+}
+
 func (a *App) resetHost() {
 	a.loaded = false
 	a.dashboard = Dashboard{}
@@ -282,6 +347,9 @@ func (a *App) resetHost() {
 	a.chatInput = ""
 	a.chatUser = ""
 	a.chatStatus = ""
+	a.chatModels = nil
+	a.chatModel = chatDefaultOption
+	a.chatDefault = ""
 	a.feedbackNote = ""
 	a.table = ui.ListState{}
 	a.notice = ""

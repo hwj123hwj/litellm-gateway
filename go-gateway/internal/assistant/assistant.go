@@ -25,8 +25,10 @@ import (
 // Config controls the resident assistant.
 type Config struct {
 	Enabled bool
-	// Model 是网关 /v1/models 里的模型 ID（如 glm-5.3-flash）。
+	// Model 是网关 /v1/models 里的模型 ID（如 glm-5.3-flash），作为默认模型。
 	Model string
+	// Models 是聊天端点允许按请求切换的模型清单（应包含 Model）；空则只有 Model。
+	Models []string
 	// BaseURL 指向网关自身（默认 http://127.0.0.1:<port>）。
 	BaseURL string
 	// APIKey 默认复用 MasterKey。
@@ -37,13 +39,16 @@ type Config struct {
 }
 
 // Assistant is a long-lived EasyAgent agent wired to gateway-domain tools.
+// 每个可用模型各持一个 agent 实例（历史独立）；Chat 按 model 参数路由。
 type Assistant struct {
-	mu       sync.Mutex
-	agent    *piagent.Agent
-	build    func(system string) *piagent.Agent
-	system   string
-	memories memory.Store
-	log      *log.Logger
+	mu        sync.Mutex
+	agents    map[string]*piagent.Agent
+	build     func(modelID, system string) *piagent.Agent
+	system    string
+	defaultM  string
+	available []string
+	memories  memory.Store
+	log       *log.Logger
 }
 
 // New builds the resident agent. The LLM transport points back at the
@@ -55,36 +60,73 @@ func New(cfg Config, memories memory.Store, logger *log.Logger) (*Assistant, err
 	}
 	registry := providers.NewRegistry()
 	registry.Register(providers.NewOpenAIProvider(cfg.APIKey, cfg.BaseURL))
-	model := ai.Model{
-		ID:            cfg.Model,
-		Name:          cfg.Model,
-		API:           "openai-completions",
-		Provider:      "openai", // 必须与 provider.Name() 一致，Agent 以此解析
-		BaseURL:       cfg.BaseURL,
-		ContextWindow: 128000,
-		MaxTokens:     8192,
+	available := dedupeModels(append([]string{cfg.Model}, cfg.Models...))
+	models := map[string]ai.Model{}
+	for _, id := range available {
+		models[id] = ai.Model{
+			ID:            id,
+			Name:          id,
+			API:           "openai-completions",
+			Provider:      "openai", // 必须与 provider.Name() 一致，Agent 以此解析
+			BaseURL:       cfg.BaseURL,
+			ContextWindow: 128000,
+			MaxTokens:     8192,
+		}
 	}
 	system := cfg.System
 	if system == "" {
 		system = DefaultSystemPrompt
 	}
-	build := func(sys string) *piagent.Agent {
+	build := func(modelID, sys string) *piagent.Agent {
 		return piagent.New(piagent.Options{
-			Model:    model,
+			Model:    models[modelID],
 			Registry: registry,
 			System:   sys,
 			Tools: []piagent.Tool{
 				newMemoryLookupTool(memories),
 				newMemoryListPendingTool(memories),
 				newMemoryProposeTool(memories),
+				newGatewayStatusTool(cfg.BaseURL, cfg.APIKey),
+				newGatewayLogsTool(cfg.BaseURL, cfg.APIKey),
 			},
 			MaxTurns: 8,
 		})
 	}
-	return &Assistant{agent: build(system), build: build, system: system, memories: memories, log: logger}, nil
+	return &Assistant{
+		agents:    map[string]*piagent.Agent{cfg.Model: build(cfg.Model, system)},
+		build:     build,
+		system:    system,
+		defaultM:  cfg.Model,
+		available: available,
+		memories:  memories,
+		log:       logger,
+	}, nil
 }
 
-// UpdateSystemPrompt hot-swaps the resident agent with a new system prompt
+func dedupeModels(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// DefaultModel returns the model used when a chat request omits one.
+func (a *Assistant) DefaultModel() string { return a.defaultM }
+
+// Models lists the model IDs a chat request may select.
+func (a *Assistant) Models() []string {
+	out := make([]string, len(a.available))
+	copy(out, a.available)
+	return out
+}
+
+// UpdateSystemPrompt hot-swaps every resident agent with a new system prompt
 // (Chat serializes on the same mutex, so in-flight turns finish first).
 func (a *Assistant) UpdateSystemPrompt(prompt string) {
 	a.mu.Lock()
@@ -93,7 +135,10 @@ func (a *Assistant) UpdateSystemPrompt(prompt string) {
 		prompt = DefaultSystemPrompt
 	}
 	a.system = prompt
-	a.agent = a.build(prompt)
+	a.agents = map[string]*piagent.Agent{}
+	for _, id := range a.available {
+		a.agents[id] = a.build(id, prompt)
+	}
 }
 
 // SystemPrompt returns the currently effective prompt.
@@ -110,13 +155,25 @@ type StreamUpdate struct {
 	Tool    string
 }
 
-// Chat runs one user turn through the agent, forwarding streamed updates.
-// 序列化执行：常驻 agent 的历史在实例内，个人场景单并发足够。
-func (a *Assistant) Chat(ctx context.Context, message string, onUpdate func(StreamUpdate)) (string, error) {
+// Chat runs one user turn through the agent for the requested model
+// ("" = default), forwarding streamed updates. 序列化执行：同一模型的
+// 会话历史在实例内，个人场景单并发足够。
+func (a *Assistant) Chat(ctx context.Context, message, model string, onUpdate func(StreamUpdate)) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if model == "" {
+		model = a.defaultM
+	}
+	if !a.modelAllowed(model) {
+		return "", fmt.Errorf("未知模型 %q；可用模型：%s", model, strings.Join(a.available, ", "))
+	}
+	agent, ok := a.agents[model]
+	if !ok {
+		agent = a.build(model, a.system)
+		a.agents[model] = agent
+	}
 
-	events, err := a.agent.PromptStream(ctx, ai.NewTextUserMessage(message))
+	events, err := agent.PromptStream(ctx, ai.NewTextUserMessage(message))
 	if err != nil {
 		return "", fmt.Errorf("assistant prompt: %w", err)
 	}
@@ -149,16 +206,28 @@ func (a *Assistant) Chat(ctx context.Context, message string, onUpdate func(Stre
 	return final, nil
 }
 
+func (a *Assistant) modelAllowed(model string) bool {
+	for _, id := range a.available {
+		if id == model {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultSystemPrompt 是未自定义时的助理人设。核心纪律（用户设定）：
 // 只记「用户本人的状态」——设备与环境、进行中的目标、现场经验；
 // 模型本就懂的通用知识一律不入记忆。
 const DefaultSystemPrompt = `你是常驻在 EasyGateway 里的助理（网关地址即你自己的 LLM 出口）。
 
 职责：
-1. 记忆管家：按用户要求检索、审阅长期记忆；发现值得长期记住的事实时，用
+1. 网关运营助手：凡是关于网关当前运行状况的问题（Provider 健康、熔断、
+   流量、延迟、最近错误），先用 gateway_status / gateway_logs 查询实时
+   数据再回答，不要凭记忆或猜测下结论。
+2. 记忆管家：按用户要求检索、审阅长期记忆；发现值得长期记住的事实时，用
    memory_propose 提案（进入 candidate，等用户在管理端确认，你无权直接生效）。
-2. 网关顾问：回答关于网关自身能力、配置约定的问题。
-3. 日常问答。
+3. 网关顾问：回答关于网关自身能力、配置约定的问题。
+4. 日常问答。
 
 记忆提案判据（最重要）：
 - 只提案关于**用户本人状态**的记忆：他的设备与环境（哪台机器、什么系统、怎么互连）、

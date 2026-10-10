@@ -24,15 +24,27 @@ func NewAssistantHandler(assistant *assistant.Assistant, logger *log.Logger) *As
 	return &AssistantHandler{assistant: assistant, log: logger}
 }
 
-// HandleChat POST /admin/assistant/chat {message} → SSE 流。
-// 事件形如 data: {"type":"text_delta","content":"..."} / tool_start / tool_end，
-// 结束帧 data: {"type":"done","content":"最终回复"} 或 {"type":"error"}。
+// HandleModels GET /admin/assistant/models — 聊天可选的模型清单与默认值。
+func (h *AssistantHandler) HandleModels(c *gin.Context) {
+	if h.assistant == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "助理未启用（ASSISTANT_ENABLED=true + ASSISTANT_MODEL）"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"default": h.assistant.DefaultModel(), "models": h.assistant.Models()})
+}
+
+// HandleChat POST /admin/assistant/chat {message, model?} → SSE 流。
+// model 缺省用 ASSISTANT_MODEL；事件形如 data: {"type":"text_delta","content":"..."} /
+// tool_start / tool_end，结束帧 data: {"type":"done","content":"最终回复"} 或 {"type":"error"}。
 func (h *AssistantHandler) HandleChat(c *gin.Context) {
 	if h.assistant == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "助理未启用（ASSISTANT_ENABLED=true + ASSISTANT_MODEL）"})
 		return
 	}
-	var req struct{ Message string `json:"message"` }
+	var req struct {
+		Message string `json:"message"`
+		Model   string `json:"model"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Message == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体需要 {\"message\": \"...\"}"})
 		return
@@ -56,7 +68,7 @@ func (h *AssistantHandler) HandleChat(c *gin.Context) {
 		flusher.Flush()
 	}
 
-	final, err := h.assistant.Chat(c.Request.Context(), req.Message, func(update assistant.StreamUpdate) {
+	final, err := h.assistant.Chat(c.Request.Context(), req.Message, req.Model, func(update assistant.StreamUpdate) {
 		if update.Type == "text_delta" {
 			writeEvent(map[string]any{"type": "text_delta", "content": update.Content})
 			return
