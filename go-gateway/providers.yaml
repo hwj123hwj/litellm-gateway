@@ -660,6 +660,68 @@ providers:
         max_input_tokens: 1000000
         max_output_tokens: 100000
 
+  - name: opencode
+    type: channel
+    channel: opencode
+    #
+    # OpenCode Zen（opencode.ai/zen）客户端。推理端点是标准 OpenAI Chat Completions
+    # （POST /zen/v1/chat/completions），因此复用 OpenAIProvider 的协议转换；免费通道
+    # **强制流式**（stream:false 直接 403），故 provider 侧用 OpenCodeProvider 覆盖非流式
+    # 路径：内部走流式端点，再把 SSE 累积回完整响应。渠道侧多做的三件事缺一即 403
+    # FreeTierError（上游据此判断「请求是否来自 OpenCode 客户端」）：
+    #   1. User-Agent 必须是 opencode/<version>（默认 opencode/1.18.22，可用
+    #      OPENCODE_USER_AGENT 覆盖），另有 x-opencode-client: cli / Accept: text/event-stream；
+    #   2. x-opencode-session 必须是 ses_ + 26 位 base62，每请求重新生成
+    #      （x-opencode-project / x-opencode-request 一并发送以保持形态一致）；
+    #   3. 请求体必须带 tools 且同时含 bash 与 read 两个占位工具，由 Transform 补齐。
+    #
+    # 免费模型**无需登录**：未登录时鉴权退化为匿名 Bearer "public"（AuthSource 处理）。
+    # 登录是标准设备码流程（网关向 console 申请 device_code，用户在浏览器完成授权），
+    # 登录后令牌即 Zen 的 Bearer key，可用于非免费模型；opencode-cli 是公开 client_id，
+    # 不需要任何第三方应用密钥。
+    #
+    # ⚠️ 同其它账号渠道：这是复刻官方客户端的非官方用法，可能违反服务条款并导致账号被封。
+    # 仅用于本机个人测试，不要对外分发。
+    #
+    # 模型清单为 2026-10-10 实测可用的免费模型（能力取 models.dev）。vision 按
+    # models.dev 的 modalities.input 是否含 image 判定，其中两处为实测覆盖：
+    # big-pickle 实际接受图片但 models.dev 漏报（故标 vision）；longcat-2.5-preview-free
+    # models.dev 标了 image 但真实带图请求 500（故不标 vision）。
+    # 模型 ID 与既有供应商无重名，无需命名空间。
+    models:
+      - id: big-pickle
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 32000
+      - id: space-bunny-free
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 1048576
+        max_output_tokens: 524288
+      - id: longcat-2.5-preview-free
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 131072
+      - id: mimo-v2.6-flash-free
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 32000
+      - id: nemotron-3-ultra-free
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: nemotron-3.5-lightning-free
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 262144
+        max_output_tokens: 262144
+      - id: ling-3.1-flash-free
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 262144
+        max_output_tokens: 32768
+      - id: step-5-preview-free
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
   # 上游 5xx）都自动降级到下一档，客户端始终只调用这个名字。

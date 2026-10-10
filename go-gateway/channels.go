@@ -42,9 +42,10 @@ func setupChannelProviders(router *provider.Router, registry *channel.Registry, 
 		trae:      channel.NewTraeChannel(dir),
 		loomy:     channel.NewLoomyChannel(dir),
 		raccoon:   channel.NewRaccoonChannel(dir),
+		opencode:  channel.NewOpenCodeChannel(dir),
 	}
 
-	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae, instances.loomy, instances.raccoon} {
+	for _, c := range []channel.Channel{instances.minimax, instances.cline, instances.lobster, instances.gemini, instances.codebuddy, instances.workbuddy, instances.trae, instances.loomy, instances.raccoon, instances.opencode} {
 		registry.Register(c)
 		logger.Printf("Account channel registered: %s (credentials: %s)", c.Name(), filepath.Join(dir, c.Name()+".json"))
 	}
@@ -74,6 +75,7 @@ type channelInstances struct {
 	trae      *channel.TraeChannel
 	loomy     *channel.LoomyChannel
 	raccoon   *channel.RaccoonChannel
+	opencode  *channel.OpenCodeChannel
 }
 
 // buildChannelProvider 是渠道 → provider 的装配开关，独立成函数以便测试直接断言
@@ -180,6 +182,24 @@ func buildChannelProvider(channelName, modelID string, ch channelInstances) (pro
 			ExtraHeaders:   ch.raccoon.ClientHeaders(),
 			DynamicHeaders: ch.raccoon.DynamicHeaders(),
 			Transform:      channel.RaccoonTransformRequest,
+		}), true
+	case "opencode":
+		// 上游是标准 OpenAI Chat Completions 协议（/zen/v1/chat/completions），
+		// 复用 OpenAIProvider 的协议转换，但用 OpenCodeProvider 覆盖非流式路径：
+		// 免费通道强制 stream:true，非流式请求必须内部走流式端点再累积回完整响应。
+		// 渠道层三处特有逻辑必须齐全，缺一上游都会 403 FreeTierError：
+		//   - Auth 用 AuthSource()：未登录时退化为匿名 Bearer "public"（免费模型无需
+		//     账号），不能像其它渠道那样直接给 Accounts（空令牌会让 applyAuth 什么都不写）；
+		//   - ExtraHeaders 提供 User-Agent: opencode/<version> 等固定头；
+		//   - DynamicHeaders 每个请求重新生成 x-opencode-session（上游唯一校验的动态头）；
+		//   - Transform 强制 stream:true 并补齐 bash/read 两个占位工具。
+		return provider.NewOpenCodeProvider(&provider.Config{
+			Name:           modelID,
+			URL:            ch.opencode.ChatURL(),
+			Auth:           ch.opencode.AuthSource(),
+			ExtraHeaders:   ch.opencode.ClientHeaders(),
+			DynamicHeaders: ch.opencode.DynamicHeaders(),
+			Transform:      channel.OpenCodeTransformRequest,
 		}), true
 	}
 	return nil, false

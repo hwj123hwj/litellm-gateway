@@ -22,6 +22,7 @@ func testChannelInstances(t *testing.T) channelInstances {
 		codebuddy: channel.NewCodeBuddyChannel(dir),
 		workbuddy: channel.NewWorkBuddyChannel(dir),
 		raccoon:   channel.NewRaccoonChannel(dir),
+		opencode:  channel.NewOpenCodeChannel(dir),
 	}
 }
 
@@ -188,5 +189,44 @@ func TestBuildChannelProviderRaccoonUsesOpenAIEndpoint(t *testing.T) {
 	}
 	if available, ok := p.(interface{ Available() bool }); ok && available.Available() {
 		t.Fatalf("未登录时 raccoon provider 不应报告可用")
+	}
+}
+
+// TestBuildChannelProviderOpenCodeUsesOpenAIEndpoint 验证 opencode 复用 OpenAI 协议：
+// URL 指向 /zen/v1/chat/completions、Bearer，模型 ID 用上游原生名。
+//
+// 与其它渠道不同的一点：opencode 免费模型无需登录，AuthSource 会把空令牌退化成匿名
+// 常量 "public"，因此这里**不**断言"未登录时不可用"——它必须报告可用。
+func TestBuildChannelProviderOpenCodeUsesOpenAIEndpoint(t *testing.T) {
+	instances := testChannelInstances(t)
+
+	p, ok := buildChannelProvider("opencode", "big-pickle", instances)
+	if !ok {
+		t.Fatalf("opencode 渠道应被识别")
+	}
+	if !p.UseBearer() {
+		t.Fatalf("opencode provider 必须用 Bearer")
+	}
+	if p.URL() != instances.opencode.ChatURL() {
+		t.Fatalf("provider URL 应指向 opencode chat 端点，得到 %q", p.URL())
+	}
+	if p.Name() != "big-pickle" {
+		t.Fatalf("provider 名应为绑定的模型 ID（原生名，无命名空间），得到 %q", p.Name())
+	}
+	if p.APIKey() != "" {
+		t.Fatalf("渠道 provider 不应带静态 api_key，得到 %q", p.APIKey())
+	}
+	if available, ok := p.(interface{ Available() bool }); ok && !available.Available() {
+		t.Fatalf("opencode 免费通道无需登录，provider 应始终报告可用")
+	}
+}
+
+// TestOpenCodeAuthSourceFallsBackToAnonymous 是回归测试：opencode 免费通道要求未登录时
+// 也能发请求。provider.applyAuth 在 Auth.BearerToken() 为空时会**不写任何头**（连
+// ExtraHeaders 一起跳过），因此渠道必须把空令牌映射成匿名常量 "public"。
+func TestOpenCodeAuthSourceFallsBackToAnonymous(t *testing.T) {
+	ch := channel.NewOpenCodeChannel(t.TempDir())
+	if got := ch.AuthSource().BearerToken(); got != "public" {
+		t.Fatalf("未登录时 opencode AuthSource 应返回匿名常量 \"public\"，得到 %q", got)
 	}
 }
