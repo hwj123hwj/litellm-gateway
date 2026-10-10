@@ -115,6 +115,47 @@ providers:
       - id: XingChenAGI/XingChenASR-Diarize-V3.0
         capabilities: [audio_transcription]
         description: "多人会议档；响应含 segments 说话人分段与时间戳"
+  # ── 账号渠道（第二类）─────────────────────────────────────────────────────
+  # 凭据不是 api_key，而是复刻官方客户端登录拿到的 OAuth 令牌：登录由网关内置的
+  # 设备码流程完成（管理面板 POST /admin/channels/<渠道>/login），凭据只落本机
+  # <LLM_GATEWAY_HOME>/channels/ 下的 0600 文件。这里的 models 只声明「这个渠道
+  # 对外提供哪些模型」，不提供密钥。
+  #
+  # ⚠️ 这些上游是各家产品的私有端点，用官方客户端凭据直接调用属于非官方用法，
+  # 可能违反其服务条款并导致账号被封。仅用于本机个人测试，不要对外分发。
+  - name: minimax
+    type: channel
+    channel: minimax
+    # 上游是 Anthropic Messages 协议，网关复用 AnthropicProvider 的传输与 SSE 透传。
+    models:
+      # M3.1 强制思考：上游对 thinking:disabled 直接 400，网关已在请求体里
+      # 统一改写为 adaptive（见 channel.MiniMaxTransformRequest）。
+      - id: MiniMax-M3.1-Flash-Preview
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+      - id: MiniMax-M3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+      - id: MiniMax-M2.7
+        capabilities: [text, tool_calling, streaming, reasoning]
+      - id: MiniMax-M2.7-highspeed
+        capabilities: [text, tool_calling, streaming, reasoning]
+  - name: cline
+    type: channel
+    channel: cline
+    # 上游是 OpenAI Chat Completions 协议；令牌需带 workos: 前缀，网关在渠道层
+    # 已处理。以下为当前免费的三个模型。
+    models:
+      - id: stealth/space-bunny-alpha
+        capabilities: [text, vision, tool_calling, streaming]
+        input_modalities: [text, image]
+      - id: cline-free/mimo-v2.6-flash
+        capabilities: [text, vision, tool_calling, streaming]
+        input_modalities: [text, image]
+      - id: cline-free/muse-spark-1.3-contributor
+        capabilities: [text, vision, tool_calling, streaming]
+        input_modalities: [text, image]
+
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
   # 上游 5xx）都自动降级到下一档，客户端始终只调用这个名字。

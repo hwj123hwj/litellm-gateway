@@ -5,7 +5,6 @@ package provider
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -222,16 +221,14 @@ func (p *OpenAIProvider) ForwardRequest(ctx context.Context, req *Request) (*Res
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai request: %w", err)
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.URL, bytes.NewReader(body))
+	body, err = p.config.applyTransform(body)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("transform openai request: %w", err)
 	}
-	p.setHeaders(httpReq)
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := postWithAuth(ctx, p.client, p.Name(), p.config.URL, p.config, p.setHeaders, body)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -261,20 +258,18 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	if err != nil {
 		return fmt.Errorf("marshal openai stream request: %w", err)
 	}
+	body, err = p.config.applyTransform(body)
+	if err != nil {
+		return fmt.Errorf("transform openai stream request: %w", err)
+	}
 
 	// 派生可取消 context：空闲看门狗超时触发 cancel，中止停滞的上游流
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, p.config.URL, bytes.NewReader(body))
+	resp, err := postWithAuth(streamCtx, p.client, p.Name(), p.config.URL, p.config, p.setHeaders, body)
 	if err != nil {
-		return fmt.Errorf("create stream request: %w", err)
-	}
-	p.setHeaders(httpReq)
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("send stream request: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -485,8 +480,9 @@ func (p *OpenAIProvider) ProbeModel(ctx context.Context, model string) ProbeResu
 
 func (p *OpenAIProvider) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 	req.Header.Set("User-Agent", "go-llm-gateway/1.0")
+	// applyAuth 处理静态 api_key 与渠道动态令牌二选一，并补渠道附加头。
+	p.config.applyAuth(req, true)
 }
 
 // ─── 始终思考模型处理 ──────────────────────────────────────────────────────────

@@ -205,6 +205,11 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 				continue
 			}
 		}
+		// 账号渠道未登录时直接跳过：否则每次请求都要先发一次必然 401 的上游调用。
+		if !providerAvailable(p) {
+			unavailable = append(unavailable, name)
+			continue
+		}
 		result = append(result, p)
 	}
 	if len(result) == 0 {
