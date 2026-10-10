@@ -343,3 +343,126 @@ func TestChannelProviderRefreshOn401Lobster(t *testing.T) {
 		t.Fatalf("续期前后令牌不正确: %v", auths)
 	}
 }
+
+// buddyProvider 复刻 channels.go 里 codebuddy/workbuddy 的装配：OpenAI 协议 +
+// 按模型解析的复刻头 + 剥离命名空间前缀的请求体改写。
+func buddyProvider(channel *BuddyChannel, accounts *Accounts, url, model string) *provider.OpenAIProvider {
+	return provider.NewOpenAIProvider(&provider.Config{
+		Name:         model,
+		URL:          url,
+		Auth:         accounts,
+		ExtraHeaders: channel.ClientHeaders(model),
+		Transform:    channel.TransformRequest,
+	})
+}
+
+// TestBuddyProviderSendsBearerAndClientHeaders 验证 buddy 推理请求的鉴权与复刻头。
+// 这些头是上游识别官方客户端的唯一依据，缺任意一项都会被拒。
+func TestBuddyProviderSendsBearerAndClientHeaders(t *testing.T) {
+	var gotAuth string
+	var gotBody map[string]any
+	gotHeaders := map[string]string{}
+
+	// 渠道实例只用来取头与做改写，端点指向假上游。
+	channel := newBuddyForTest(t, "http://127.0.0.1:1", buddyChannelWorkBuddy)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		for name := range channel.ClientHeaders("workbuddy/gpt-5.6-sol") {
+			gotHeaders[name] = r.Header.Get(name)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c","object":"chat.completion","model":"gpt-5.6-sol","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	accounts := channelAccounts(t, "workbuddy", "buddy-token")
+	p := buddyProvider(channel, accounts, server.URL, "workbuddy/gpt-5.6-sol")
+
+	// 请求体用对外模型名（带前缀）：上游收到的必须是剥掉前缀的真名。
+	req := mustRequest(t, `{"model":"workbuddy/gpt-5.6-sol","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	if _, err := p.ForwardRequest(context.Background(), req); err != nil {
+		t.Fatalf("ForwardRequest failed: %v", err)
+	}
+
+	if gotAuth != "Bearer buddy-token" {
+		t.Fatalf("buddy 必须用 Authorization: Bearer，得到 %q", gotAuth)
+	}
+	if gotBody["model"] != "gpt-5.6-sol" {
+		t.Fatalf("发往上游的模型名应剥掉渠道前缀，得到 %v", gotBody["model"])
+	}
+	for name, want := range channel.ClientHeaders("workbuddy/gpt-5.6-sol") {
+		if got := gotHeaders[name]; got != want {
+			t.Fatalf("buddy 复刻头 %s 应为 %q，得到 %q", name, want, got)
+		}
+	}
+	// User-Agent 必须被渠道覆盖掉网关默认 UA，否则上游按非官方客户端处理。
+	if got := gotHeaders["User-Agent"]; got != buddyWorkBuddyUAIntl {
+		t.Fatalf("User-Agent 应被渠道覆盖为 WorkBuddy 国际版形态，得到 %q", got)
+	}
+}
+
+// TestBuddyProviderUnavailableWhenLoggedOut 验证未登录时 provider 报告不可用且不触达上游。
+func TestBuddyProviderUnavailableWhenLoggedOut(t *testing.T) {
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	channel := newBuddyForTest(t, "http://127.0.0.1:1", buddyChannelCodeBuddy)
+	empty := NewAccounts("codebuddy", NewStore(t.TempDir()), newOAuthClient(), nil)
+	p := buddyProvider(channel, empty, server.URL, "codebuddy/glm-5.3")
+
+	if p.Available() {
+		t.Fatalf("未登录时 Available 应为 false")
+	}
+	req := mustRequest(t, `{"model":"codebuddy/glm-5.3","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+	if _, err := p.ForwardRequest(context.Background(), req); err == nil {
+		t.Fatalf("未登录时应直接报错，不发请求")
+	}
+	if hits != 0 {
+		t.Fatalf("未登录时不应触达上游，实际 %d 次", hits)
+	}
+}
+
+// TestBuddyProviderRefreshOn401 验证 401 后账号池续期并重试一次；buddy 的续期
+// 走 refreshCredential（真实请求），这里注入一个假账号池来只测调度。
+func TestBuddyProviderRefreshOn401(t *testing.T) {
+	var auths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		if len(auths) == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"expired"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	store := NewStore(t.TempDir())
+	writeCreds(t, store, "codebuddy", Credential{
+		AccessToken:  "old-token",
+		RefreshToken: "r",
+		ExpiresAt:    time.Now().Add(-time.Hour),
+	})
+	accounts := NewAccounts("codebuddy", store, newOAuthClient(), func(_ context.Context, cred Credential) (Credential, error) {
+		next := cred
+		next.AccessToken = "new-token"
+		next.ExpiresAt = time.Now().Add(2 * time.Hour)
+		return next, nil
+	})
+
+	channel := newBuddyForTest(t, "http://127.0.0.1:1", buddyChannelCodeBuddy)
+	p := buddyProvider(channel, accounts, server.URL, "codebuddy/glm-5.3")
+	req := mustRequest(t, `{"model":"codebuddy/glm-5.3","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+	if _, err := p.ForwardRequest(context.Background(), req); err != nil {
+		t.Fatalf("续期后应成功，得到 %v", err)
+	}
+	if len(auths) != 2 || auths[0] != "Bearer old-token" || auths[1] != "Bearer new-token" {
+		t.Fatalf("续期前后令牌不正确: %v", auths)
+	}
+}

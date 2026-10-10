@@ -15,10 +15,12 @@ func testChannelInstances(t *testing.T) channelInstances {
 	t.Helper()
 	dir := t.TempDir()
 	return channelInstances{
-		minimax: channel.NewMiniMaxChannel(dir),
-		cline:   channel.NewClineChannel(dir),
-		lobster: channel.NewLobsterChannel(dir),
-		gemini:  channel.NewGeminiChannel(dir),
+		minimax:   channel.NewMiniMaxChannel(dir),
+		cline:     channel.NewClineChannel(dir),
+		lobster:   channel.NewLobsterChannel(dir),
+		gemini:    channel.NewGeminiChannel(dir),
+		codebuddy: channel.NewCodeBuddyChannel(dir),
+		workbuddy: channel.NewWorkBuddyChannel(dir),
 	}
 }
 
@@ -102,6 +104,52 @@ func TestBuildChannelProviderGeminiUsesCloudCode(t *testing.T) {
 	}
 	if available, ok := p.(interface{ Available() bool }); ok && available.Available() {
 		t.Fatalf("未登录时 gemini provider 不应报告可用")
+	}
+}
+
+// TestBuildChannelProviderCodeBuddyUsesOpenAIEndpoint 验证 codebuddy 复用 OpenAI
+// 协议：URL 指向 /v2/chat/completions、Bearer，且未登录时报告不可用。
+func TestBuildChannelProviderCodeBuddyUsesOpenAIEndpoint(t *testing.T) {
+	instances := testChannelInstances(t)
+
+	p, ok := buildChannelProvider("codebuddy", "codebuddy/glm-5.3", instances)
+	if !ok {
+		t.Fatalf("codebuddy 渠道应被识别")
+	}
+	if !p.UseBearer() {
+		t.Fatalf("codebuddy provider 必须用 Bearer")
+	}
+	if p.URL() != instances.codebuddy.ChatURL() {
+		t.Fatalf("provider URL 应指向 buddy chat 端点，得到 %q", p.URL())
+	}
+	if p.Name() != "codebuddy/glm-5.3" {
+		t.Fatalf("provider 名应为绑定的模型 ID，得到 %q", p.Name())
+	}
+	if p.APIKey() != "" {
+		t.Fatalf("渠道 provider 不应带静态 api_key，得到 %q", p.APIKey())
+	}
+	if available, ok := p.(interface{ Available() bool }); ok && available.Available() {
+		t.Fatalf("未登录时 codebuddy provider 不应报告可用")
+	}
+}
+
+// TestBuildChannelProviderWorkBuddyUsesItsOwnProduct 是回归测试：两个 buddy 渠道
+// 共用一份实现，装配时若把 workbuddy 也指向 codebuddy 实例，端点会错到腾讯域上。
+func TestBuildChannelProviderWorkBuddyUsesItsOwnProduct(t *testing.T) {
+	instances := testChannelInstances(t)
+
+	p, ok := buildChannelProvider("workbuddy", "workbuddy/gpt-5.6-sol", instances)
+	if !ok {
+		t.Fatalf("workbuddy 渠道应被识别")
+	}
+	if p.URL() != instances.workbuddy.ChatURL() {
+		t.Fatalf("workbuddy provider URL 应指向 WorkBuddy 端点，得到 %q", p.URL())
+	}
+	if p.URL() == instances.codebuddy.ChatURL() {
+		t.Fatalf("workbuddy 不应复用 codebuddy 的端点")
+	}
+	if available, ok := p.(interface{ Available() bool }); ok && available.Available() {
+		t.Fatalf("未登录时 workbuddy provider 不应报告可用")
 	}
 }
 

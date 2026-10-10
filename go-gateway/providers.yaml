@@ -230,6 +230,234 @@ providers:
         input_modalities: [text, image]
         description: "Gemini 3.8 Flash（CloudCode 渠道），自适应思考档（上游自行决定预算）"
 
+  # CodeBuddy（腾讯）/ WorkBuddy（国际版）：两者共用同一套私有登录与推理协议，
+  # 网关里是同一个渠道实现（channel.BuddyChannel）加两张产品常量表。登录形态是
+  # 「申请 state + 轮询」，既不是设备码也没有回环回调：网关先向
+  # /v2/plugin/auth/state 取 state 与登录地址，交给用户在浏览器打开，随后用同一个
+  # state 轮询 /v2/plugin/auth/token 拿令牌（未就绪回 code=11217）、再轮询
+  # /v2/plugin/login/account 补账号信息（未就绪回 code=12151）——这两个码属正常
+  # 等待，不是失败。推理走 OpenAI Chat Completions 协议（/v2/chat/completions），
+  # 故复用 OpenAIProvider，渠道层只负责令牌、复刻头与续期。
+  #
+  # 两个渠道的模型名都带自己的前缀（codebuddy/、workbuddy/）：这两家的模型清单与
+  # 既有供应商大量重名（glm-5.3、glm-5.2、kimi-k2.6、deepseek-v4-flash…），网关按
+  # 模型 ID 注册路由，裸名会覆盖既有 provider。前缀属网关侧命名，发往上游前由
+  # channel.BuddyChannel.TransformRequest 剥掉。
+  #
+  # WorkBuddy 的 User-Agent 按模型家族切换：GPT/Gemini/Claude 系用国际版形态，
+  # glm/hy/kimi/minimax 系用国内客户端形态，网关在渠道层按模型名解析。
+  # 下面的 max_input_tokens/max_output_tokens 取自官方客户端自带的模型元数据。
+  - name: codebuddy
+    type: channel
+    channel: codebuddy
+    # 模型清单来自客户端自带目录（CODEBUDDY_FALLBACK_MODELS）。
+    models:
+      - id: codebuddy/hy4-preview
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 64000
+      - id: codebuddy/hy3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 192000
+        max_output_tokens: 64000
+      - id: codebuddy/hy3-x
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 192000
+        max_output_tokens: 64000
+      - id: codebuddy/deepseek-v4.1-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: codebuddy/deepseek-v4-pro
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: codebuddy/deepseek-v4-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 50000
+      - id: codebuddy/glm-5.3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 64000
+      - id: codebuddy/glm-5.3-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 32000
+      - id: codebuddy/glm-5.2
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 64000
+      - id: codebuddy/glm-5.1
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 48000
+      - id: codebuddy/glm-5v-turbo
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: codebuddy/kimi-k3-1
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 32000
+      - id: codebuddy/kimi-k2.8-preview
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 64000
+      - id: codebuddy/kimi-k2.7
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 256000
+        max_output_tokens: 32000
+      - id: codebuddy/kimi-k2.6
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 256000
+        max_output_tokens: 32000
+      - id: codebuddy/minimax-m3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 512000
+        max_output_tokens: 64000
+  - name: workbuddy
+    type: channel
+    channel: workbuddy
+    # 模型清单来自客户端自带目录。前五项是服务端档位别名（default-model 等），
+    # 由上游映射到具体模型，保留以复刻官方清单。
+    models:
+      - id: workbuddy/default-model
+        capabilities: [text, vision, tool_calling, streaming]
+        input_modalities: [text, image]
+        max_input_tokens: 176000
+        max_output_tokens: 24000
+        description: "WorkBuddy 服务端默认档别名，由上游映射到具体模型"
+      - id: workbuddy/fast-model
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 32000
+        description: "WorkBuddy 快速档别名，由上游映射到具体模型"
+      - id: workbuddy/balanced-model
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 256000
+        max_output_tokens: 32000
+        description: "WorkBuddy 均衡档别名，由上游映射到具体模型"
+      - id: workbuddy/primary-model
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 72000
+        description: "WorkBuddy 主力档别名，由上游映射到具体模型"
+      - id: workbuddy/deep-model
+        capabilities: [text, vision, tool_calling, streaming]
+        input_modalities: [text, image]
+        max_input_tokens: 176000
+        max_output_tokens: 24000
+        description: "WorkBuddy 深度档别名，由上游映射到具体模型"
+      - id: workbuddy/hy4-preview-f
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 64000
+      - id: workbuddy/hy4-preview
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 64000
+      - id: workbuddy/hy3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 192000
+        max_output_tokens: 64000
+      - id: workbuddy/deepseek-v4.1-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/deepseek-v4.1-flash-sg
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/gpt-6-astra
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/gpt-5.6-sol
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/gpt-5.6-terra
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/gpt-5.6-luna
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/gpt-5.5
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 128000
+      - id: workbuddy/gpt-5.4
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+        max_output_tokens: 72000
+      - id: workbuddy/gpt-5.3-codex
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 272000
+      - id: workbuddy/gemini-3.5-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 65536
+      - id: workbuddy/glm-5.3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 48000
+      - id: workbuddy/glm-5.2
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 48000
+      - id: workbuddy/kimi-k3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 32000
+      - id: workbuddy/kimi-k2.8-preview
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 1000000
+        max_output_tokens: 32000
+      - id: workbuddy/kimi-k2.6
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 256000
+        max_output_tokens: 32000
+
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
   # 上游 5xx）都自动降级到下一档，客户端始终只调用这个名字。
