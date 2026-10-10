@@ -1,7 +1,7 @@
 {
   "name": "EasyGateway",
   "identifier": "com.hwj.llm-gateway.desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "out": "build.noindex",
   "macos": {
     "minimumSystemVersion": "13.0"

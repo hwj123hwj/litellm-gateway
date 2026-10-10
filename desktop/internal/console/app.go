@@ -33,6 +33,7 @@ type App struct {
 	logLimit, logFilter                                                                string
 	logSelected                                                                        int
 	table                                                                              ui.ListState
+	listViews                                                                          listViewState
 	modelFilter                                                                        string
 	skills                                                                             Skills
 	project, loadedProject, targets                                                    string
@@ -325,6 +326,7 @@ func (a *App) chatModelParam() string {
 }
 
 func (a *App) resetHost() {
+	a.listViews = listViewState{}
 	a.loaded = false
 	a.dashboard = Dashboard{}
 	a.models = nil

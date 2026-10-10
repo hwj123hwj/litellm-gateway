@@ -504,18 +504,16 @@ func (a *App) overviewView(c *ui.Context) {
 }
 func (a *App) modelsView(c *ui.Context) {
 	ui.TextInput(c, &a.modelFilter).Placeholder("搜索模型或 Provider").Label("搜索模型")
-	filtered := []Model{}
-	for _, m := range a.models {
-		if strings.Contains(strings.ToLower(m.Name+" "+m.Provider), strings.ToLower(a.modelFilter)) {
-			filtered = append(filtered, m)
-		}
+	filtered, changed := a.listViews.models.apply(a.models, a.modelFilter, modelSearchText)
+	if changed {
+		a.listViews.modelList = ui.ListState{}
 	}
-	if len(filtered) == 0 {
+	if filtered.Len() == 0 {
 		empty(c, "没有匹配的模型")
 		return
 	}
-	ui.List(c, nil, len(filtered), func(i int) {
-		m := filtered[i]
+	ui.List(c, &a.listViews.modelList, filtered.Len(), func(i int) {
+		m := filtered.At(i)
 		ui.Column(c.Key(m.Name)).Children(func() {
 			row(c, func() {
 				ui.Row(c).Gap(12).Children(func() {
@@ -598,20 +596,22 @@ func (a *App) logsView(c *ui.Context) {
 			a.reload()
 		}
 	})
-	filtered := []Log{}
-	for _, l := range a.logs {
-		if strings.Contains(strings.ToLower(l.Model+" "+l.Provider+" "+l.RequestID+" "+l.Error), strings.ToLower(a.logFilter)) {
-			filtered = append(filtered, l)
-		}
+	filtered, changed := a.listViews.logs.apply(a.logs, a.logFilter, logSearchText)
+	if changed {
+		a.logSelected = -1
+		a.table = ui.ListState{}
 	}
-	if len(filtered) == 0 {
+	if filtered.Len() == 0 {
 		empty(c, "暂无匹配的请求日志")
 		return
 	}
 	a.table.Selected = &a.logSelected
-	a.table.Key = func(i int) any { return filtered[i].RequestID + filtered[i].Timestamp + fmt.Sprint(i) }
-	ui.Table(c, &a.table, []ui.TableColumn{{Title: "时间", Width: 170}, {Title: "模型"}, {Title: "Provider", Width: 150}, {Title: "状态", Width: 65}, {Title: "延迟", Width: 100}}, len(filtered), func(row, col int) {
-		l := filtered[row]
+	a.table.Key = func(i int) any {
+		l := filtered.At(i)
+		return l.RequestID + l.Timestamp + fmt.Sprint(i)
+	}
+	ui.Table(c, &a.table, []ui.TableColumn{{Title: "时间", Width: 170}, {Title: "模型"}, {Title: "Provider", Width: 150}, {Title: "状态", Width: 65}, {Title: "延迟", Width: 100}}, filtered.Len(), func(row, col int) {
+		l := filtered.At(row)
 		switch col {
 		case 0:
 			ui.Text(c, l.Timestamp).SingleLine()
@@ -625,8 +625,8 @@ func (a *App) logsView(c *ui.Context) {
 			ui.Text(c, formatLatency(l.Latency))
 		}
 	}).Grow(1).MinHeight(130)
-	if a.logSelected >= 0 && a.logSelected < len(filtered) {
-		l := filtered[a.logSelected]
+	if a.logSelected >= 0 && a.logSelected < filtered.Len() {
+		l := filtered.At(a.logSelected)
 		ui.Scroll(c).MaxHeight(220).Gap(6).Padding(12).Background(c.Theme().Surface).Radius(8).Selectable().Children(func() {
 			ui.Text(c, l.Method+" "+l.Path+" · "+l.RequestID).Bold()
 			meta(c, "输入 "+shortNumber(l.Input), "输出 "+shortNumber(l.Output)+" tokens", "缓存读取 "+shortNumber(l.CacheRead), fmt.Sprintf("流式 %t", l.Stream))
