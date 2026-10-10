@@ -21,6 +21,7 @@ func testChannelInstances(t *testing.T) channelInstances {
 		gemini:    channel.NewGeminiChannel(dir),
 		codebuddy: channel.NewCodeBuddyChannel(dir),
 		workbuddy: channel.NewWorkBuddyChannel(dir),
+		raccoon:   channel.NewRaccoonChannel(dir),
 	}
 }
 
@@ -160,5 +161,32 @@ func TestBuildChannelProviderUnknownChannel(t *testing.T) {
 
 	if p, ok := buildChannelProvider("qoder", "whatever", instances); ok || p != nil {
 		t.Fatalf("未实现的渠道不应返回 provider，得到 %v ok=%v", p, ok)
+	}
+}
+
+// TestBuildChannelProviderRaccoonUsesOpenAIEndpoint 验证 raccoon 复用 OpenAI 协议：
+// URL 指向 /api/web/llm/v2/chat/completions、Bearer（Authorization 头），且未登录时
+// 报告不可用（路由层据此跳过）。
+func TestBuildChannelProviderRaccoonUsesOpenAIEndpoint(t *testing.T) {
+	instances := testChannelInstances(t)
+
+	p, ok := buildChannelProvider("raccoon", "sn-glm-5-3", instances)
+	if !ok {
+		t.Fatalf("raccoon 渠道应被识别")
+	}
+	if !p.UseBearer() {
+		t.Fatalf("raccoon provider 必须用 Bearer")
+	}
+	if p.URL() != instances.raccoon.ChatURL() {
+		t.Fatalf("provider URL 应指向 raccoon chat 端点，得到 %q", p.URL())
+	}
+	if p.Name() != "sn-glm-5-3" {
+		t.Fatalf("provider 名应为绑定的模型 ID（原生 sn- 前缀），得到 %q", p.Name())
+	}
+	if p.APIKey() != "" {
+		t.Fatalf("渠道 provider 不应带静态 api_key，得到 %q", p.APIKey())
+	}
+	if available, ok := p.(interface{ Available() bool }); ok && available.Available() {
+		t.Fatalf("未登录时 raccoon provider 不应报告可用")
 	}
 }

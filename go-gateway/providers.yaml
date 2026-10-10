@@ -605,6 +605,60 @@ providers:
         capabilities: [text, tool_calling, streaming, reasoning]
         max_input_tokens: 1048576
         max_output_tokens: 65536
+  - name: raccoon
+    type: channel
+    channel: raccoon
+    #
+    # Raccoon（商汤 / Senser「小浣熊」）桌面客户端。推理端点是普通 OpenAI Chat Completions
+    # （POST {apiBase}/api/web/llm/v2/chat/completions），因此复用 OpenAIProvider；
+    # 渠道侧多做的三件事：
+    #   1. 鉴权 Authorization: Bearer <token>（由 AuthSource 提供，401 自动续期一次）；
+    #   2. 复刻固定头 Accept: text/event-stream / X-Raccoon-Language: zh /
+    #      X-Client-Platform: desktop-windows；其中 X-Org-Code 必须是**当前账号**的
+    #      office_identity（个人账号为空），故走 DynamicHeaders 每请求求值；
+    #   3. 思考档位只认 extra_body.thinking.type（顶层 reasoning_effort / thinking 会被
+    #      静默忽略），由 Transform 折叠进 extra_body。
+    #
+    # 登录有两条路径，都在本机回环页上完成（网关在 127.0.0.1 随机端口起小服务）：
+    #   - 微信扫码：二维码内容 = {apiBase}/login/mp?code=<随机 hex>，服务端不提供图片，
+    #     故由网关**本地渲染**成 SVG（见 internal/channel/raccoon_qr.go），页面每 2 秒
+    #     轮询一次 /raccoon/poll；
+    #   - 短信：手机号经 AES-128-CFB 加密（密钥为客户端内置常量，可用
+    #     RACCOON_PHONE_CIPHER_SECRET 覆盖）后调 send_sms / login_with_sms，
+    #     下发前需过阿里云滑块验证码。
+    # 登录不需要任何第三方应用密钥，开箱可用。
+    #
+    # ⚠️ 同其它账号渠道：这是复刻官方客户端的非官方用法，可能违反服务条款并导致账号被封。
+    # 仅用于本机个人测试，不要对外分发。
+    #
+    # 模型清单取自客户端自带的 RACCOON_FALLBACK_MODELS（含上下文档位）。均为多模态模型
+    # （标注 vision）；思考档位通过 extra_body.thinking 控制，故标注 reasoning。
+    # 模型 ID 直接用上游原生的 `sn-` 前缀（与既有供应商无重名，无需再加命名空间）。
+    models:
+      - id: sn-sensenova-6-8-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 256000
+        max_output_tokens: 63999
+      - id: sn-sensenova-6-8-flash-lite
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 256000
+        max_output_tokens: 63999
+      - id: sn-glm-5-3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 100000
+      - id: sn-kimi-k3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 100000
+      - id: sn-glm-5-3-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 100000
+      - id: sn-deepseek-v4-1-flash
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        max_input_tokens: 1000000
+        max_output_tokens: 100000
 
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
