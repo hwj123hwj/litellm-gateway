@@ -69,6 +69,25 @@ func (a *Accounts) BearerToken() string {
 	return cred.AccessToken
 }
 
+// CurrentExtra 返回当前账号的附加字段（uid / machine_id 等）。返回的是副本，
+// 调用方可以安全长期持有。未登录时返回 nil。
+//
+// 这是 trae 这类「请求头需要账号级身份字段」的渠道的扩展点：provider 只认
+// AuthSource，拿不到 Credential，故由渠道侧在此暴露。
+func (a *Accounts) CurrentExtra() map[string]string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	cred := a.currentLocked()
+	if cred == nil || len(cred.Extra) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(cred.Extra))
+	for key, value := range cred.Extra {
+		out[key] = value
+	}
+	return out
+}
+
 // Credentials 实现 CredentialReporter：返回所有账号的非敏感摘要。
 // 注意只回传账号标识与有效期，绝不回传 token 明文。
 func (a *Accounts) Credentials() []credentialSummary {

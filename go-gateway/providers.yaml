@@ -457,6 +457,96 @@ providers:
         input_modalities: [text, image]
         max_input_tokens: 256000
         max_output_tokens: 32000
+  - name: trae
+    type: channel
+    channel: trae
+    #
+    # TRAE（字节）的 SOLO 端点：既不是 OpenAI 也不是 Anthropic，用专门的
+    # TraeProvider（见 internal/provider/trae.go）做请求体翻译与私有 SSE → Anthropic
+    # SSE 翻译。鉴权是 Authorization: Cloud-IDE-JWT，并附带复刻客户端所需的一整套
+    # X-* 头（由渠道侧的 AuthSource 提供，因为依赖当前账号的 uid/machine_id）。
+    #
+    # 登录是「授权页 + 固定端口回环回调」：网关在 127.0.0.1:18080 起回调服务
+    # （端口被占用则退回系统分配端口），把 https://www.trae.cn/authorization?... 交给
+    # 浏览器打开。⚠️ 网关需要 Trae 客户端标识（client_id / app_id）才能拼出授权地址：
+    # 通过 TRAE_CHANNEL_CLIENT_ID / TRAE_CHANNEL_APP_ID 环境变量，或
+    # <LLM_GATEWAY_HOME>/trae-client.json（{"client_id":..,"app_id":..}）提供，二者都
+    # 没有时登录会直接报错并给出指引（第三方客户端标识不进公开仓库）。
+    #
+    # ⚠️ 同其它账号渠道：这是复刻官方客户端的非官方用法，可能违反服务条款并导致账号
+    # 被封。仅用于本机个人测试，不要对外分发。
+    #
+    # 模型清单取自官方客户端自带的 TRAE_FALLBACK_MODELS：只保留可调用的可见模型，
+    # isHidden 的内部模型（browser_use_subagent / explore_sub_agent_* / summary）与
+    # custom_model_* 占位模型都不在此。模型 ID 加 `trae/` 前缀以避免与既有供应商重名。
+    models:
+      - id: trae/glm-5.2
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/glm-5-turbo
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/glm-5
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/DeepSeek-V4-Pro
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/DeepSeek-V4-Flash
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/DeepSeek-V4-Flash-Official
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/kimi-k3
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/kimi-k2.7-code
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/kimi-k2.6
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/minimax-m3
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/qwen-3.7-plus
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/Doubao-Seed-2.1-Pro
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/Doubao-Seed-2.1-Turbo
+        capabilities: [text, vision, tool_calling, streaming, reasoning]
+        input_modalities: [text, image]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/Doubao-Seed-2.0-Code
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
+      - id: trae/seed-code-pro-0430
+        capabilities: [text, tool_calling, streaming, reasoning]
+        max_input_tokens: 200000
+        max_output_tokens: 64000
 
 chains:
   # 唯一对外入口。按能力从强到弱排列，任一档失败（含限流、无权限、
