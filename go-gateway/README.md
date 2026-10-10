@@ -122,6 +122,7 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/admin/archives/export` | GET | 增量导出归档为 JSONL（`since`/`limit`，响应头返回下一游标） |
 | `/admin/archives` | DELETE | 按时间清理归档（`before_days` 或 `before`） |
 | `/admin/archives/:id` | DELETE | 删除单条归档 |
+| `/admin/fs/dirs` | GET | 只读目录浏览：`?path=` 绝对路径（缺省为主目录），返回该目录下的子目录名列表，供桌面端选择网关主机路径；不返回文件内容 |
 | `/admin/skills` | GET | 技能面板状态：技能目录、启用清单、各目标目录链接是否同步（未设置 `SKILLS_REPO_PATH` 时返回 `configured:false`） |
 | `/admin/skills/:id` | GET | 单个技能详情（registry 条目 + SKILL.md 原文） |
 | `/admin/skills/config` | PUT | 写入启用清单 `{"targets":[...],"enabled":[...]}`（写入前自动备份） |

@@ -190,6 +190,7 @@ func main() {
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
 	skillsHandler := handlers.NewSkillsHandler(skillsRepoPath(), logger)
+	fsHandler := handlers.NewFSHandler()
 
 	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
 	var assistantHandler *handlers.AssistantHandler
@@ -289,6 +290,7 @@ func main() {
 		admin.GET("/skills/:id", skillsHandler.HandleDetail)
 		admin.PUT("/skills/config", skillsHandler.HandleUpdateConfig)
 		admin.POST("/skills/sync", skillsHandler.HandleSync)
+		admin.GET("/fs/dirs", fsHandler.HandleDirs)
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

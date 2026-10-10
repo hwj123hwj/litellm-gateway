@@ -52,6 +52,9 @@ type App struct {
 	editorModalities                                                                   string
 	deleteOpen                                                                         bool
 	deleteAction                                                                       func()
+	browserOpen                                                                        bool
+	browserPath, browserParent                                                         string
+	browserDirs                                                                        []string
 }
 
 func New(store *connection.Store) *App {
@@ -283,6 +286,9 @@ func (a *App) resetHost() {
 	a.table = ui.ListState{}
 	a.notice = ""
 	a.problem = ""
+	a.browserOpen = false
+	a.browserPath, a.browserParent = "", ""
+	a.browserDirs = nil
 }
 func skillsQuery(project string) string {
 	if project == "" {
@@ -301,6 +307,38 @@ func split(value string) []string {
 		}
 	}
 	return out
+}
+
+// openBrowser 打开网关主机目录浏览器；起始路径用当前输入框的值，
+// 留空时由网关返回其主目录。本机网关浏览的就是本机文件系统，
+// 远程网关则与 Termius 的远程浏览同构——路径语义始终属于网关主机。
+func (a *App) openBrowser() {
+	a.browserOpen = true
+	a.browseHost(strings.TrimSpace(a.project))
+}
+func (a *App) browseHost(path string) {
+	a.work("正在读取目录", 20*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
+		var d struct {
+			Path   string   `json:"path"`
+			Parent string   `json:"parent"`
+			Dirs   []string `json:"dirs"`
+		}
+		endpoint := "/fs/dirs"
+		if path != "" {
+			endpoint += "?path=" + url.QueryEscape(path)
+		}
+		if err := c.JSON(ctx, "GET", endpoint, nil, &d); err != nil {
+			return nil, err
+		}
+		return func() { a.browserPath, a.browserParent, a.browserDirs = d.Path, d.Parent, d.Dirs }, nil
+	})
+}
+func (a *App) pickBrowserDir() {
+	if a.browserPath == "" {
+		return
+	}
+	a.project = a.browserPath
+	a.browserOpen = false
 }
 func configInSync(cfg ClientConfig, choices map[string]bool) bool {
 	if !cfg.Exists || len(cfg.MissingEntries) > 0 || len(cfg.Current) != len(sortedSelection(choices)) {
