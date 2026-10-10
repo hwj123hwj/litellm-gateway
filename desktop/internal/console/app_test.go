@@ -208,6 +208,28 @@ func TestSkillsProjectBrowserPicksHostDirectory(t *testing.T) {
 	}
 }
 
+func TestLocalNativePickFillsProjectPath(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	if !a.localConnection() {
+		t.Fatal("fixture connection should count as local")
+	}
+	previous := pickNativeFolder
+	pickNativeFolder = func() (string, bool) { return "/Users/demo/project", true }
+	defer func() { pickNativeFolder = previous }()
+	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "本机选择目录")
+	if a.project != "/Users/demo/project" {
+		t.Fatal("native pick not applied:", a.project)
+	}
+	pickNativeFolder = func() (string, bool) { return "", false }
+	click(t, tt, "本机选择目录")
+	if a.project != "/Users/demo/project" {
+		t.Fatal("cancel must keep the old value:", a.project)
+	}
+}
+
 func TestDirtySkillsPreventScopeAndHostNavigation(t *testing.T) {
 	a, _, _ := fixture(t)
 	a.page = "skills"

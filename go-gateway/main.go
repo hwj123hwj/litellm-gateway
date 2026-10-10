@@ -204,8 +204,18 @@ func main() {
 		if apiKey == "" {
 			apiKey = cfg.MasterKey
 		}
+		// 聊天模型清单：router 里具备文本能力的模型（排除 embedding/ASR）。
+		chatModels := []string{}
+		for _, info := range router.ListModelInfos() {
+			for _, cap := range info.Capabilities {
+				if cap == "text" {
+					chatModels = append(chatModels, info.ID)
+					break
+				}
+			}
+		}
 		resident, err := assistant.New(assistant.Config{
-			Enabled: true, Model: cfg.Assistant.Model,
+			Enabled: true, Model: cfg.Assistant.Model, Models: chatModels,
 			BaseURL: baseURL, APIKey: apiKey,
 		}, memoryStore, logger)
 		if err != nil {
@@ -282,6 +292,7 @@ func main() {
 		admin.POST("/memories/:id/retire", memoryAdminHandler.HandleRetire)
 		admin.DELETE("/memories/:id", memoryAdminHandler.HandleDelete)
 		admin.POST("/assistant/chat", assistantHandler.HandleChat)
+		admin.GET("/assistant/models", assistantHandler.HandleModels)
 		admin.GET("/assistant/prompt", assistantAdminHandler.HandleGetPrompt)
 		admin.PUT("/assistant/prompt", assistantAdminHandler.HandlePutPrompt)
 		admin.POST("/assistant/feedback", assistantAdminHandler.HandleAddFeedback)
