@@ -60,6 +60,7 @@ type ProviderStats struct {
 // DashboardSummary 仪表盘概览
 type DashboardSummary struct {
 	TodayRequests            int      `json:"today_requests"`
+	TodayTokens              int64    `json:"today_tokens"`
 	SuccessRate              float64  `json:"success_rate"`
 	ActiveModels             int      `json:"active_models"`
 	AvgLatency               float64  `json:"avg_latency_ms"`
@@ -117,6 +118,7 @@ type Collector struct {
 
 	// 按天重置的计数器
 	todayTotal      int
+	todayTokens     int64
 	todaySuccess    int
 	todayErrors     int
 	todayLatencySum float64
@@ -191,6 +193,7 @@ func (c *Collector) SetStore(store Store) {
 			c.todaySuccess = 0
 			c.todayErrors = 0
 			c.todayLatencySum = 0
+			c.todayTokens = 0
 			c.todayCacheStats = CacheStats{}
 			for i := range stats {
 				ms := &stats[i]
@@ -255,6 +258,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		c.todayErrors++
 	}
 	c.todayLatencySum += r.Latency
+	c.todayTokens += int64(r.InputTokens + r.OutputTokens)
 
 	// 更新模型统计
 	if r.Model != "" {
@@ -333,6 +337,7 @@ func (c *Collector) GetDashboard() DashboardSummary {
 
 	return DashboardSummary{
 		TodayRequests:            c.todayTotal,
+		TodayTokens:              c.todayTokens,
 		SuccessRate:              successRate,
 		ActiveModels:             len(c.activeModels),
 		AvgLatency:               avgLatency,

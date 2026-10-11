@@ -132,3 +132,17 @@ func TestCollectorRestoresTodayAggregates(t *testing.T) {
 		t.Fatalf("today_requests after new record = %d, want 4", summary.TodayRequests)
 	}
 }
+
+func TestDashboardSummaryAggregatesTodayTokens(t *testing.T) {
+	collector := NewCollector()
+	now := time.Now()
+	for _, record := range []RequestRecord{
+		{Timestamp: now, Method: http.MethodPost, Path: "/v1/chat/completions", Model: "coding", StatusCode: http.StatusOK, InputTokens: 100, OutputTokens: 50},
+		{Timestamp: now, Method: http.MethodPost, Path: "/v1/chat/completions", Model: "coding", StatusCode: http.StatusOK, InputTokens: 30, OutputTokens: 20},
+	} {
+		collector.Record(record)
+	}
+	if summary := collector.GetDashboard(); summary.TodayTokens != 200 {
+		t.Fatalf("today tokens = %d, want 200", summary.TodayTokens)
+	}
+}

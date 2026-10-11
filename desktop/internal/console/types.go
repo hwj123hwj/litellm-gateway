@@ -2,6 +2,7 @@ package console
 
 type Summary struct {
 	TodayRequests int      `json:"today_requests"`
+	TodayTokens   int64    `json:"today_tokens"`
 	SuccessRate   float64  `json:"success_rate"`
 	ActiveModels  int      `json:"active_models"`
 	AvgLatency    float64  `json:"avg_latency_ms"`
@@ -153,6 +154,14 @@ type MarketPage struct {
 type MarketSection struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+// MarketInstallEvent 是技能安装进度流的单个事件。
+type MarketInstallEvent struct {
+	Phase      string `json:"phase"`
+	BytesDone  int64  `json:"bytes_done,omitempty"`
+	BytesTotal int64  `json:"bytes_total,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // MarketInstalled 是本机已安装的市场技能记录（含 EasyAgent 安装的）。

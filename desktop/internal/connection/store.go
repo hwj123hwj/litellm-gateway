@@ -290,3 +290,35 @@ func (s *Store) persist(next diskState) error {
 	s.state = next
 	return nil
 }
+
+// Prefs 是桌面端的 UI 偏好（低频、可丢失，丢失不影响功能）。
+type Prefs struct {
+	ChatModel     string `json:"chat_model,omitempty"`
+	SkillSource   string `json:"skill_source,omitempty"`
+	ModelCategory string `json:"model_category,omitempty"`
+	MarketSection string `json:"market_section,omitempty"`
+}
+
+func (s *Store) prefsPath() string {
+	return filepath.Join(filepath.Dir(s.path), "prefs.json")
+}
+
+// LoadPrefs 读取 UI 偏好；缺失或损坏时返回零值。
+func (s *Store) LoadPrefs() Prefs {
+	var p Prefs
+	raw, err := os.ReadFile(s.prefsPath())
+	if err != nil {
+		return p
+	}
+	_ = json.Unmarshal(raw, &p)
+	return p
+}
+
+// SavePrefs 写 UI 偏好，尽力而为：失败静默忽略。
+func (s *Store) SavePrefs(p Prefs) {
+	raw, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.prefsPath(), append(raw, '\n'), 0o600)
+}

@@ -114,6 +114,13 @@ func (a *App) channelsView(c *ui.Context) {
 					}
 					ui.Row(c.Key(strconv.Itoa(index))).Gap(10).Children(func() {
 						ui.Text(c, title).Selectable()
+						if account.Expired {
+							chip(c, "已失效", c.Theme().Danger)
+						} else if expiry, err := time.Parse(time.RFC3339, account.ExpiresAt); err == nil {
+							if until := time.Until(expiry); until > 0 && until < 24*time.Hour {
+								chip(c, "即将过期", c.Theme().Accent)
+							}
+						}
 						ui.Text(c, detail).FontSize(12).TextColor(c.Theme().TextMuted).Grow(1)
 						ui.Button(c, "移除账号").Label("移除 " + name + " " + title).Disabled(a.busy != "" || a.channelLogin != nil).OnClick(func() {
 							a.editorTitle = "移除 " + name + " 的账号凭据：" + title

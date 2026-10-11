@@ -319,6 +319,7 @@ func main() {
 		admin.GET("/skills/market/sections", skillsMarketHandler.HandleSections)
 		admin.GET("/skills/market/installed", skillsMarketHandler.HandleInstalled)
 		admin.POST("/skills/market/install", skillsMarketHandler.HandleInstall)
+		admin.POST("/skills/market/install-stream", skillsMarketHandler.HandleInstallStream)
 		admin.POST("/skills/market/uninstall", skillsMarketHandler.HandleUninstall)
 		admin.GET("/fs/dirs", fsHandler.HandleDirs)
 		admin.GET("/channels", channelAdminHandler.HandleList)
