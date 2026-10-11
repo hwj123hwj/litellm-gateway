@@ -17,7 +17,9 @@ type ProviderConfig struct {
 	Type                  string `yaml:"type"` // openai / anthropic / chatgpt / channel
 	URL                   string `yaml:"url"`
 	APIKeyEnv             string `yaml:"api_key_env"`
+	AllowNoKey            bool   `yaml:"allow_no_key,omitempty"`
 	RequestTimeoutSeconds int    `yaml:"request_timeout_seconds,omitempty"`
+	RateLimitScope        string `yaml:"rate_limit_scope,omitempty"`
 	// Channel 是账号渠道名（type: channel 时必填）。账号渠道的凭据由交互式登录
 	// 产生，不存在 api_key_env，因此构造实例由 main 注入的工厂完成。
 	Channel string        `yaml:"channel,omitempty"`
@@ -108,13 +110,18 @@ func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 
+	for _, p := range cfg.Providers {
+		if p.RateLimitScope != "" && p.RateLimitScope != "model" && p.RateLimitScope != "channel" {
+			return nil, fmt.Errorf("provider %s: invalid rate_limit_scope %q", p.Name, p.RateLimitScope)
+		}
+	}
 	return &cfg, nil
 }
 
 // NewOpenAIProviderFromConfig 从配置创建 OpenAI 提供商
 func NewOpenAIProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 	apiKey := providerAPIKeyFromEnv(cfg.APIKeyEnv)
-	if apiKey == "" {
+	if apiKey == "" && !cfg.AllowNoKey {
 		return nil, fmt.Errorf("API key not found: %s", cfg.APIKeyEnv)
 	}
 
@@ -205,6 +212,10 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 				providerName := providerInstanceName(pc.Name, mc.ID, usedProviderNames)
 				usedProviderNames[providerName] = true
 				router.RegisterProvider(providerName, bound)
+				router.SetProviderChannel(providerName, pc.Name)
+				if pc.RateLimitScope == "channel" {
+					router.SetProviderRateLimitGroup(providerName, pc.Name)
+				}
 
 				// 渠道模型不必声明 protocol：入站协议由客户端端点决定，
 				// 出站协议由渠道 provider 自行转换，留空即不对外标注。
@@ -288,6 +299,9 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 			capabilities := normalizeModelCapabilities(mc.Capabilities)
 			boundProvider := NewBoundModelProviderWrapper(baseProvider, mc.ID, capabilities)
 			router.RegisterProvider(providerName, boundProvider)
+			if pc.RateLimitScope == "channel" {
+				router.SetProviderRateLimitGroup(providerName, pc.Name)
+			}
 			protocol := mc.Protocol
 			if protocol == "" {
 				protocol = pc.Type

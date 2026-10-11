@@ -2,9 +2,11 @@ package channel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -195,12 +197,13 @@ func TestAccountsRefreshFailureRotates(t *testing.T) {
 func TestAccountsCredentialsSummaryHidesTokens(t *testing.T) {
 	store := NewStore(t.TempDir())
 	writeCreds(t, store, "c", Credential{
-		AccessToken: "super-secret-token",
-		AccountID:   "acct",
-		Nickname:    "nick",
-		ExpiresAt:   time.Now().Add(time.Hour),
+		AccessToken:  "super-secret-token",
+		RefreshToken: "super-secret-refresh",
+		AccountID:    "acct",
+		Nickname:     "nick",
+		ExpiresAt:    time.Now().Add(time.Hour),
 	})
-	accounts := NewAccounts("c", store, newOAuthClient(), nil)
+	accounts := NewAccounts("c", store, newOAuthClient(), func(context.Context, Credential) (Credential, error) { return Credential{}, nil })
 
 	summaries := accounts.Credentials()
 	if len(summaries) != 1 {
@@ -210,10 +213,21 @@ func TestAccountsCredentialsSummaryHidesTokens(t *testing.T) {
 	if summary.AccountID != "acct" || summary.Nickname != "nick" || summary.Expired {
 		t.Fatalf("摘要内容错误: %+v", summary)
 	}
+	if !summary.RefreshAvailable {
+		t.Fatal("refresh capability missing from safe summary")
+	}
 	// 摘要结构体里根本没有 token 字段——这里再确认序列化后不含明文。
 	encoded := summary.ExpiresAt
 	if encoded == "" {
 		t.Fatalf("应带过期时间")
+	}
+	raw, err := json.Marshal(summaries)
+	if err != nil || strings.Contains(string(raw), "super-secret") {
+		t.Fatal("account summary exposed credentials")
+	}
+	accounts.refresh = nil
+	if accounts.Credentials()[0].RefreshAvailable {
+		t.Fatal("renewal advertised without a refresh implementation")
 	}
 }
 

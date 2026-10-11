@@ -95,8 +95,9 @@ type TraeChannel struct {
 	oauthHost   string
 	consoleHost string
 
-	clientID string
-	appID    string
+	clientID    string
+	appID       string
+	localClient *traeLocalClient
 
 	callbackPort int
 	loginTimeout time.Duration
@@ -120,7 +121,7 @@ func NewTraeChannel(dir string) *TraeChannel {
 	return c
 }
 
-// resolveClientCredential 解析 Trae 客户端标识，优先级：环境变量 > 本地文件。
+// resolveClientCredential 解析 Trae 客户端标识，优先级：环境变量 > 本地文件 > 本机安装包。
 // 两者都没有时返回空串，登录时由 BeginLogin 给出明确指引。
 func (c *TraeChannel) resolveClientCredential() (string, string) {
 	id := os.Getenv("TRAE_CHANNEL_CLIENT_ID")
@@ -129,7 +130,17 @@ func (c *TraeChannel) resolveClientCredential() (string, string) {
 		return id, app
 	}
 	fileID, fileApp := c.loadClientCredentialFile()
-	return firstNonEmpty(id, fileID), firstNonEmpty(app, fileApp)
+	id, app = firstNonEmpty(id, fileID), firstNonEmpty(app, fileApp)
+	if id != "" && app != "" {
+		return id, app
+	}
+	if local := discoverTraeLocalClient(); local != nil {
+		id, app = firstNonEmpty(id, local.ClientID), firstNonEmpty(app, local.AppID)
+		if id == local.ClientID {
+			c.localClient = local
+		}
+	}
+	return id, app
 }
 
 // loadClientCredentialFile 读取 <home>/trae-client.json（best-effort）。
@@ -228,6 +239,21 @@ func (c *TraeChannel) BeginLogin(ctx context.Context) (LoginSession, error) {
 	machineID := mustRandomHex(16)
 	deviceID := mustRandomHex(16)
 	loginURL := buildTraeLoginURL(c.consoleHost, c.clientID, machineID, deviceID, server.callbackURL())
+	if local := c.localClient; local != nil {
+		// The installed TRAE IDE and SOLO use different OAuth clients/auth_from values.
+		u, _ := url.Parse(loginURL)
+		query := u.Query()
+		query.Set("auth_from", local.AuthFrom)
+		if local.PluginVersion != "" {
+			query.Set("plugin_version", local.PluginVersion)
+		}
+		if local.Version != "" {
+			query.Set("x_app_version", local.Version)
+		}
+		query.Set("x_app_type", local.Quality)
+		u.RawQuery = query.Encode()
+		loginURL = u.String()
+	}
 	return &traeLogin{
 		channel:   c,
 		server:    server,

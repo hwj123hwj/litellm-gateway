@@ -20,6 +20,13 @@ func TestClientModelSelections(t *testing.T) {
 			home := t.TempDir()
 			gateway := t.TempDir()
 			router := provider.NewRouter(discardLogger())
+			// model-a 必须可用（有已启用的 provider 链）才会进入同步清单。
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(upstream.Close)
+			router.RegisterProvider("test-provider", provider.NewOpenAIProvider(&provider.Config{Name: "test-provider", URL: upstream.URL, APIKey: "k"}))
+			router.RegisterChain("model-a", []string{"test-provider"})
 			for _, id := range []string{"model-a", "model-b"} {
 				router.RegisterModel(provider.ModelInfo{ID: id, Capabilities: []string{"text"}, Protocol: "responses"})
 			}

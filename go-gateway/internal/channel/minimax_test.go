@@ -38,6 +38,32 @@ func TestParseMiniMaxTokenFull(t *testing.T) {
 	}
 }
 
+func TestMiniMaxRefreshExpiredAccountPersistsRenewedToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.URL.Path != miniMaxTokenPath || r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "old-refresh-sentinel" {
+			t.Error("incorrect MiniMax refresh request")
+		}
+		writeJSON(w, map[string]any{"access_token": "renewed-access-sentinel", "refresh_token": "renewed-refresh-sentinel", "token_type": "Bearer", "expires_in": 3600, "scope": miniMaxScope})
+	}))
+	defer server.Close()
+	ch := NewMiniMaxChannel(t.TempDir())
+	ch.accountHost = server.URL
+	if err := ch.accounts.add(Credential{AccessToken: "expired-access-sentinel", RefreshToken: "old-refresh-sentinel", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if !ch.accounts.Refresh(context.Background()) {
+		t.Fatal("expired MiniMax access token did not renew")
+	}
+	stored, err := ch.accounts.Store().Load(miniMaxChannel)
+	if err != nil || len(stored) != 1 {
+		t.Fatal("renewed account was not persisted")
+	}
+	if stored[0].AccessToken != "renewed-access-sentinel" || stored[0].RefreshToken != "renewed-refresh-sentinel" || stored[0].Expired(time.Now().Add(55*time.Minute)) {
+		t.Fatal("renewal did not retain a usable access/refresh pair")
+	}
+}
+
 func TestParseMiniMaxTokenFallsBackToExpiresIn(t *testing.T) {
 	// 非 JWT 的 access token：无法解 exp，应回退到 expires_in（相对现在）。
 	before := time.Now()

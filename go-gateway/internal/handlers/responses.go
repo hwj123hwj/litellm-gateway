@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -302,6 +303,7 @@ func (h *responsesHandler) SetArchiver(a *archive.Archiver) {
 
 // Handle 处理 /v1/responses 端点
 func (h *responsesHandler) Handle(c *gin.Context) {
+	c.Request = c.Request.WithContext(h.router.BeginRouting(c.Request.Context()))
 	rawBody, _ := io.ReadAll(c.Request.Body)
 	logRequestSummary(h.logger, c, "responses", len(rawBody))
 	c.Request.Body = io.NopCloser(strings.NewReader(string(rawBody)))
@@ -347,7 +349,10 @@ func (h *responsesHandler) handleNonStream(c *gin.Context, req *responsesRequest
 	}
 
 	resp, finalProvider, attempts, err := h.router.ForwardWithDetails(c.Request.Context(), providerReq.Model, providerReq)
-	setForwardMetadata(c, finalProvider, attempts, err)
+	if err != nil {
+		err = nativeFallbackError(c, err)
+	}
+	setForwardMetadata(c, finalProvider, append(providerAttempts(c), attempts...), err)
 	if err != nil {
 		h.logger.Printf("Responses forward failed: %v", err)
 		setProviderErrorHeaders(c, err)
@@ -804,7 +809,7 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 
 	for _, p := range providerChain {
 		if chatgptPassthrough, ok := p.(provider.ChatGPTPassthroughMarker); ok {
-			if !h.router.AllowProviderRequestFor(req.Model, p) {
+			if h.router.ProviderAttempted(c.Request.Context(), req.Model, p) || !h.router.AllowProviderRequestFor(req.Model, p) {
 				continue
 			}
 			started := time.Now()
@@ -817,11 +822,18 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			usageWriter := newUsageTrackingWriter(streamWriter, c)
 
 			// 直接透传原始请求体到 ChatGPT
-			if err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), usageWriter); err != nil {
+			if err := runGuardedStream(c, h.router, providerReq, p, usageWriter, func(ctx context.Context, _ *provider.Request, w io.Writer) error {
+				return chatgptPassthrough.ForwardRawResponsesStream(ctx, json.RawMessage(rawBody), w)
+			}); err != nil {
 				usageWriter.Finish()
 				recordProviderAttempt(c, p.Name(), started, err)
 				h.router.RecordProviderFailureFor(req.Model, p, err)
+				h.router.MarkProviderAttempted(c.Request.Context(), req.Model, p)
+				c.Set("native_passthrough_error", err)
 				h.logger.Printf("[RESPONSES] ChatGPT passthrough failed: %v", err)
+				if !c.Writer.Written() && provider.ShouldFallback(err) {
+					continue
+				}
 				if c.Writer.Written() {
 					_ = writeResponsesStreamError(c.Writer, err)
 				} else {
@@ -855,6 +867,7 @@ func (h *responsesHandler) tryChatGPTPassthrough(c *gin.Context, req *responsesR
 			}
 			return true
 		}
+		return false
 	}
 
 	return false
@@ -877,15 +890,19 @@ func (h *responsesHandler) tryChatGPTNonStreamPassthrough(c *gin.Context, req *r
 	for _, p := range providerChain {
 		chatgptPassthrough, ok := p.(provider.ChatGPTPassthroughMarker)
 		if !ok {
-			continue
+			return false
 		}
-		if !h.router.AllowProviderRequestFor(req.Model, p) {
+		if h.router.ProviderAttempted(c.Request.Context(), req.Model, p) || !h.router.AllowProviderRequestFor(req.Model, p) {
 			continue
 		}
 
 		started := time.Now()
 		var upstream bytes.Buffer
-		err := chatgptPassthrough.ForwardRawResponsesStream(c.Request.Context(), json.RawMessage(rawBody), &upstream)
+		err := h.router.RunNonStreamAttempt(c.Request.Context(), p.Name(), func(ctx context.Context) error {
+			return runGuardedStreamContext(c, ctx, h.router, providerReq, p, &upstream, func(attemptCtx context.Context, _ *provider.Request, w io.Writer) error {
+				return chatgptPassthrough.ForwardRawResponsesStream(attemptCtx, json.RawMessage(rawBody), w)
+			})
+		})
 		if err == nil {
 			var responseBody []byte
 			var inputTokens, outputTokens int
@@ -911,7 +928,12 @@ func (h *responsesHandler) tryChatGPTNonStreamPassthrough(c *gin.Context, req *r
 
 		recordProviderAttempt(c, p.Name(), started, err)
 		h.router.RecordProviderFailureFor(req.Model, p, err)
+		h.router.MarkProviderAttempted(c.Request.Context(), req.Model, p)
+		c.Set("native_passthrough_error", err)
 		h.logger.Printf("[RESPONSES] ChatGPT non-stream passthrough failed: %v", err)
+		if provider.ShouldFallback(err) {
+			continue
+		}
 		setProviderErrorHeaders(c, err)
 		if h.archiver != nil && h.archiver.Enabled() {
 			submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, nil,

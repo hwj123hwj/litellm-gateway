@@ -21,9 +21,10 @@ const (
 // logical request. It intentionally contains only bounded metadata; request
 // and response bodies never belong in metrics.
 type ProviderAttempt struct {
-	Provider   string  `json:"provider"`
-	Status     string  `json:"status"` // success, error, or skipped
-	StatusCode int     `json:"status_code,omitempty"`
-	LatencyMs  float64 `json:"latency_ms"`
-	Error      string  `json:"error,omitempty"`
+	Provider      string   `json:"provider"`
+	FirstOutputMs *float64 `json:"first_output_ms,omitempty"`
+	Status        string   `json:"status"` // success, error, or skipped
+	StatusCode    int      `json:"status_code,omitempty"`
+	LatencyMs     float64  `json:"latency_ms"`
+	Error         string   `json:"error,omitempty"`
 }

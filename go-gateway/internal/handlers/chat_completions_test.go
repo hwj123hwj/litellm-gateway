@@ -501,7 +501,7 @@ func TestChatCompletionsHandlerDoesNotFallbackAfterStreamStarts(t *testing.T) {
 	router := provider.NewRouter(logger)
 	first := &stubChatProvider{
 		name:       "partial",
-		streamData: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"model\":\"partial\"}}\n\n",
+		streamData: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"model\":\"partial\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
 		streamErr:  errors.New("upstream stream interrupted"),
 	}
 	second := &stubChatProvider{

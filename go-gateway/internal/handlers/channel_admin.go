@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/weijian/go-llm-gateway/internal/channel"
+	"github.com/weijian/go-llm-gateway/internal/provider"
 )
 
 // ChannelAdminHandler 暴露账号渠道的登录与账号管理接口。它直接与 internal/channel
@@ -21,6 +22,7 @@ import (
 // 凭据只在本机文件里，接口一律不回传 token 明文：账号列表只给帐号标识与有效期。
 type ChannelAdminHandler struct {
 	registry *channel.Registry
+	router   *provider.Router
 	logger   *log.Logger
 
 	mu       sync.Mutex
@@ -33,6 +35,7 @@ type pendingLogin struct {
 	channel string
 	session channel.LoginSession
 	done    chan struct{}
+	cancel  context.CancelFunc
 	cred    *channel.Credential
 	err     error
 }
@@ -45,6 +48,8 @@ func NewChannelAdminHandler(registry *channel.Registry, logger *log.Logger) *Cha
 		pendings: make(map[string]*pendingLogin),
 	}
 }
+
+func (h *ChannelAdminHandler) SetRouter(r *provider.Router) { h.router = r }
 
 func (h *ChannelAdminHandler) resolve(c *gin.Context) (channel.Channel, bool) {
 	if h.registry == nil {
@@ -85,7 +90,13 @@ func (h *ChannelAdminHandler) HandleStatus(c *gin.Context) {
 
 func (h *ChannelAdminHandler) channelStatus(ch channel.Channel) gin.H {
 	accounts := ch.Accounts()
+	info := channel.LoginInfoFor(ch)
+	var models []string
+	if h.router != nil {
+		models = h.router.ChannelProviderNames(ch.Name())
+	}
 	return gin.H{
+		"login_available": info.Available, "needs_client_config": info.NeedsClientConfig, "local_login_only": info.LocalOnly, "setup_hint": info.SetupHint, "anonymous_available": info.Anonymous, "models": models,
 		"channel":   ch.Name(),
 		"logged_in": accounts.LoggedIn(),
 		"accounts":  accounts.Credentials(),
@@ -107,22 +118,36 @@ func (h *ChannelAdminHandler) HandleLoginStart(c *gin.Context) {
 	}
 	dc := session.DeviceCode()
 	id := newLoginID()
-	pending := &pendingLogin{channel: ch.Name(), session: session, done: make(chan struct{})}
+	timeout := dc.ExpiresIn
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+30*time.Second)
+	if c.Request.Context().Err() != nil {
+		cancel()
+	}
+	pending := &pendingLogin{channel: ch.Name(), session: session, done: make(chan struct{}), cancel: cancel}
 	h.mu.Lock()
 	h.pendings[id] = pending
 	h.mu.Unlock()
 
 	// 后台等待授权：超时略长于设备码有效期，保证轮询到最后一刻。
-	timeout := dc.ExpiresIn
-	if timeout <= 0 {
-		timeout = 5 * time.Minute
-	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout+30*time.Second)
 		defer cancel()
 		cred, err := session.Wait(ctx)
 		pending.cred, pending.err = cred, err
+		if err == nil && h.router != nil {
+			h.router.ResetChannelProviders(ch.Name())
+		}
 		close(pending.done)
+		// Retain terminal results briefly for the desktop poll, then release abandoned sessions.
+		time.AfterFunc(time.Minute, func() {
+			h.mu.Lock()
+			if h.pendings[id] == pending {
+				delete(h.pendings, id)
+			}
+			h.mu.Unlock()
+		})
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -132,7 +157,7 @@ func (h *ChannelAdminHandler) HandleLoginStart(c *gin.Context) {
 		"verification_uri":          dc.VerificationURI,
 		"verification_uri_complete": dc.VerificationURIComplete,
 		"login_url":                 dc.LoginURL(),
-		"expires_in":                int(dc.ExpiresIn.Seconds()),
+		"expires_in":                int(timeout.Seconds()),
 		"interval":                  int(dc.Interval.Seconds()),
 	})
 }
@@ -226,4 +251,32 @@ func newLoginID() string {
 		return strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	return hex.EncodeToString(buf)
+}
+
+// HandleLoginCancel DELETE /admin/channels/:channel/login/:id cancels only that session.
+func (h *ChannelAdminHandler) HandleLoginCancel(c *gin.Context) {
+	ch, ok := h.resolve(c)
+	if !ok {
+		return
+	}
+	id := c.Param("id")
+	h.mu.Lock()
+	pending, found := h.pendings[id]
+	if found && pending.channel != ch.Name() {
+		h.mu.Unlock()
+		c.JSON(http.StatusNotFound, gin.H{"error": "登录会话不存在"})
+		return
+	}
+	if found {
+		delete(h.pendings, id)
+	}
+	h.mu.Unlock()
+	if found {
+		pending.cancel()
+		select {
+		case <-pending.done:
+		case <-time.After(2 * time.Second):
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
 }

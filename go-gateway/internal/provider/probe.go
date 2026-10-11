@@ -43,6 +43,7 @@ const probePrompt = "ping"
 type ProbeResult struct {
 	Status     ProbeStatus
 	StatusCode int
+	RetryAfter string
 	Detail     string
 	Latency    time.Duration
 }
@@ -105,6 +106,7 @@ func probeVia(ctx context.Context, model string, maxTokens int, forward func(con
 		return ProbeResult{
 			Status:     classifyProbeStatus(providerErr.StatusCode),
 			StatusCode: providerErr.StatusCode,
+			RetryAfter: providerErr.RetryAfter,
 			Detail:     providerErr.Message,
 			Latency:    latency,
 		}

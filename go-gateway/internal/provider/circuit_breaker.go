@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,6 +23,8 @@ type CircuitBreakerConfig struct {
 	FailureThreshold int
 	RecoveryTimeout  time.Duration
 	SuccessThreshold int
+	RateLimitInitial time.Duration
+	RateLimitMax     time.Duration
 }
 
 var defaultCircuitBreakerConfig = CircuitBreakerConfig{
@@ -57,6 +62,8 @@ type CircuitBreaker struct {
 	lastFailure   time.Time
 	lastSuccess   time.Time
 	openedAt      time.Time
+	rateUntil     time.Time
+	rateStreak    int
 }
 
 // NewCircuitBreaker creates an independent circuit for one provider instance.
@@ -69,6 +76,15 @@ func NewCircuitBreaker(config CircuitBreakerConfig) *CircuitBreaker {
 	}
 	if config.SuccessThreshold <= 0 {
 		config.SuccessThreshold = defaultCircuitBreakerConfig.SuccessThreshold
+	}
+	if config.RateLimitInitial <= 0 {
+		config.RateLimitInitial = 30 * time.Second
+	}
+	if config.RateLimitMax < config.RateLimitInitial {
+		config.RateLimitMax = 5 * time.Minute
+		if config.RateLimitMax < config.RateLimitInitial {
+			config.RateLimitMax = config.RateLimitInitial
+		}
 	}
 	return &CircuitBreaker{config: config, state: CircuitClosed}
 }
@@ -91,7 +107,7 @@ func (b *CircuitBreaker) allowLocked(now time.Time) bool {
 	case CircuitClosed:
 		return true
 	case CircuitOpen:
-		if now.Sub(b.openedAt) < b.config.RecoveryTimeout {
+		if now.Before(b.retryAtLocked()) {
 			return false
 		}
 		b.state = CircuitHalfOpen
@@ -115,7 +131,7 @@ func (b *CircuitBreaker) allowLocked(now time.Time) bool {
 func (b *CircuitBreaker) CanAttempt() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.state == CircuitOpen && time.Since(b.openedAt) >= b.config.RecoveryTimeout {
+	if b.state == CircuitOpen && !time.Now().Before(b.retryAtLocked()) {
 		b.state = CircuitHalfOpen
 		b.halfOpenProbe = false
 		b.successes = 0
@@ -139,11 +155,14 @@ func (b *CircuitBreaker) RecordSuccessAt(now time.Time) {
 		b.halfOpenProbe = false
 		if b.successes >= b.config.SuccessThreshold {
 			b.state = CircuitClosed
+			b.rateStreak = 0
+			b.rateUntil = time.Time{}
 			b.failures = 0
 			b.successes = 0
 		}
 	case CircuitClosed:
 		b.failures = 0
+		b.rateStreak = 0
 	}
 }
 
@@ -176,6 +195,7 @@ func (b *CircuitBreaker) RecordFailureAt(now time.Time) {
 func (b *CircuitBreaker) openLocked(now time.Time) {
 	b.state = CircuitOpen
 	b.openedAt = now
+	b.rateUntil = time.Time{}
 	b.halfOpenProbe = false
 }
 
@@ -192,6 +212,8 @@ func (b *CircuitBreaker) Reset() {
 	b.lastFailure = time.Time{}
 	b.lastSuccess = time.Time{}
 	b.openedAt = time.Time{}
+	b.rateUntil = time.Time{}
+	b.rateStreak = 0
 }
 
 func (b *CircuitBreaker) Snapshot() CircuitSnapshot {
@@ -204,7 +226,7 @@ func (b *CircuitBreaker) SnapshotAt(now time.Time) CircuitSnapshot {
 	state := b.state
 	nextRetry := time.Time{}
 	if state == CircuitOpen {
-		nextRetry = b.openedAt.Add(b.config.RecoveryTimeout)
+		nextRetry = b.retryAtLocked()
 		if !nextRetry.After(now) {
 			state = CircuitHalfOpen
 		}
@@ -222,3 +244,55 @@ func (b *CircuitBreaker) SnapshotAt(now time.Time) CircuitSnapshot {
 		NextRetryAt:          nextRetry,
 	}
 }
+
+func (b *CircuitBreaker) retryAtLocked() time.Time {
+	if !b.rateUntil.IsZero() {
+		return b.rateUntil
+	}
+	return b.openedAt.Add(b.config.RecoveryTimeout)
+}
+
+// RecordRateLimit opens immediately. Retry-After overrides exponential backoff.
+// A late parallel success cannot close an open circuit.
+func (b *CircuitBreaker) RecordRateLimit(retryAfter string) {
+	b.RecordRateLimitAt(time.Now(), retryAfter)
+}
+func (b *CircuitBreaker) RecordRateLimitAt(now time.Time, retryAfter string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hasResult = true
+	b.totalFailure++
+	b.failures++
+	b.lastFailure = now
+	b.rateStreak++
+	delay := b.config.RateLimitInitial
+	for i := 1; i < b.rateStreak && delay < b.config.RateLimitMax; i++ {
+		if delay > b.config.RateLimitMax/2 {
+			delay = b.config.RateLimitMax
+		} else {
+			delay *= 2
+		}
+	}
+	if delay > b.config.RateLimitMax {
+		delay = b.config.RateLimitMax
+	}
+	raw := strings.TrimSpace(retryAfter)
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds >= 0 && seconds <= 86400 {
+		delay = time.Duration(seconds) * time.Second
+	} else if date, err := http.ParseTime(raw); err == nil && date.After(now) && date.Sub(now) <= 24*time.Hour {
+		delay = date.Sub(now)
+	}
+	if delay < time.Second {
+		delay = time.Second
+	}
+	until := now.Add(delay)
+	if b.rateUntil.After(until) {
+		until = b.rateUntil
+	}
+	b.openLocked(now)
+	b.rateUntil = until
+	b.successes = 0
+}
+
+// ReleaseProbe frees a reservation after client cancellation or a skipped call.
+func (b *CircuitBreaker) ReleaseProbe() { b.mu.Lock(); defer b.mu.Unlock(); b.halfOpenProbe = false }

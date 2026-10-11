@@ -56,7 +56,7 @@ func TestMessageHandlerSkipsOpenStreamProviderOnNextRequest(t *testing.T) {
 		SuccessThreshold: 1,
 	})
 	first := &stubChatProvider{name: "first", streamErr: errors.New("provider unavailable")}
-	second := &stubChatProvider{name: "second", streamData: "data: ok\n\n"}
+	second := &stubChatProvider{name: "second", streamData: "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"ok\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"}
 	router.RegisterProvider(first.name, first)
 	router.RegisterProvider(second.name, second)
 	router.RegisterChain("coding", []string{first.name, second.name})
