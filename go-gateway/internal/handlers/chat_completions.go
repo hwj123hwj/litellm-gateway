@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -214,6 +215,7 @@ func (h *openAIChatCompletionsHandler) SetArchiver(a *archive.Archiver) {
 }
 
 func (h *openAIChatCompletionsHandler) Handle(c *gin.Context) {
+	c.Request = c.Request.WithContext(h.router.BeginRouting(c.Request.Context()))
 	rawBody, _ := io.ReadAll(c.Request.Body)
 	logRequestSummary(h.logger, c, "chat.completions", len(rawBody))
 	c.Request.Body = io.NopCloser(bytes.NewReader(rawBody))
@@ -296,7 +298,7 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 	var lastErr error
 	streamOK := false
 	for _, p := range providerChain {
-		if !h.router.AllowProviderRequestFor(originalModel, p) {
+		if h.router.ProviderAttempted(c.Request.Context(), originalModel, p) || !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
 		}
 		started := time.Now()
@@ -363,6 +365,8 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 }
 
 func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, sink *archiveSink) error {
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
 	pr, pw := io.Pipe()
 	streamWriterBase := newDeferredStreamWriter(c)
 	var streamWriter io.Writer = streamWriterBase
@@ -372,7 +376,7 @@ func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *p
 	errCh := make(chan error, 1)
 	go func() {
 		if sp, ok := p.(provider.StreamProvider); ok {
-			errCh <- sp.ForwardStream(c.Request.Context(), req, pw)
+			errCh <- runGuardedStreamContext(c, ctx, h.router, req, p, pw, sp.ForwardStream)
 		} else {
 			errCh <- fmt.Errorf("provider %s does not support streaming", p.Name())
 		}
@@ -380,7 +384,9 @@ func (h *openAIChatCompletionsHandler) streamFromProvider(c *gin.Context, req *p
 	}()
 
 	if err := anthropicSSEToOpenAISSEWithUsage(pr, streamWriter, c); err != nil {
+		cancel()
 		_ = pr.Close()
+		<-errCh
 		return err
 	}
 	if err := <-errCh; err != nil {

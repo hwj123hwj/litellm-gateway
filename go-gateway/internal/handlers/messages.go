@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,6 +35,7 @@ func (h *MessageHandler) SetArchiver(a *archive.Archiver) {
 
 // Handle 处理消息请求，支持流式和非流式
 func (h *MessageHandler) Handle(c *gin.Context) {
+	c.Request = c.Request.WithContext(h.router.BeginRouting(c.Request.Context()))
 	// Read once so BindJSON can validate the same payload without retaining or
 	// logging the full request body (which may contain credentials or Base64).
 	rawBody, _ := io.ReadAll(c.Request.Body)
@@ -117,7 +119,7 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, raw
 	var lastErr error
 	streamOK := false
 	for i, p := range providerChain {
-		if !h.router.AllowProviderRequestFor(originalModel, p) {
+		if h.router.ProviderAttempted(c.Request.Context(), originalModel, p) || !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
 		}
 		started := time.Now()
@@ -216,7 +218,7 @@ func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Reques
 
 	// 若提供商实现了 StreamProvider（如 OpenAI 格式），使用其内置流式逻辑
 	if sp, ok := p.(provider.StreamProvider); ok {
-		err := sp.ForwardStream(c.Request.Context(), req, usageWriter)
+		err := runGuardedStream(c, h.router, req, p, usageWriter, sp.ForwardStream)
 		if err == nil {
 			streamWriterBase.Commit()
 		}
@@ -224,46 +226,49 @@ func (h *MessageHandler) streamFromProvider(c *gin.Context, req *provider.Reques
 	}
 
 	// 默认：直接透传 Anthropic 兼容的 SSE 流
-	body, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, p.URL(), bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "go-llm-gateway/1.0")
-	if p.UseBearer() {
-		httpReq.Header.Set("Authorization", "Bearer "+p.APIKey())
-	} else {
-		httpReq.Header.Set("x-api-key", p.APIKey())
-	}
-
-	client := &http.Client{} // 流式不设 Timeout，靠 context cancel 控制
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("send: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return provider.NewHTTPError(p.Name(), resp, b)
-	}
-
-	// 逐行透传 SSE 流
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		if _, err := fmt.Fprintf(usageWriter, "%s\n", scanner.Bytes()); err != nil {
-			return nil // 客户端断开，正常退出
+	return runGuardedStream(c, h.router, req, p, usageWriter, func(attemptCtx context.Context, _ *provider.Request, guarded io.Writer) error {
+		body, err := json.Marshal(req)
+		if err != nil {
+			return fmt.Errorf("marshal: %w", err)
 		}
-		usageWriter.Flush()
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	streamWriterBase.Commit()
-	return nil
+
+		httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, p.URL(), bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("User-Agent", "go-llm-gateway/1.0")
+		if p.UseBearer() {
+			httpReq.Header.Set("Authorization", "Bearer "+p.APIKey())
+		} else {
+			httpReq.Header.Set("x-api-key", p.APIKey())
+		}
+
+		client := &http.Client{} // 流式不设 Timeout，靠 context cancel 控制
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return fmt.Errorf("send: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			return provider.NewHTTPError(p.Name(), resp, b)
+		}
+
+		// 逐行透传 SSE 流
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			if _, err := fmt.Fprintf(guarded, "%s\n", scanner.Bytes()); err != nil {
+				return err
+			}
+			if f, ok := guarded.(interface{ Flush() }); ok {
+				f.Flush()
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+		return nil
+	})
 }

@@ -91,7 +91,12 @@ type ClientConfig struct {
 type Skill struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"displayName"`
+	Emoji       string          `json:"emoji"`
 	Description string          `json:"description"`
+	Tags        []string        `json:"tags"`
+	Author      string          `json:"author"`
+	GithubURL   string          `json:"githubUrl"`
+	Updated     string          `json:"lastUpdated"`
 	Enabled     bool            `json:"enabled"`
 	Installed   map[string]bool `json:"installed"`
 }
@@ -119,6 +124,37 @@ type Skills struct {
 		} `json:"targets"`
 	} `json:"sync"`
 	Error string `json:"error"`
+}
+
+// MarketSkill 是技能市场目录里的一条技能（网关代理远端商城的浏览结果）。
+type MarketSkill struct {
+	ID           int      `json:"id"`
+	Name         string   `json:"name"`
+	DisplayName  string   `json:"display_name"`
+	Description  string   `json:"description"`
+	Category     string   `json:"category"`
+	Tags         []string `json:"tags"`
+	Version      string   `json:"version"`
+	InstallCount int      `json:"install_count"`
+	SizeBytes    int64    `json:"tarball_size"`
+}
+
+// MarketPage 是技能市场浏览响应；运营性失败经 Error 带内返回。
+type MarketPage struct {
+	Enabled bool          `json:"enabled"`
+	Hint    string        `json:"hint"`
+	Skills  []MarketSkill `json:"skills"`
+	Total   int           `json:"total"`
+	Page    int           `json:"page"`
+	Error   string        `json:"error"`
+}
+
+// MarketInstalled 是本机已安装的市场技能记录（含 EasyAgent 安装的）。
+type MarketInstalled struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Version     string `json:"version"`
+	InstalledAt string `json:"installed_at"`
 }
 type Memory struct {
 	ID         int     `json:"id"`

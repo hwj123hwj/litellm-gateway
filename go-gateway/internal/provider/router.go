@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"reflect"
 	"sort"
 	"sync"
@@ -22,19 +23,23 @@ type Router struct {
 	runtime        map[string]*providerRuntime
 	modelOverrides map[string]modelCapabilityOverride
 	circuitConfig  CircuitBreakerConfig
+	policy         RoutingPolicy
+	rateGroups     map[string]*CircuitBreaker
 	mu             sync.RWMutex
 	logger         *log.Logger
 }
 
 type providerRuntime struct {
+	channel string
 	enabled bool
 	breaker *CircuitBreaker
+	quota   *CircuitBreaker
 	// lastProbe 保存最近一次上游探测的结论。它与熔断器分开：熔断只反映连续
 	// 请求失败，探测结论是「人工验证过上游可用性」的证据，面板据此区分
 	// 「在线」和「只是没失败过」。
-	lastProbe    ProbeResult
-	lastProbeAt  time.Time
-	hasProbe     bool
+	lastProbe   ProbeResult
+	lastProbeAt time.Time
+	hasProbe    bool
 }
 
 type modelCapabilityOverride struct {
@@ -59,10 +64,10 @@ type RuntimeProviderStatus struct {
 	NextRetryAt         time.Time
 	// 最近一次上游探测的结论。HasProbe 为 false 表示从未探测过，此时 Status
 	// 只反映熔断器，不代表上游可用性。
-	HasProbe     bool
-	ProbeStatus  ProbeStatus
-	ProbeDetail  string
-	LastProbeAt  time.Time
+	HasProbe    bool
+	ProbeStatus ProbeStatus
+	ProbeDetail string
+	LastProbeAt time.Time
 }
 
 type RouteProviderStatus struct {
@@ -100,6 +105,8 @@ func NewRouterWithCircuitConfig(logger *log.Logger, circuitConfig CircuitBreaker
 		runtime:        make(map[string]*providerRuntime),
 		modelOverrides: make(map[string]modelCapabilityOverride),
 		circuitConfig:  circuitConfig,
+		policy:         DefaultRoutingPolicy(),
+		rateGroups:     make(map[string]*CircuitBreaker),
 		logger:         logger,
 	}
 }
@@ -200,7 +207,7 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 			continue
 		}
 		if runtime := r.runtime[name]; runtime != nil {
-			if !runtime.enabled || !runtime.breaker.CanAttempt() {
+			if !runtime.enabled || !runtime.breaker.CanAttempt() || (runtime.quota != nil && !runtime.quota.CanAttempt()) {
 				unavailable = append(unavailable, name)
 				continue
 			}
@@ -219,6 +226,36 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 		r.logger.Printf("Skipping unavailable providers for model %s: %v", modelName, unavailable)
 	}
 	return result, nil
+}
+
+// ModelUsable reports whether a model currently has at least one provider
+// worth recommending: the chain exists and some provider in it is enabled
+// with usable credentials (a channel is logged in). Circuit-breaker and rate
+// limit state are deliberately ignored — they are transient, while the
+// admin surfaces that list this model for clients and the assistant should
+// stay stable. Unlike Route it never logs and reserves no attempts.
+func (r *Router) ModelUsable(modelName string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerNames, ok := r.chains[modelName]
+	if !ok {
+		return false
+	}
+	for _, name := range providerNames {
+		p, ok := r.providers[name]
+		if !ok {
+			continue
+		}
+		if runtime := r.runtime[name]; runtime != nil && !runtime.enabled {
+			continue
+		}
+		if !providerAvailable(p) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // RouteForRequest applies capability filtering before a request reaches a
@@ -294,6 +331,7 @@ func (r *Router) Forward(ctx context.Context, modelName string, req *Request) (*
 // provider together with one bounded result for every provider attempt. The
 // existing Forward method remains as a compatibility wrapper for embedders.
 func (r *Router) ForwardWithDetails(ctx context.Context, modelName string, req *Request) (*Response, string, []requestmeta.ProviderAttempt, error) {
+	ctx = r.BeginRouting(ctx)
 	providers, err := r.RouteForRequest(modelName, req)
 	if err != nil {
 		return nil, "", nil, err
@@ -305,7 +343,7 @@ func (r *Router) ForwardWithDetails(ctx context.Context, modelName string, req *
 	attempts := make([]requestmeta.ProviderAttempt, 0, len(providers))
 	attempted := false
 	for i, p := range providers {
-		if !r.AllowProviderRequestFor(modelName, p) {
+		if r.ProviderAttempted(ctx, modelName, p) || !r.AllowProviderRequestFor(modelName, p) {
 			continue
 		}
 		attempted = true
@@ -317,7 +355,12 @@ func (r *Router) ForwardWithDetails(ctx context.Context, modelName string, req *
 			req.Model = r.mapModelName(modelName, p.Name())
 		}
 
-		resp, err := p.ForwardRequest(ctx, req)
+		var resp *Response
+		err := r.RunNonStreamAttempt(ctx, p.Name(), func(attemptCtx context.Context) error {
+			var attemptErr error
+			resp, attemptErr = p.ForwardRequest(attemptCtx, req)
+			return attemptErr
+		})
 		req.Model = originalModel
 
 		if err != nil {
@@ -336,7 +379,7 @@ func (r *Router) ForwardWithDetails(ctx context.Context, modelName string, req *
 			}
 			attempts = append(attempts, attempt)
 			finalProvider = p.Name()
-			if !ShouldFallback(err) {
+			if ctx.Err() != nil || !ShouldFallback(err) {
 				return nil, finalProvider, attempts, err
 			}
 			continue
@@ -431,7 +474,13 @@ func (r *Router) AllowProviderRequest(name string) bool {
 		r.mu.RUnlock()
 		return false
 	}
-	allowed := runtime.breaker.Allow()
+	allowed := runtime.quota == nil || runtime.quota.Allow()
+	if allowed {
+		allowed = runtime.breaker.Allow()
+		if !allowed && runtime.quota != nil {
+			runtime.quota.ReleaseProbe()
+		}
+	}
 	r.mu.RUnlock()
 	return allowed
 }
@@ -454,6 +503,9 @@ func (r *Router) RecordProviderSuccess(name string) {
 	r.mu.RUnlock()
 	if runtime != nil {
 		runtime.breaker.RecordSuccess()
+		if runtime.quota != nil {
+			runtime.quota.RecordSuccess()
+		}
 	}
 }
 
@@ -467,14 +519,32 @@ func (r *Router) RecordProviderSuccessFor(modelName string, p Provider) {
 // RecordProviderFailure updates the circuit only for provider-level failures.
 // Client validation/auth errors must not take a healthy provider offline.
 func (r *Router) RecordProviderFailure(name string, err error) {
-	if err == nil || !ShouldFallback(err) {
+	if err == nil {
 		return
 	}
 	r.mu.RLock()
 	runtime := r.runtime[name]
 	r.mu.RUnlock()
 	if runtime != nil {
-		runtime.breaker.RecordFailure()
+		if isClientCancellation(err) || errors.Is(err, ErrRoutingBudgetExceeded) || !ShouldFallback(err) {
+			runtime.breaker.ReleaseProbe()
+			if runtime.quota != nil {
+				runtime.quota.ReleaseProbe()
+			}
+			return
+		}
+		var httpErr *ProviderError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == 429 {
+			runtime.breaker.RecordRateLimit(httpErr.RetryAfter)
+			if runtime.quota != nil {
+				runtime.quota.RecordRateLimit(httpErr.RetryAfter)
+			}
+		} else {
+			runtime.breaker.RecordFailure()
+			if runtime.quota != nil {
+				runtime.quota.ReleaseProbe()
+			}
+		}
 	}
 }
 
@@ -534,6 +604,9 @@ func (r *Router) ResetProvider(name string) error {
 		return fmt.Errorf("%w: %s", ErrUnknownProvider, name)
 	}
 	runtime.breaker.Reset()
+	if runtime.quota != nil {
+		runtime.quota.Reset()
+	}
 	r.mu.Lock()
 	runtime.hasProbe = false
 	runtime.lastProbe = ProbeResult{}
@@ -568,9 +641,13 @@ func (r *Router) CheckProviderHealth(ctx context.Context, name string) ProbeResu
 	r.mu.Unlock()
 	switch result.Status {
 	case ProbeOnline:
-		runtime.breaker.RecordSuccess()
+		r.RecordProviderSuccess(name)
 	case ProbeDegraded, ProbeOffline:
-		runtime.breaker.RecordFailure()
+		if result.StatusCode == http.StatusTooManyRequests {
+			r.RecordProviderFailure(name, &ProviderError{StatusCode: result.StatusCode, RetryAfter: result.RetryAfter})
+		} else {
+			runtime.breaker.RecordFailure()
+		}
 	case ProbeUnknown:
 		// 无结论：保持熔断器现状。
 	}
@@ -610,6 +687,17 @@ func (r *Router) ListProviderStatuses() []RuntimeProviderStatus {
 
 func runtimeStatus(name string, runtime *providerRuntime) RuntimeProviderStatus {
 	snapshot := runtime.breaker.Snapshot()
+	if runtime.quota != nil {
+		quota := runtime.quota.Snapshot()
+		if quota.State != CircuitClosed {
+			if snapshot.State != CircuitOpen {
+				snapshot.State = quota.State
+			}
+			if quota.NextRetryAt.After(snapshot.NextRetryAt) {
+				snapshot.NextRetryAt = quota.NextRetryAt
+			}
+		}
+	}
 	status := "unknown"
 	if !runtime.enabled || snapshot.State == CircuitOpen {
 		status = "offline"
@@ -736,4 +824,49 @@ func (r *Router) SetModelCapabilities(modelName string, capabilities, modalities
 		capabilities: append([]string(nil), capabilities...), inputModalities: append([]string(nil), modalities...),
 	}
 	return nil
+}
+
+// SetProviderRateLimitGroup shares only quota cooldown, not ordinary failures.
+// Configure this when an upstream applies one account/channel quota to models.
+func (r *Router) SetProviderRateLimitGroup(name, group string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	runtime := r.runtime[name]
+	if runtime == nil || group == "" {
+		return
+	}
+	quota := r.rateGroups[group]
+	if quota == nil {
+		quota = NewCircuitBreaker(r.circuitConfig)
+		r.rateGroups[group] = quota
+	}
+	runtime.quota = quota
+}
+
+// SetProviderChannel associates configured model instances with their login channel.
+func (r *Router) SetProviderChannel(name, channel string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if runtime := r.runtime[name]; runtime != nil {
+		runtime.channel = channel
+	}
+}
+func (r *Router) ChannelProviderNames(channel string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var names []string
+	for name, runtime := range r.runtime {
+		if runtime.channel == channel && channel != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ResetChannelProviders clears stale missing-credential probes after successful login.
+func (r *Router) ResetChannelProviders(channel string) {
+	for _, name := range r.ChannelProviderNames(channel) {
+		_ = r.ResetProvider(name)
+	}
 }

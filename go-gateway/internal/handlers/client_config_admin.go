@@ -34,12 +34,16 @@ func NewClientConfigHandler(gatewayHome, zcodeHome, dshHome string, router *prov
 }
 
 // desiredModels 返回对外推荐的聊天模型清单（与 /v1/models 一致，剔除
-// 嵌入/语音转写这类非聊天模型）。
+// 嵌入/语音转写这类非聊天模型），且只保留当前可用的模型——渠道未登录
+// 或 provider 已停用的模型写进客户端配置也无法使用。
 func (h *ClientConfigHandler) desiredModels() []gin.H {
 	ids := []gin.H{}
 	seen := map[string]bool{}
 	for _, info := range h.router.ListModelInfos() {
 		if hasTextCapability(info.Capabilities) && !hasCapabilityFlagValue(info.Capabilities) && !seen[info.ID] {
+			if h.router != nil && !h.router.ModelUsable(info.ID) {
+				continue
+			}
 			seen[info.ID] = true
 			ids = append(ids, gin.H{"id": info.ID, "name": info.ID})
 		}

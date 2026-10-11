@@ -149,8 +149,8 @@ func TestProbeResultOverridesStaleCircuitSuccess(t *testing.T) {
 
 	router.CheckProviderHealth(context.Background(), "glm-5.2")
 	after, _ := router.ProviderStatus("glm-5.2")
-	if after.Status != "degraded" {
-		t.Fatalf("status after probe = %q, want degraded (probe is newer evidence)", after.Status)
+	if after.Status != "offline" || after.State != CircuitOpen || after.NextRetryAt.IsZero() {
+		t.Fatalf("429 probe must cool immediately despite stale success: %+v", after)
 	}
 }
 

@@ -14,24 +14,31 @@ import (
 
 // Config 应用全局配置
 type Config struct {
-	Port                    int
-	LogLevel                string
-	MasterKey               string
-	AdminToken              string // 独立的管理端点 token（可选）
-	GLMAPIKey               string
-	CopilotToken            string // GitHub Copilot token（短期有效，需要定期刷新）
-	CopilotGithubToken      string // GitHub OAuth token（用于刷新 Copilot token）
-	DeepVEnabled            bool   // DeepV Server（EasyCode/DeepVCode）是否启用
-	DeepVWorkDir            string // DeepV 工作目录（用于获取 Git 信息）
-	HTTPProxy               string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
-	ChatGPTAuthFile         string // ChatGPT/Pi OAuth auth.json 路径（可选）
-	Env                     string
-	CircuitFailureThreshold int
-	CircuitRecoverySeconds  int
-	CircuitSuccessThreshold int
-	Archive                 archive.Config
-	Memory                  memory.Config
-	Assistant               assistant.Config
+	Port                        int
+	LogLevel                    string
+	MasterKey                   string
+	AdminToken                  string // 独立的管理端点 token（可选）
+	GLMAPIKey                   string
+	CopilotToken                string // GitHub Copilot token（短期有效，需要定期刷新）
+	CopilotGithubToken          string // GitHub OAuth token（用于刷新 Copilot token）
+	DeepVEnabled                bool   // DeepV Server（EasyCode/DeepVCode）是否启用
+	DeepVWorkDir                string // DeepV 工作目录（用于获取 Git 信息）
+	HTTPProxy                   string // HTTP 代理地址（如 http://127.0.0.1:7890，用于访问 ChatGPT）
+	ChatGPTAuthFile             string // ChatGPT/Pi OAuth auth.json 路径（可选）
+	Env                         string
+	CircuitFailureThreshold     int
+	CircuitRecoverySeconds      int
+	CircuitSuccessThreshold     int
+	FirstOutputSeconds          int
+	ReasoningFirstOutputSeconds int
+	StreamIdleSeconds           int
+	AttemptSeconds              int
+	FallbackWaitSeconds         int
+	RateLimitInitialSeconds     int
+	RateLimitMaxSeconds         int
+	Archive                     archive.Config
+	Memory                      memory.Config
+	Assistant                   assistant.Config
 }
 
 // Load 从环境变量加载配置
@@ -39,24 +46,31 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:                    getEnvInt("PORT", 4001),
-		LogLevel:                getEnv("LOG_LEVEL", "info"),
-		MasterKey:               getEnv("LITELLM_MASTER_KEY", ""),
-		AdminToken:              getEnv("ADMIN_TOKEN", ""),
-		GLMAPIKey:               getEnv("GLM_API_KEY", ""),
-		CopilotToken:            getEnv("COPILOT_TOKEN", ""),
-		CopilotGithubToken:      getEnv("COPILOT_GITHUB_TOKEN", ""),
-		DeepVEnabled:            getEnvBool("DEEPV_ENABLED", false),
-		DeepVWorkDir:            getEnv("DEEPV_WORK_DIR", ""),
-		HTTPProxy:               getEnv("HTTP_PROXY", ""),
-		ChatGPTAuthFile:         getEnv("CHATGPT_AUTH_FILE", ""),
-		Env:                     getEnv("ENV", "development"),
-		CircuitFailureThreshold: getEnvInt("CIRCUIT_FAILURE_THRESHOLD", 3),
-		CircuitRecoverySeconds:  getEnvInt("CIRCUIT_RECOVERY_SECONDS", 30),
-		CircuitSuccessThreshold: getEnvInt("CIRCUIT_SUCCESS_THRESHOLD", 1),
-		Archive:                 loadArchiveConfig(),
-		Memory:                  loadMemoryConfig(),
-		Assistant:               loadAssistantConfig(),
+		Port:                        getEnvInt("PORT", 4001),
+		LogLevel:                    getEnv("LOG_LEVEL", "info"),
+		MasterKey:                   getEnv("LITELLM_MASTER_KEY", ""),
+		AdminToken:                  getEnv("ADMIN_TOKEN", ""),
+		GLMAPIKey:                   getEnv("GLM_API_KEY", ""),
+		CopilotToken:                getEnv("COPILOT_TOKEN", ""),
+		CopilotGithubToken:          getEnv("COPILOT_GITHUB_TOKEN", ""),
+		DeepVEnabled:                getEnvBool("DEEPV_ENABLED", false),
+		DeepVWorkDir:                getEnv("DEEPV_WORK_DIR", ""),
+		HTTPProxy:                   getEnv("HTTP_PROXY", ""),
+		ChatGPTAuthFile:             getEnv("CHATGPT_AUTH_FILE", ""),
+		Env:                         getEnv("ENV", "development"),
+		CircuitFailureThreshold:     getEnvInt("CIRCUIT_FAILURE_THRESHOLD", 3),
+		CircuitRecoverySeconds:      getEnvInt("CIRCUIT_RECOVERY_SECONDS", 30),
+		CircuitSuccessThreshold:     getEnvInt("CIRCUIT_SUCCESS_THRESHOLD", 1),
+		FirstOutputSeconds:          getEnvInt("ROUTING_FIRST_OUTPUT_SECONDS", 15),
+		ReasoningFirstOutputSeconds: getEnvInt("ROUTING_REASONING_FIRST_OUTPUT_SECONDS", 45),
+		StreamIdleSeconds:           getEnvInt("ROUTING_STREAM_IDLE_SECONDS", 30),
+		AttemptSeconds:              getEnvInt("ROUTING_ATTEMPT_SECONDS", 30),
+		FallbackWaitSeconds:         getEnvInt("ROUTING_FALLBACK_WAIT_SECONDS", 60),
+		RateLimitInitialSeconds:     getEnvInt("RATE_LIMIT_INITIAL_SECONDS", 30),
+		RateLimitMaxSeconds:         getEnvInt("RATE_LIMIT_MAX_SECONDS", 300),
+		Archive:                     loadArchiveConfig(),
+		Memory:                      loadMemoryConfig(),
+		Assistant:                   loadAssistantConfig(),
 	}
 
 	if cfg.MasterKey == "" {

@@ -57,6 +57,12 @@ func recordProviderAttempt(c *gin.Context, providerName string, started time.Tim
 		Status:    "success",
 		LatencyMs: float64(time.Since(started).Microseconds()) / 1000,
 	}
+	if timing, ok := c.Get("attempt_stream_timing"); ok {
+		if t, ok := timing.(provider.StreamTiming); ok {
+			attempt.FirstOutputMs = t.FirstOutputMs
+		}
+		c.Set("attempt_stream_timing", nil)
+	}
 	if err != nil {
 		attempt.Status = "error"
 		attempt.Error = summarizeRequestError(err)

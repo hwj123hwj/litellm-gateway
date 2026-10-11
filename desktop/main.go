@@ -34,6 +34,8 @@ func main() {
 	}
 	var win *mygo.Window
 	state := console.New(store)
+	state.OpenLoginURL = mygo.Shell.OpenExternal
+	state.CopyText = mygo.Clipboard.WriteText
 	state.Version = app.Version()
 	show := func() {
 		if win == nil || win.IsDestroyed() {

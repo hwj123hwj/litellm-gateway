@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,9 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 
 	providerChain, err := h.router.RouteForStreamRequest(providerReq.Model, providerReq)
 	if err != nil {
+		err = nativeFallbackError(c, err)
+	}
+	if err != nil {
 		setProviderErrorHeaders(c, err)
 		submitRoutingErrorArchive(c, h.archiver, archive.ProtocolResponses, rawBody, err)
 		c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
@@ -43,10 +47,10 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 	}
 
 	originalModel := req.Model
-	var lastErr error
+	lastErr := nativeFallbackError(c, nil)
 	streamOK := false
 	for i, p := range providerChain {
-		if !h.router.AllowProviderRequestFor(originalModel, p) {
+		if h.router.ProviderAttempted(c.Request.Context(), originalModel, p) || !h.router.AllowProviderRequestFor(originalModel, p) {
 			continue
 		}
 		started := time.Now()
@@ -124,6 +128,8 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 
 // streamFromProvider 从指定 provider 获取流式响应并转换为 Responses SSE
 func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Request, p provider.Provider, model string, sink *archiveSink) error {
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
 	pr, pw := io.Pipe()
 	streamWriterBase := newDeferredStreamWriter(c)
 	var streamWriter io.Writer = streamWriterBase
@@ -135,13 +141,18 @@ func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Requ
 	go func() {
 		defer pw.Close()
 		if sp, ok := p.(provider.StreamProvider); ok {
-			errCh <- sp.ForwardStream(c.Request.Context(), req, pw)
+			errCh <- runGuardedStreamContext(c, ctx, h.router, req, p, pw, sp.ForwardStream)
 		} else {
-			errCh <- h.forwardRawStream(c, req, p, pw)
+			errCh <- runGuardedStreamContext(c, ctx, h.router, req, p, pw, func(ctx context.Context, _ *provider.Request, w io.Writer) error {
+				return h.forwardRawStream(ctx, req, p, w)
+			})
 		}
 	}()
 
 	err := anthropicSSEToResponsesSSEWithUsage(pr, streamWriter, model, c)
+	if err != nil {
+		cancel()
+	}
 	_ = pr.Close()
 
 	if streamErr := <-errCh; streamErr != nil && err == nil {
@@ -155,13 +166,13 @@ func (h *responsesHandler) streamFromProvider(c *gin.Context, req *provider.Requ
 }
 
 // forwardRawStream 对非 StreamProvider 做原始 Anthropic SSE 转发
-func (h *responsesHandler) forwardRawStream(c *gin.Context, req *provider.Request, p provider.Provider, w io.Writer) error {
+func (h *responsesHandler) forwardRawStream(ctx context.Context, req *provider.Request, p provider.Provider, w io.Writer) error {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, p.URL(), strings.NewReader(string(body)))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.URL(), strings.NewReader(string(body)))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

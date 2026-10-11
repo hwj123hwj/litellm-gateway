@@ -99,7 +99,7 @@ func NewHTTPError(providerName string, resp *http.Response, body []byte) *Provid
 // non-streaming handlers. Untyped provider/network errors remain retryable for
 // backwards compatibility; typed client errors explicitly opt out.
 func ShouldFallback(err error) bool {
-	if err == nil {
+	if err == nil || isClientCancellation(err) || errors.Is(err, ErrRoutingBudgetExceeded) {
 		return false
 	}
 	var providerErr *ProviderError

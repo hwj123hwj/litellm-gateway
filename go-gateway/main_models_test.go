@@ -36,3 +36,24 @@ func TestDeepVNewModelRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestAssistantChatModelIDsExcludeSinglePurpose(t *testing.T) {
+	infos := []provider.ModelInfo{
+		{ID: "chat", Capabilities: []string{"text"}},
+		{ID: "vision-chat", Capabilities: []string{"text", "vision"}},
+		// 配置加载会为所有模型补 text 能力，嵌入与转写模型因此带 text。
+		{ID: "BAAI/bge-m3", Capabilities: []string{"embedding", "text"}},
+		{ID: "XingChenAGI/XingChenASR-V3.2", Capabilities: []string{"audio_transcription", "text"}},
+		{ID: "no-text", Capabilities: []string{"tool_calling", "streaming"}},
+	}
+	got := assistantChatModelIDs(infos)
+	want := []string{"chat", "vision-chat"}
+	if len(got) != len(want) {
+		t.Fatalf("assistant chat models = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("assistant chat models = %v, want %v", got, want)
+		}
+	}
+}

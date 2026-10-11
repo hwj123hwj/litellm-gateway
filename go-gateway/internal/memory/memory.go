@@ -45,8 +45,8 @@ const (
 type ScopeType string
 
 const (
-	ScopeGlobal ScopeType = "global" // 跨项目通用（极少）：语言偏好等
-	ScopeClient ScopeType = "client" // 按客户端（HwjCode / Claude Code / Codex CLI / Pi）
+	ScopeGlobal  ScopeType = "global"  // 跨项目通用（极少）：语言偏好等
+	ScopeClient  ScopeType = "client"  // 按客户端（HwjCode / Claude Code / Codex CLI / Pi）
 	ScopeProject ScopeType = "project" // 按仓库：scope_key = host:owner/repo
 )
 
@@ -55,17 +55,17 @@ const StatementMaxLen = 500
 
 // Memory is one propositional memory entry.
 type Memory struct {
-	ID         int64     `json:"id"`
-	ScopeType  ScopeType `json:"scope_type"`
-	ScopeKey   string    `json:"scope_key"`
-	Statement  string    `json:"statement"`
-	Status     Status    `json:"status"`
-	Source     string    `json:"source"` // manual | agent:<client> | archive:<request_id> | git:<sha>
-	Confidence float64   `json:"confidence"`
-	HitCount   int       `json:"hit_count"`
+	ID         int64      `json:"id"`
+	ScopeType  ScopeType  `json:"scope_type"`
+	ScopeKey   string     `json:"scope_key"`
+	Statement  string     `json:"statement"`
+	Status     Status     `json:"status"`
+	Source     string     `json:"source"` // manual | agent:<client> | archive:<request_id> | git:<sha>
+	Confidence float64    `json:"confidence"`
+	HitCount   int        `json:"hit_count"`
 	LastHitAt  *time.Time `json:"last_hit_at,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // ListFilter narrows admin listings.
@@ -99,13 +99,13 @@ type Store interface {
 // NoopStore implements Store as a no-op. Used when the feature is disabled.
 type NoopStore struct{}
 
-func (NoopStore) Insert(m Memory) (Memory, bool, error)         { return Memory{}, false, nil }
-func (NoopStore) Get(int64) (*Memory, error)                    { return nil, nil }
-func (NoopStore) List(ListFilter) ([]Memory, int, error)        { return nil, 0, nil }
-func (NoopStore) SetStatus(int64, Status) (bool, error)         { return false, nil }
-func (NoopStore) Delete(int64) (bool, error)                    { return false, nil }
+func (NoopStore) Insert(m Memory) (Memory, bool, error)           { return Memory{}, false, nil }
+func (NoopStore) Get(int64) (*Memory, error)                      { return nil, nil }
+func (NoopStore) List(ListFilter) ([]Memory, int, error)          { return nil, 0, nil }
+func (NoopStore) SetStatus(int64, Status) (bool, error)           { return false, nil }
+func (NoopStore) Delete(int64) (bool, error)                      { return false, nil }
 func (NoopStore) LookupFor(string, string, int) ([]Memory, error) { return nil, nil }
-func (NoopStore) MarkHits([]int64) error                        { return nil }
+func (NoopStore) MarkHits([]int64) error                          { return nil }
 
 // secretPatterns are rejected outright at write time — Authorization、Token、
 // 密码和 API Key 永不落库（AGENTS.md 红线）。这里是最后一道守门。

@@ -98,9 +98,10 @@ func (a *Accounts) Credentials() []credentialSummary {
 	for i := range a.creds {
 		cred := &a.creds[i]
 		summary := credentialSummary{
-			AccountID: cred.AccountID,
-			Nickname:  cred.Nickname,
-			Expired:   cred.Expired(now),
+			AccountID:        cred.AccountID,
+			Nickname:         cred.Nickname,
+			Expired:          cred.Expired(now),
+			RefreshAvailable: a.refresh != nil && cred.RefreshToken != "",
 		}
 		if !cred.ExpiresAt.IsZero() {
 			summary.ExpiresAt = cred.ExpiresAt.UTC().Format(time.RFC3339)
@@ -113,10 +114,11 @@ func (a *Accounts) Credentials() []credentialSummary {
 // credentialSummary 是 channel 层的非敏感凭据摘要（provider.CredentialSummary 的
 // 结构化对应物，字段名一致以便 Admin API 直接序列化）。
 type credentialSummary struct {
-	AccountID string `json:"account_id,omitempty"`
-	Nickname  string `json:"nickname,omitempty"`
-	ExpiresAt string `json:"expires_at,omitempty"`
-	Expired   bool   `json:"expired"`
+	AccountID        string `json:"account_id,omitempty"`
+	Nickname         string `json:"nickname,omitempty"`
+	ExpiresAt        string `json:"expires_at,omitempty"`
+	Expired          bool   `json:"expired"`
+	RefreshAvailable bool   `json:"refresh_available"`
 }
 
 // Refresh 实现 AuthSource：当前账号临近过期或已过期时续期一次。

@@ -25,6 +25,7 @@ func clearTraeCredentialEnv(t *testing.T) {
 	for _, key := range []string{"TRAE_CHANNEL_CLIENT_ID", "TRAE_CHANNEL_APP_ID"} {
 		t.Setenv(key, "")
 	}
+	t.Setenv("TRAE_CHANNEL_CLIENT_PRODUCT", filepath.Join(t.TempDir(), "not-installed.json"))
 }
 
 // traeTestChannel 造一个已配置客户端标识、回调端口交给系统分配的渠道。

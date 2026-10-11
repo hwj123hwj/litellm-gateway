@@ -42,6 +42,24 @@ make run
 
 网关仅提供 HTTP API，不携带或提供浏览器页面。使用 `GET /health` 检查状态，通过 [原生 Go 桌面端](../desktop/README.md) 管理连接、模型、路由、日志和助理。
 
+## 账号渠道登录
+
+在原生桌面端的「账号渠道」中发起登录，由浏览器完成授权。账号令牌保存在网关主机的受保护凭据目录，桌面端不接收令牌明文。渠道是否需要额外客户端配置、是否支持匿名模型以及本机回调要求以 `GET /admin/channels` 返回值为准；缺少配置时按桌面端说明补齐并重启网关。
+
+账号授权成功不代表上游模型有额度或可用，仍需实际调用验证。成功授权会重置该渠道对应 Provider 的熔断与历史探测状态，避免之前的缺少凭据错误阻止新账号调用。
+
+TRAE 渠道在 macOS 上可自动识别 `/Applications` 或 `~/Applications` 下已安装的 TRAE CN 客户端，读取安装包 `product.json` 中的客户端标识与版本，无需手动填写额外标识。非标准路径可用 `TRAE_CHANNEL_CLIENT_PRODUCT` 指定该文件；环境变量与 `trae-client.json` 仍优先。此识别不导入 IDE 的账号令牌，仍由用户在浏览器中为网关完成授权。国际版配置不会用于国内渠道。
+
+这些接口使用管理凭据鉴权：
+
+| 请求 | 用途 |
+|---|---|
+| `GET /admin/channels` | 渠道、账号概要及登录前提；不返回令牌 |
+| `POST /admin/channels/:channel/login` | 返回登录地址、授权码、有效期和 `login_id` |
+| `GET /admin/channels/:channel/login/:id` | 查询 `pending` / `complete` / `failed` / `cancelled` 状态 |
+| `DELETE /admin/channels/:channel/login/:id` | 取消此次授权，释放回调服务；不移除账号 |
+| `DELETE /admin/channels/:channel/accounts/:index` | 移除指定账号凭据 |
+
 ## 配置 Pi
 
 安装版网关可一键写入 Pi 的自定义模型配置：
@@ -127,6 +145,11 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/admin/skills/:id` | GET | 单个技能详情（registry 条目 + SKILL.md 原文） |
 | `/admin/skills/config` | PUT | 写入启用清单 `{"targets":[...],"enabled":[...]}`（写入前自动备份） |
 | `/admin/skills/sync` | POST | 按清单落盘：为启用技能建符号链接、清理指向技能仓库的旧链接 |
+| `/admin/skills/market/browse` | GET | 技能市场目录：`q`/`category`/`sort`/`page`/`section`（默认启用，`SKILLS_MARKET_ENABLED=false` 时返回 `enabled:false`） |
+| `/admin/skills/market/sections` | GET | 技能市场主题分组 |
+| `/admin/skills/market/installed` | GET | 已安装的市场技能（含 EasyAgent 安装的，按安装清单识别） |
+| `/admin/skills/market/install` | POST | 安装市场技能 `{"id":<技能 ID>}`：下载、SHA-256 校验、解包到安装目录 |
+| `/admin/skills/market/uninstall` | POST | 卸载市场技能 `{"name":"<目录名>"}`（只删带安装清单的目录） |
 
 ### 技能面板（custom-skills 技能市场）
 
@@ -141,7 +164,15 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 - 项目范围输入现有项目的绝对路径，每个项目独立保存 `.agents/skills.enabled.json`，仅同步到该项目的 `.agents/skills`；不会改变全局启用清单。清单内保存相对目标，便于项目移动。
 - 「本地已有」只读展示未由技能库管理的技能；项目范围检查 `.agents/skills`、`.claude/skills` 和 `.codex/skills`。同名自定义文件和外部链接不会被覆盖；全局与项目技能的实际加载及优先级由客户端决定。
 - `/admin/skills`、`/admin/skills/config`、`/admin/skills/sync` 可携带 `?project=<URL 编码的项目绝对路径>`，省略时保持全局行为。项目目录需存在；项目 `.agents`、安装目录和清单不接受符号链接，以免跨范围写入。
-- 选择技能会先形成草稿。「仅保存」保存清单，「保存并同步」才落盘。同步结果区分新增、清理、同名跳过及错误，空结果返回数组。
+- 选择技能会先形成草稿。「保存并同步」一次完成清单保存与符号链接落盘；同步是幂等的目录对齐，也可单独用于修复断链。同步结果区分新增、清理、同名跳过及错误，空结果返回数组。
+
+#### 技能市场
+
+技能市场把远端商城（默认 `https://skills.deepvlab.ai`）接到技能页：浏览、搜索、一键安装与卸载。安装包经 SHA-256 校验后解包到 `SKILLS_MARKET_SKILLS_DIR`（默认 `~/.agents/skills`），目录内写入安装清单，卸载只删除带清单的目录——手写技能与符号链接不受影响。
+
+- 环境变量：`SKILLS_MARKET_ENABLED=false` 关闭面板；`SKILLS_MARKET_BASE_URL` 指向其他商城地址；`SKILLS_MARKET_SKILLS_DIR` 自定义安装目录。
+- 安装目录与 EasyAgent 同源，安装清单格式一致：任何一侧安装的技能在另一侧都显示为已安装；商城不可达时浏览返回带内 `error`，技能库（custom-skills）来源不受影响。
+- 商城为外部服务，其可用性与内容归属不受网关控制；技能的实际加载与优先级仍由各客户端决定。
 
 `/admin/stats`、`/admin/dashboard`、`/admin/models` 和 `/admin/logs` 会返回聚合指标或请求日志。缓存统计包含 `cache_read_input_tokens`、`cache_creation_input_tokens`、`cache_input_tokens`、`cache_usage_requests` 和 `cache_hit_rate`；命中率按缓存读取 token ÷ 已报告的总输入 token 加权计算。上游没有返回缓存 usage 的请求不计入命中率样本，数据不足时 `cache_hit_rate` 为 `null`。
 
@@ -180,7 +211,32 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 每行 JSON 包含 `schema_version`、`request_id`、`timestamp`、`protocol`、`source`、`conversation_id`、`session_id`、`model`、`provider`、`is_stream`、`status`、`status_code`、`input_tokens`、`output_tokens`、`request_bytes`、`response_bytes`、`truncated`、`request_body`、`response_body`、`error_reason` 等字段。`schema_version` 当前为 `2`。客户端可以通过 `X-AI-Source`、`X-Conversation-ID`、`X-Session-ID` 写入可关联的来源与会话标识；密钥类内容仍会被脱敏。
 
-Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后允许一次半开探测；可通过 `CIRCUIT_FAILURE_THRESHOLD`、`CIRCUIT_RECOVERY_SECONDS` 和 `CIRCUIT_SUCCESS_THRESHOLD` 调整。管理接口只返回脱敏的运行状态，API key 始终来自环境变量。
+Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后允许一次半开探测；429 则立即冷却，优先使用有效的 `Retry-After`（秒数或 HTTP 日期），否则从 30 秒指数退避到最多 300 秒（`RATE_LIMIT_INITIAL_SECONDS` / `RATE_LIMIT_MAX_SECONDS`）。冷却期间自动跳过该 Provider，恢复时只允许一个半开请求；可通过 `CIRCUIT_FAILURE_THRESHOLD`、`CIRCUIT_RECOVERY_SECONDS` 和 `CIRCUIT_SUCCESS_THRESHOLD` 调整。管理接口只返回脱敏的运行状态，API key 始终来自环境变量。
+
+### 等待限制与测速
+
+三种 API 共用路由等待策略。首个实际文本、推理内容或工具调用到来前，元数据及心跳会缓冲，超时可以切换下一家；一旦对客户端输出，就不会拼接另一家模型的回答。
+
+| 环境变量 | 默认秒数 | 用途 |
+|---|---:|---|
+| `ROUTING_FIRST_OUTPUT_SECONDS` | 15 | 普通流等待首个实际输出 |
+| `ROUTING_REASONING_FIRST_OUTPUT_SECONDS` | 45 | 推理模型或启用推理的请求等待首个实际输出 |
+| `ROUTING_STREAM_IDLE_SECONDS` | 30 | 已开始的流连续无实际进展；心跳不延长等待 |
+| `ROUTING_ATTEMPT_SECONDS` | 30 | 非流式单次完整响应上限 |
+| `ROUTING_FALLBACK_WAIT_SECONDS` | 60 | 同一请求所有尝试共用的等待预算 |
+
+流开始输出后只检查 idle 超时，不用总等待预算截断正在生成的长回答。客户端取消立即取消上游，不增加失败计数。普通超时按现有连续失败阈值熔断，不会因一次偶发慢响应永久删除模型。`provider_attempts` 中的 `first_output_ms` 记录实际首输出，排除响应头和心跳。
+
+默认按模型实例冷却。确实共用同一限流额度的 Provider，可在 `providers.yaml` 的 Provider 条目设置 `rate_limit_scope: channel`，使该条目所有模型共用 429 冷却；只在 429 时共享，普通失败仍按模型计数。`model` 或留空使用独立冷却。手动 reset 该组任意模型也会重置组的冷却。
+
+在含 `.env` 的网关目录运行（或设置 `LITELLM_MASTER_KEY`）：
+
+```bash
+./gateway benchmark --models coding --samples 3 --timeout 60s
+./gateway benchmark --models model-a,model-b --samples 2 --timeout 45s
+```
+
+`--endpoint` 默认 `http://127.0.0.1:4001`。命令串行测指定模型，每个模型最多 10 次，遇到 HTTP 429 停止该模型剩余样本。输出 JSON 包含成功率、实际首输出、完成耗时、输出 token 数及从首输出到完成的平均 tokens/s（上游有 usage 时）。不保存提示词、回答和密钥，也不扫描整个模型目录。测 alias 时会走真实 fallback 链；比较模型要使用具体模型 ID。测速只反映该时刻、小提示词下的速度和可用性，不能代替代码能力、工具调用及长上下文评测；默认 `coding` 保留精简备用链，模型目录仍可用于手动选择。
 
 ### Provider 探测
 
@@ -195,7 +251,7 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 
 响应里带 `probe_status`、`detail`、`status_code`、`latency_ms`，并同时返回该 provider 的完整运行状态。只有 `online`/`degraded`/`offline` 会写入熔断器；`unknown` 不写结果，避免一次「测不了」被当成成功而清掉真实的连续失败计数。
 
-管理面板的「在线」状态以**最近一次探测结论**为准，优先于「历史上请求成功过」——否则一个已被上游限流的 provider 会因为早先成功过而长期显示在线。从未探测过的 provider 显示「未知」，面板会注明状态来自请求历史。
+熔断打开（包括 429 冷却）时运行状态显示 `offline`，并带 `next_retry_at`；探测本身仍报告 `degraded`。其余情况下，管理面板的「在线」状态以**最近一次探测结论**为准，优先于「历史上请求成功过」——否则一个已被上游限流的 provider 会因为早先成功过而长期显示在线。从未探测过的 provider 显示「未知」，面板会注明状态来自请求历史。
 
 `Provider.IsHealthy` 只反映本地配置（凭据是否存在），不再作为上游可用性的判断依据。
 
