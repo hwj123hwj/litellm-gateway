@@ -125,7 +125,7 @@ jobs:
           go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64
           VERSION=$(python3 -c 'import json; print(json.load(open("mygo.json"))["version"])')
           mkdir -p ../desktop-release
-          cp "build.noindex/darwin-arm64/EasyGateway $VERSION.dmg" "../desktop-release/EasyGateway-$VERSION-darwin-arm64.dmg"
+          cp "build.noindex/darwin-arm64/EasyGateway $VERSION arm64.dmg" "../desktop-release/EasyGateway-$VERSION-darwin-arm64.dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-darwin-arm64
