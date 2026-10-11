@@ -58,6 +58,7 @@ func (h *AdminHandler) HandleDashboard(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"summary": gin.H{
 			"today_requests":              summary.TodayRequests,
+			"today_tokens":                summary.TodayTokens,
 			"success_rate":                summary.SuccessRate,
 			"active_models":               summary.ActiveModels,
 			"avg_latency_ms":              summary.AvgLatency,
