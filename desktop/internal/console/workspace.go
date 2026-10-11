@@ -36,6 +36,23 @@ func sortedSelection(m map[string]bool) []string {
 // skillsTagAll 是标签筛选里表示“不过滤”的哨兵选项。
 const skillsTagAll = "全部标签"
 
+// marketSectionAll 是市场分类筛选里表示“不过滤”的哨兵选项。
+const marketSectionAll = "全部分类"
+
+// marketSectionOptions 返回分类下拉选项：哨兵值 + 商城分类名。
+func (a *App) marketSectionOptions() []string {
+	if len(a.marketSections) == 0 {
+		return nil
+	}
+	options := []string{marketSectionAll}
+	for _, s := range a.marketSections {
+		if s.Name != "" {
+			options = append(options, s.Name)
+		}
+	}
+	return options
+}
+
 // skillTagOptions 汇总技能目录里出现过的标签，供筛选下拉使用。
 func (a *App) skillTagOptions() []string {
 	tags := map[string]bool{}
@@ -101,6 +118,9 @@ func (a *App) skillsView(c *ui.Context) {
 			ui.Textf(c, "%d 个已选", len(sortedSelection(a.skillSelection)))
 		}
 	})
+	if a.unloadedOrEmpty(c, "") {
+		return
+	}
 	if a.skillSource == skillSourceMarket {
 		a.marketView(c)
 		return
@@ -116,6 +136,13 @@ func (a *App) marketView(c *ui.Context) {
 	}
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.TextInput(c, &a.marketQuery).Label("搜索市场").Placeholder("输入技能名称或描述，点击搜索").Grow(1)
+		if sections := a.marketSectionOptions(); len(sections) > 0 {
+			if ui.Select(c, &a.marketSection, sections).Label("分类").Disabled(a.busy != "").Changed() {
+				a.marketPage = 1
+				a.listViews.marketList = ui.ListState{}
+				a.reload()
+			}
+		}
 		if ui.Select(c, &a.marketSort, []string{"推荐", "最多安装", "名称"}).Label("排序").Disabled(a.busy != "").Changed() {
 			a.marketPage = 1
 			a.reload()
@@ -494,8 +521,8 @@ func (a *App) memoryView(c *ui.Context) {
 			})
 		})
 	}).Grow(1).Children(func() {
-		if len(a.memories) == 0 {
-			muted(c, "没有此状态的记忆")
+		if a.unloadedOrEmpty(c, "没有此状态的记忆") {
+			return
 		}
 	})
 	card(c, func() {

@@ -149,6 +149,12 @@ type MarketPage struct {
 	Error   string        `json:"error"`
 }
 
+// MarketSection 是商城的主题分类。
+type MarketSection struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 // MarketInstalled 是本机已安装的市场技能记录（含 EasyAgent 安装的）。
 type MarketInstalled struct {
 	Name        string `json:"name"`

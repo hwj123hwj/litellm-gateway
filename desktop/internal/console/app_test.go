@@ -44,7 +44,7 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 		case "/admin/routes":
 			w.Write([]byte(`{"routes":[{"model":"coding","providers":[{"name":"alpha"},{"name":"beta"}]}]}`))
 		case "/admin/skills/market/browse":
-			if r.URL.Query().Get("q") != "" {
+			if r.URL.Query().Get("q") != "" || r.URL.Query().Get("section") == "3" {
 				w.Write([]byte(`{"enabled":true,"skills":[],"total":0,"page":1}`))
 				return
 			}
@@ -52,6 +52,8 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 				`{"id":5,"name":"market-demo","display_name":"市场示例","description":"来自市场的演示技能","version":"1.0.0","install_count":9,"tarball_size":2048},` +
 				`{"id":6,"name":"installed-demo","display_name":"已安装示例","description":"已经装好的技能","version":"0.9.0","install_count":4,"tarball_size":1024}` +
 				`],"total":2,"page":1}`))
+		case "/admin/skills/market/sections":
+			w.Write([]byte(`{"enabled":true,"sections":[{"id":3,"name":"开发工具"},{"id":4,"name":"演示与设计"}]}`))
 		case "/admin/skills/market/installed":
 			w.Write([]byte(`{"enabled":true,"skills_dir":"/tmp/skills","installed":[{"name":"installed-demo","display_name":"已安装示例","version":"0.9.0"}]}`))
 		default:
@@ -404,6 +406,56 @@ func TestSkillsMarketDisabledShowsHint(t *testing.T) {
 	}
 	if tt.HasText("搜索市场") {
 		t.Fatal("market controls should stay hidden when disabled")
+	}
+}
+
+func TestSkillsMarketSectionFilter(t *testing.T) {
+	a, queue, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	a.skillSource = skillSourceMarket
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1100, 800)
+	// Select 未展开时只渲染当前值；分类选项已装进下拉即表现为选中“全部分类”。
+	if !tt.HasText("全部分类") {
+		t.Fatal("section select missing")
+	}
+	a.marketSection = "开发工具" // fixture 对 section=3 返回空清单
+	a.reload()
+	await(t, a, queue)
+	tt.Frame()
+	if !tt.HasText("没有匹配的技能") {
+		t.Fatal("section filter did not narrow the browse list")
+	}
+	a.marketSection = marketSectionAll
+	a.reload()
+	await(t, a, queue)
+	tt.Frame()
+	if !tt.HasText("市场示例") {
+		t.Fatal("resetting the section lost browse results")
+	}
+}
+
+// 上次载入失败时页面工具保持可用：来源切换可直接自愈，不必先刷新。
+func TestFailedLoadKeepsPageToolbar(t *testing.T) {
+	a, queue, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = false
+	a.problem = "get /admin/skills: connection refused"
+	tt := ui.NewTester(a.View, 1100, 800)
+	if !tt.HasText("数据未加载") {
+		t.Fatal("retry hint missing on failed load")
+	}
+	if !tt.HasText("技能来源") || !tt.HasText("技能库") {
+		t.Fatal("source switcher should stay available on failure")
+	}
+	a.skillSource = skillSourceMarket
+	a.reload()
+	await(t, a, queue)
+	tt.Frame()
+	if !tt.HasText("市场示例") {
+		t.Fatal("switching source should reload data and self-heal")
 	}
 }
 
