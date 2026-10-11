@@ -111,6 +111,7 @@ func (a *App) skillsView(c *ui.Context) {
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 		if ui.Select(c, &a.skillSource, []string{skillSourceRepo, skillSourceMarket}).Label("技能来源").Changed() {
 			a.loaded = false
+			a.savePrefs()
 			a.reload()
 		}
 		ui.Spacer(c)
@@ -140,6 +141,7 @@ func (a *App) marketView(c *ui.Context) {
 			if ui.Select(c, &a.marketSection, sections).Label("分类").Disabled(a.busy != "").Changed() {
 				a.marketPage = 1
 				a.listViews.marketList = ui.ListState{}
+				a.savePrefs()
 				a.reload()
 			}
 		}
@@ -224,17 +226,50 @@ func (a *App) marketRow(c *ui.Context, s MarketSkill) {
 	})
 }
 
-// installMarketSkill 通过网关下载并安装商城技能。
+// installMarketSkill 通过 SSE 进度流安装商城技能：阶段与字节进度
+// 实时写进顶部忙碌条，失败与完成按事件收尾。
 func (a *App) installMarketSkill(id int, name string) {
 	a.work("正在安装技能", 120*time.Second, func(ctx context.Context, client *connection.Client) (func(), error) {
-		var result MarketPage
-		if err := client.JSON(ctx, "POST", "/skills/market/install", map[string]int{"id": id}, &result); err != nil {
-			return nil, err
+		seq := a.sequence
+		var streamErr error
+		err := client.Stream(ctx, "/skills/market/install-stream", map[string]int{"id": id}, func(data []byte) bool {
+			var e MarketInstallEvent
+			if json.Unmarshal(data, &e) != nil {
+				return true
+			}
+			dispatch := a.dispatch
+			dispatch(func() {
+				if seq != a.sequence {
+					return
+				}
+				switch e.Phase {
+				case "resolving":
+					a.busy = "正在获取技能信息"
+				case "downloading":
+					if e.BytesTotal > 0 {
+						a.busy = fmt.Sprintf("正在下载技能 %s / %s", shortNumber(e.BytesDone), shortNumber(e.BytesTotal))
+					} else {
+						a.busy = "正在下载技能 " + shortNumber(e.BytesDone)
+					}
+				case "verifying":
+					a.busy = "正在校验安装包"
+				case "extracting":
+					a.busy = "正在解包安装"
+				case "failed":
+					streamErr = errors.New(e.Error)
+				}
+			})
+			return e.Phase != "failed" && e.Phase != "done"
+		})
+		if err == nil && streamErr != nil {
+			err = streamErr
 		}
-		if result.Error != "" {
-			return nil, errors.New(result.Error)
-		}
-		return func() { a.notice = "技能「" + name + "」已安装"; a.reload() }, nil
+		return func() {
+			if err == nil {
+				a.reload()
+				a.notice = "技能「" + name + "」已安装"
+			}
+		}, err
 	})
 }
 
@@ -250,7 +285,7 @@ func (a *App) uninstallMarketSkill(name, display string) {
 		if result.Error != "" {
 			return nil, errors.New(result.Error)
 		}
-		return func() { a.notice = "技能「" + display + "」已卸载"; a.reload() }, nil
+		return func() { a.reload(); a.notice = "技能「" + display + "」已卸载" }, nil
 	})
 }
 
@@ -276,6 +311,7 @@ func (a *App) modelPickerModal(c *ui.Context) {
 						ui.Button(c, name).Label("选择模型 " + name).Grow(1).OnClick(func() {
 							a.chatModel = name
 							a.closeModelPicker()
+							a.savePrefs()
 						})
 						if current {
 							chip(c, "当前", okGreen)

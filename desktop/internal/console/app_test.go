@@ -54,6 +54,16 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 				`],"total":2,"page":1}`))
 		case "/admin/skills/market/sections":
 			w.Write([]byte(`{"enabled":true,"sections":[{"id":3,"name":"开发工具"},{"id":4,"name":"演示与设计"}]}`))
+		case "/admin/skills/market/install-stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			if f, ok := w.(http.Flusher); ok {
+				fmt.Fprintln(w, `data: {"phase":"resolving"}`)
+				f.Flush()
+				fmt.Fprintln(w, `data: {"phase":"downloading","bytes_done":1024,"bytes_total":2048}`)
+				f.Flush()
+				fmt.Fprintln(w, `data: {"phase":"done","name":"market-demo","display_name":"市场示例"}`)
+				f.Flush()
+			}
 		case "/admin/skills/market/installed":
 			w.Write([]byte(`{"enabled":true,"skills_dir":"/tmp/skills","installed":[{"name":"installed-demo","display_name":"已安装示例","version":"0.9.0"}]}`))
 		default:
@@ -651,5 +661,98 @@ func TestAssistantUsesAuthoritativeFinalReply(t *testing.T) {
 	await(t, a, queue)
 	if a.chatReply != "complete reply" || a.chatStatus != "回复完成" {
 		t.Fatal(a.chatReply, a.chatStatus)
+	}
+}
+
+func TestSkillsMarketInstallStreamsProgress(t *testing.T) {
+	a, queue, requests := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	a.skillSource = skillSourceMarket
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "安装技能 市场示例")
+	await(t, a, queue)
+	select {
+	case got := <-requests:
+		if !strings.Contains(got, "POST /admin/skills/market/install-stream") {
+			t.Fatal("install should use the stream endpoint:", got)
+		}
+	default:
+		t.Fatal("install request not sent")
+	}
+	if a.problem != "" {
+		t.Fatal("stream install reported a problem:", a.problem)
+	}
+	if a.notice != "技能「市场示例」已安装" {
+		t.Fatal("completion notice missing:", a.notice)
+	}
+}
+
+func TestPrefsApplyAndRejectInvalid(t *testing.T) {
+	dir := t.TempDir()
+	store, err := connection.New(filepath.Join(dir, "connections.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SavePrefs(connection.Prefs{
+		ChatModel:     "glm-5.3-flash",
+		SkillSource:   skillSourceMarket,
+		ModelCategory: "向量",
+		MarketSection: "开发工具",
+	})
+	a := New(store)
+	a.applyPrefs()
+	if a.chatModel != "glm-5.3-flash" || a.skillSource != skillSourceMarket || a.modelCategory != "向量" || a.marketSection != "开发工具" {
+		t.Fatalf("prefs not applied: %+v", a)
+	}
+	// 非法值回退默认；未设置的不覆盖。
+	store.SavePrefs(connection.Prefs{SkillSource: "bogus", ModelCategory: "bogus"})
+	b := New(store)
+	b.applyPrefs()
+	if b.skillSource != skillSourceRepo || b.modelCategory != modelCategoryAll {
+		t.Fatalf("invalid prefs should fall back: %q %q", b.skillSource, b.modelCategory)
+	}
+}
+
+func TestChannelExpiryMarksRender(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "channels"
+	a.loaded = true
+	a.channels = []AccountChannel{{
+		ID:       "minimax",
+		LoggedIn: true,
+		Accounts: []ChannelAccount{
+			{AccountID: "a1", Nickname: "过期账号", Expired: true},
+			{AccountID: "a2", Nickname: "临期账号", ExpiresAt: time.Now().Add(2 * time.Hour).Format(time.RFC3339)},
+		},
+	}}
+	tt := ui.NewTester(a.View, 1280, 850)
+	if !tt.HasText("已失效") || !tt.HasText("即将过期") {
+		t.Fatalf("expiry chips missing: %v", tt.Texts())
+	}
+}
+
+func TestOverviewShowsTokenMetricAndExpiryWarning(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.loaded = true
+	rate := 98.5
+	a.dashboard = Dashboard{Summary: Summary{TodayRequests: 24, SuccessRate: rate, TodayTokens: 1523000}}
+	a.channels = []AccountChannel{{
+		ID:       "minimax",
+		LoggedIn: true,
+		Accounts: []ChannelAccount{{AccountID: "a1", Expired: true}},
+	}}
+	tt := ui.NewTester(a.View, 1280, 850)
+	if !tt.HasText("今日 Tokens") || !tt.HasText("1.5M") {
+		t.Fatal("token metric missing")
+	}
+	if !tt.HasText("渠道凭据提醒") || !tt.HasText("1 个已失效") {
+		t.Fatal("expiry warning missing")
+	}
+	click(t, tt, "去处理")
+	if a.page != "channels" {
+		t.Fatal("warning button did not navigate to channels")
 	}
 }

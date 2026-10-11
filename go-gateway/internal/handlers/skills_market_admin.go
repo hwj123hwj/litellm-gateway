@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -142,19 +144,75 @@ func (h *SkillsMarketHandler) enabled(c *gin.Context) bool {
 	return false
 }
 
+// marketErrorMessage 把运营性失败翻译成可直接展示的文案。
+func marketErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, skillmarket.ErrNotFound):
+		return "技能市场里没有这个技能"
+	case errors.Is(err, skillmarket.ErrAlreadyInstalled):
+		return "本机已有同名技能目录（可能由 EasyAgent 安装或手写），安装已取消"
+	case errors.Is(err, skillmarket.ErrDigestMismatch):
+		return "下载包校验不匹配，已放弃安装"
+	case errors.Is(err, skillmarket.ErrNotMarketplace):
+		return "目标目录不是市场安装的技能，拒绝卸载"
+	default:
+		return "技能市场请求失败: " + err.Error()
+	}
+}
+
 // writeError 把运营性失败输出为 200 + {"error"}，桌面端可直接展示原文；
 // 认证与连接层错误仍由传输层处理。
 func (h *SkillsMarketHandler) writeError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, skillmarket.ErrNotFound):
-		c.JSON(http.StatusOK, gin.H{"enabled": true, "error": "技能市场里没有这个技能"})
-	case errors.Is(err, skillmarket.ErrAlreadyInstalled):
-		c.JSON(http.StatusOK, gin.H{"enabled": true, "error": "本机已有同名技能目录（可能由 EasyAgent 安装或手写），安装已取消"})
-	case errors.Is(err, skillmarket.ErrDigestMismatch):
-		c.JSON(http.StatusOK, gin.H{"enabled": true, "error": "下载包校验不匹配，已放弃安装"})
-	case errors.Is(err, skillmarket.ErrNotMarketplace):
-		c.JSON(http.StatusOK, gin.H{"enabled": true, "error": "目标目录不是市场安装的技能，拒绝卸载"})
-	default:
-		c.JSON(http.StatusOK, gin.H{"enabled": true, "error": "技能市场请求失败: " + err.Error()})
+	c.JSON(http.StatusOK, gin.H{"enabled": true, "error": marketErrorMessage(err)})
+}
+
+// HandleInstallStream POST /admin/skills/market/install-stream {"id":N} —
+// SSE 流式安装：逐事件推送阶段与下载字节进度；失败以
+// {"phase":"failed","error":...} 带内返回。
+func (h *SkillsMarketHandler) HandleInstallStream(c *gin.Context) {
+	if !h.enabled(c) {
+		return
 	}
+	var body struct {
+		ID int `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体应为 {\"id\": <技能 ID>}"})
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming unsupported"})
+		return
+	}
+	writeEvent := func(payload map[string]any) {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(c.Writer, "data: %s\n\n", raw)
+		flusher.Flush()
+	}
+
+	writeEvent(map[string]any{"phase": "resolving"})
+	item, err := h.client.InstallWithProgress(c.Request.Context(), body.ID, func(p skillmarket.InstallProgress) {
+		switch p.Phase {
+		case skillmarket.PhaseDownloading:
+			writeEvent(map[string]any{"phase": "downloading", "bytes_done": p.BytesDone, "bytes_total": p.BytesTotal})
+		case skillmarket.PhaseVerifying:
+			writeEvent(map[string]any{"phase": "verifying"})
+		case skillmarket.PhaseExtracting:
+			writeEvent(map[string]any{"phase": "extracting"})
+		}
+	})
+	if err != nil {
+		h.logger.Printf("skill market install %d: %v", body.ID, err)
+		writeEvent(map[string]any{"phase": "failed", "error": marketErrorMessage(err)})
+		return
+	}
+	h.logger.Printf("skill market installed (stream): %s (id=%d) -> %s", item.Name, item.ID, h.client.SkillsDir())
+	writeEvent(map[string]any{"phase": "done", "name": item.Name, "display_name": item.DisplayName})
 }

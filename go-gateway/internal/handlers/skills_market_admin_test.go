@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -75,6 +76,7 @@ func marketTestRouter(t *testing.T, handler *SkillsMarketHandler) *gin.Engine {
 	engine.GET("/admin/skills/market/sections", handler.HandleSections)
 	engine.GET("/admin/skills/market/installed", handler.HandleInstalled)
 	engine.POST("/admin/skills/market/install", handler.HandleInstall)
+	engine.POST("/admin/skills/market/install-stream", handler.HandleInstallStream)
 	engine.POST("/admin/skills/market/uninstall", handler.HandleUninstall)
 	return engine
 }
@@ -238,5 +240,47 @@ func TestSkillsMarketInstallRejectsTamperedPackage(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "demo-skill")); !os.IsNotExist(err) {
 		t.Fatal("校验失败的包不应落盘")
+	}
+}
+
+// TestSkillsMarketInstallStream 走 SSE 流式安装：事件按阶段推进，
+// 完成后技能落盘。
+func TestSkillsMarketInstallStream(t *testing.T) {
+	store := newMarketStore(t, "")
+	defer store.Close()
+	skillsDir := t.TempDir()
+	engine := marketTestRouter(t, NewSkillsMarketHandler(skillsDir, store.URL, true, log.New(io.Discard, "", 0)))
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin/skills/market/install-stream", strings.NewReader(`{"id":7}`)))
+	body := w.Body.String()
+	if w.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("应返回 SSE: %v", w.Header())
+	}
+	for _, phase := range []string{`"phase":"resolving"`, `"phase":"downloading"`, `"phase":"verifying"`, `"phase":"extracting"`, `"phase":"done"`, `"display_name":"示例技能"`} {
+		if !strings.Contains(body, phase) {
+			t.Fatalf("缺少事件 %s: %s", phase, body)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "demo-skill", "SKILL.md")); err != nil {
+		t.Fatalf("技能未落盘: %v", err)
+	}
+
+	// 失败路径：重复安装以 failed 事件带内返回。
+	w = httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin/skills/market/install-stream", strings.NewReader(`{"id":7}`)))
+	if !strings.Contains(w.Body.String(), `"phase":"failed"`) || !strings.Contains(w.Body.String(), "本机已有同名技能目录") {
+		t.Fatalf("失败事件缺失: %s", w.Body.String())
+	}
+}
+
+func TestSkillsMarketInstallStreamRejectsInvalidBody(t *testing.T) {
+	store := newMarketStore(t, "")
+	defer store.Close()
+	engine := marketTestRouter(t, NewSkillsMarketHandler(t.TempDir(), store.URL, true, log.New(io.Discard, "", 0)))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin/skills/market/install-stream", strings.NewReader(`{"id":0}`)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("非法 ID 应返回 400: %d", w.Code)
 	}
 }

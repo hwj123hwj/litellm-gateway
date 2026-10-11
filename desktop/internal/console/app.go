@@ -98,9 +98,39 @@ func New(store *connection.Store) *App {
 func (a *App) SetDispatcher(fn func(func())) { a.dispatch = fn }
 func (a *App) Close()                        { a.stop(); a.dispatch = nil }
 func (a *App) Start() {
+	a.applyPrefs()
 	if a.page != "connections" {
 		a.reload()
 	}
+}
+
+// applyPrefs 应用本地 UI 偏好；非法值回退默认。
+func (a *App) applyPrefs() {
+	prefs := a.store.LoadPrefs()
+	if prefs.SkillSource == skillSourceRepo || prefs.SkillSource == skillSourceMarket {
+		a.skillSource = prefs.SkillSource
+	}
+	for _, category := range modelCategories {
+		if prefs.ModelCategory == category {
+			a.modelCategory = prefs.ModelCategory
+		}
+	}
+	if prefs.MarketSection != "" {
+		a.marketSection = prefs.MarketSection
+	}
+	if prefs.ChatModel != "" {
+		a.chatModel = prefs.ChatModel
+	}
+}
+
+// savePrefs 把需要记住的 UI 状态写本地（尽力而为）。
+func (a *App) savePrefs() {
+	a.store.SavePrefs(connection.Prefs{
+		ChatModel:     a.chatModel,
+		SkillSource:   a.skillSource,
+		ModelCategory: a.modelCategory,
+		MarketSection: a.marketSection,
+	})
 }
 func (a *App) ShowConnections() { a.navigate("connections") }
 func (a *App) stop() {
@@ -200,6 +230,13 @@ func (a *App) reload() {
 		case "overview":
 			var d Dashboard
 			err := c.JSON(ctx, "GET", "/dashboard", nil, &d)
+			var channels struct {
+				Channels []AccountChannel `json:"channels"`
+			}
+			// 渠道清单用于过期提醒；拉取失败不影响概览指标。
+			if err2 := c.JSON(ctx, "GET", "/channels", nil, &channels); err2 == nil {
+				a.channels = channels.Channels
+			}
 			return func() { a.dashboard = d; a.loaded = true }, err
 		case "models":
 			var m struct {
@@ -268,6 +305,17 @@ func (a *App) reload() {
 					a.market = browse
 					a.marketSections = sections.Sections
 					a.marketInstalled = local.Installed
+					if a.marketSection != marketSectionAll && len(sections.Sections) > 0 {
+						found := false
+						for _, s := range sections.Sections {
+							if s.Name == a.marketSection {
+								found = true
+							}
+						}
+						if !found {
+							a.marketSection = marketSectionAll
+						}
+					}
 					a.loaded = true
 				}, err
 			}
@@ -541,6 +589,25 @@ func (a *App) filteredChatModels() []string {
 	}
 	return append(starts, contains...)
 }
+
+// channelExpiryCounts 汇总渠道账号凭据的失效与临期数量（24 小时内到期）。
+func (a *App) channelExpiryCounts() (expired, expiring int) {
+	for _, ch := range a.channels {
+		for _, account := range ch.Accounts {
+			if account.Expired {
+				expired++
+				continue
+			}
+			if expiry, err := time.Parse(time.RFC3339, account.ExpiresAt); err == nil {
+				if until := time.Until(expiry); until > 0 && until < 24*time.Hour {
+					expiring++
+				}
+			}
+		}
+	}
+	return expired, expiring
+}
+
 func split(value string) []string {
 	out := []string{}
 	seen := map[string]bool{}

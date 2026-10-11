@@ -481,7 +481,7 @@ func (a *App) overviewView(c *ui.Context) {
 	metrics := []struct{ Title, Value string }{
 		{"今日请求", shortNumber(int64(s.TodayRequests))},
 		{"成功率", fmt.Sprintf("%.1f%%", s.SuccessRate)},
-		{"活跃模型", fmt.Sprint(s.ActiveModels)},
+		{"今日 Tokens", shortNumber(s.TodayTokens)},
 		{"平均延迟", formatLatency(s.AvgLatency)},
 	}
 	ui.Row(c).Background(theme.Surface).Radius(12).Border(1, theme.Border).AlignItems(ui.Center).Children(func() {
@@ -495,6 +495,20 @@ func (a *App) overviewView(c *ui.Context) {
 			})
 		}
 	})
+	// 渠道凭据过期提醒：把“用到才发现 401”提前到概览。
+	if expired, expiring := a.channelExpiryCounts(); expired > 0 || expiring > 0 {
+		var parts []string
+		if expired > 0 {
+			parts = append(parts, fmt.Sprintf("%d 个已失效", expired))
+		}
+		if expiring > 0 {
+			parts = append(parts, fmt.Sprintf("%d 个 24 小时内过期", expiring))
+		}
+		ui.Row(c).Gap(12).Padding(12).Radius(8).Background(theme.Accent.Alpha(.08)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "渠道凭据提醒："+strings.Join(parts, "，")+"。").TextColor(theme.Accent).Grow(1)
+			ui.Button(c, "去处理").OnClick(func() { a.navigate("channels") })
+		})
+	}
 	ui.Row(c).Gap(20).Children(func() {
 		muted(c, "运行时间  "+s.Uptime)
 		muted(c, "缓存命中  "+percent(s.CacheHitRate))
@@ -553,6 +567,7 @@ func (a *App) modelsView(c *ui.Context) {
 		ui.TextInput(c, &a.modelFilter).Placeholder("搜索模型或 Provider").Label("搜索模型").Grow(1)
 		if ui.Select(c, &a.modelCategory, modelCategories).Label("能力分类").Changed() {
 			a.listViews.modelList = ui.ListState{}
+			a.savePrefs()
 		}
 	})
 	filtered, changed := a.listViews.models.apply(a.models, a.modelFilter, modelSearchText)
