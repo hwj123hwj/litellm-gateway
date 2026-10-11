@@ -756,3 +756,37 @@ func TestOverviewShowsTokenMetricAndExpiryWarning(t *testing.T) {
 		t.Fatal("warning button did not navigate to channels")
 	}
 }
+
+func TestConnectionSwitcherInTitleBar(t *testing.T) {
+	a, queue, _ := fixture(t)
+	localURL := a.profiles.Profiles[0].URL
+	localID := a.profiles.ActiveID
+	if _, err := a.store.Save(context.Background(), connection.Input{Name: "迷你主机", URL: localURL, Token: "native-test"}); err != nil {
+		t.Fatal(err)
+	}
+	a.profiles = a.store.State()
+	a.page = "overview"
+	a.loaded = true
+	if a.profiles.ActiveID == localID {
+		t.Fatal("fixture setup: latest save should be active")
+	}
+	tt := ui.NewTester(a.View, 1280, 850)
+	if !tt.HasText("迷你主机") {
+		t.Fatal("title bar switcher should show the active connection")
+	}
+	// 点开下拉并选择另一个连接。
+	click(t, tt, "迷你主机")
+	tt.Frame()
+	click(t, tt, "测试网关")
+	await(t, a, queue)
+	if a.profiles.ActiveID != localID {
+		t.Fatalf("switcher did not change the active connection: %s", a.profiles.ActiveID)
+	}
+	if a.connSelect != "测试网关" || a.page != "overview" {
+		t.Fatalf("switch state wrong: %q page=%s", a.connSelect, a.page)
+	}
+	await(t, a, queue)
+	if !a.loaded {
+		t.Fatal("overview should reload for the newly selected gateway")
+	}
+}
