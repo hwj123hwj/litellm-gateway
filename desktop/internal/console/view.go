@@ -16,8 +16,9 @@ var pages = []struct{ ID, Title, Subtitle string }{
 	{"overview", "运行概览", "网关流量、模型与上游健康状态"},
 	{"models", "模型与路由", "配置模型能力和 Provider 回退顺序"},
 	{"providers", "Provider", "管理上游连接、探测与熔断器"},
+	{"channels", "账号渠道", "登录上游账号、查看授权状态"},
 	{"logs", "请求日志", "查看请求结果和每次上游尝试"},
-	{"skills", "技能", "管理全局与项目技能的安装清单"},
+	{"skills", "技能", "搜索、启用并同步技能到全局与项目目录"},
 	{"memory", "记忆", "确认、停用和管理助理记忆"},
 	{"assistant", "助理", "与网关助理对话，实时查看回复和工具状态"},
 	{"settings", "设置", "客户端模型同步、助理人设与反馈"},
@@ -68,12 +69,12 @@ func (a *App) View(c *ui.Context) {
 				current := a.page
 				sidebar := ui.Sidebar(c, &current, func() {
 					ui.SidebarSection(c, "控制台", nil, func() {
-						for _, p := range pages[:4] {
+						for _, p := range pages[:5] {
 							ui.SidebarItem(c, p.ID, nil, p.Title)
 						}
 					})
 					ui.SidebarSection(c, "个人工作区", nil, func() {
-						for _, p := range pages[4:8] {
+						for _, p := range pages[5:9] {
 							ui.SidebarItem(c, p.ID, nil, p.Title)
 						}
 					})
@@ -139,6 +140,8 @@ func (a *App) View(c *ui.Context) {
 					a.overviewView(c)
 				case "models":
 					a.modelsView(c)
+				case "channels":
+					a.channelsView(c)
 				case "providers":
 					a.providersView(c)
 				case "logs":
@@ -157,6 +160,7 @@ func (a *App) View(c *ui.Context) {
 	})
 	a.editor(c)
 	a.browserModal(c)
+	a.modelPickerModal(c)
 	if ui.AlertDialog(c, &a.deleteOpen, "确认移除？", a.editorTitle, "取消", "移除") == 1 && a.deleteAction != nil {
 		action := a.deleteAction
 		a.deleteAction = nil
@@ -529,17 +533,28 @@ func (a *App) overviewView(c *ui.Context) {
 	}).Grow(1)
 }
 func (a *App) modelsView(c *ui.Context) {
-	ui.TextInput(c, &a.modelFilter).Placeholder("搜索模型或 Provider").Label("搜索模型")
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.TextInput(c, &a.modelFilter).Placeholder("搜索模型或 Provider").Label("搜索模型").Grow(1)
+		if ui.Select(c, &a.modelCategory, modelCategories).Label("能力分类").Changed() {
+			a.listViews.modelList = ui.ListState{}
+		}
+	})
 	filtered, changed := a.listViews.models.apply(a.models, a.modelFilter, modelSearchText)
 	if changed {
 		a.listViews.modelList = ui.ListState{}
 	}
-	if filtered.Len() == 0 {
+	visible := []Model{}
+	for i := 0; i < filtered.Len(); i++ {
+		if m := filtered.At(i); modelInCategory(m, a.modelCategory) {
+			visible = append(visible, m)
+		}
+	}
+	if len(visible) == 0 {
 		empty(c, "没有匹配的模型")
 		return
 	}
-	ui.List(c, &a.listViews.modelList, filtered.Len(), func(i int) {
-		m := filtered.At(i)
+	ui.List(c, &a.listViews.modelList, len(visible), func(i int) {
+		m := visible[i]
 		ui.Column(c.Key(m.Name)).Children(func() {
 			row(c, func() {
 				ui.Row(c).Gap(12).Children(func() {

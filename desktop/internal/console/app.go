@@ -26,6 +26,13 @@ type App struct {
 	loaded                                                                bool
 	dashboard                                                             Dashboard
 	providers                                                             []Provider
+	channels                                                              []AccountChannel
+	channelLogin                                                          *ChannelLogin
+	channelClient                                                         *connection.Client
+	channelList                                                           ui.ListState
+	channelSetup                                                          string
+	OpenLoginURL                                                          func(string) error
+	CopyText                                                              func(string)
 	models                                                                []Model
 	routes                                                                []Route
 	logs                                                                  []Log
@@ -33,11 +40,23 @@ type App struct {
 	logSelected                                                           int
 	table                                                                 ui.ListState
 	listViews                                                             listViewState
-	modelFilter                                                           string
+	modelFilter, modelCategory                                            string
 	skills                                                                Skills
 	project, loadedProject, targets                                       string
 	skillSelection                                                        map[string]bool
 	skillDirty                                                            bool
+	skillFilter, skillTag                                                 string
+	skillScopeOpen                                                        bool
+	skillExpanded                                                         map[string]bool
+	skillSource                                                           string
+	market                                                                MarketPage
+	marketQuery, marketSort                                               string
+	marketPage                                                            int
+	marketInstalled                                                       []MarketInstalled
+	marketExpanded                                                        map[string]bool
+	modelPickerOpen                                                       bool
+	modelPickerFilter                                                     string
+	modelPickerList                                                       ui.ListState
 	memories                                                              []Memory
 	memoryFilter                                                          string
 	memoryScope, memoryKey, memoryText                                    string
@@ -66,7 +85,10 @@ type App struct {
 
 func New(store *connection.Store) *App {
 	a := &App{store: store, profiles: store.State(), page: "connections", logLimit: "50", logSelected: -1,
-		memoryScope: "global", memoryFilter: "all", skillSelection: map[string]bool{}, configs: map[string]ClientConfig{}, configSelection: map[string]map[string]bool{}}
+		memoryScope: "global", memoryFilter: "all", skillSelection: map[string]bool{}, skillTag: skillsTagAll,
+		modelCategory: modelCategoryAll,
+		skillExpanded: map[string]bool{}, skillSource: skillSourceRepo, marketSort: "推荐", marketPage: 1,
+		marketExpanded: map[string]bool{}, configs: map[string]ClientConfig{}, configSelection: map[string]map[string]bool{}}
 	if a.profiles.ActiveID != "" {
 		a.page = "overview"
 	}
@@ -81,6 +103,7 @@ func (a *App) Start() {
 }
 func (a *App) ShowConnections() { a.navigate("connections") }
 func (a *App) stop() {
+	a.cancelChannelSession()
 	a.sequence++
 	if a.cancel != nil {
 		a.cancel()
@@ -170,6 +193,7 @@ func (a *App) launch(label string, timeout time.Duration, task func(context.Cont
 }
 func (a *App) reload() {
 	page, project, filter, limit := a.page, a.loadedProject, a.memoryFilter, a.logLimit
+	source, marketQuery, marketSort, marketPage := a.skillSource, a.marketQuery, a.marketSort, a.marketPage
 	a.work("正在读取", 35*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
 		switch page {
 		case "overview":
@@ -188,6 +212,12 @@ func (a *App) reload() {
 			}
 			err := c.JSON(ctx, "GET", "/routes", nil, &r)
 			return func() { a.models = m.Models; a.routes = r.Routes; a.loaded = true }, err
+		case "channels":
+			var d struct {
+				Channels []AccountChannel `json:"channels"`
+			}
+			err := c.JSON(ctx, "GET", "/channels", nil, &d)
+			return func() { a.channels = orderChannels(d.Channels); a.loaded = true }, err
 		case "providers":
 			var d struct {
 				Providers []Provider `json:"providers"`
@@ -201,6 +231,28 @@ func (a *App) reload() {
 			err := c.JSON(ctx, "GET", "/logs?limit="+url.QueryEscape(limit), nil, &d)
 			return func() { a.logs = d.Logs; a.logSelected = -1; a.loaded = true }, err
 		case "skills":
+			if source == skillSourceMarket {
+				var browse MarketPage
+				endpoint := fmt.Sprintf("/skills/market/browse?q=%s&sort=%s&page=%d",
+					url.QueryEscape(marketQuery), url.QueryEscape(marketSortParam(marketSort)), marketPage)
+				err := c.JSON(ctx, "GET", endpoint, nil, &browse)
+				if err == nil && browse.Error != "" {
+					err = errors.New(browse.Error)
+				}
+				var local struct {
+					Installed []MarketInstalled `json:"installed"`
+				}
+				if err == nil {
+					if err2 := c.JSON(ctx, "GET", "/skills/market/installed", nil, &local); err2 != nil {
+						err = err2
+					}
+				}
+				return func() {
+					a.market = browse
+					a.marketInstalled = local.Installed
+					a.loaded = true
+				}, err
+			}
 			var d Skills
 			err := c.JSON(ctx, "GET", "/skills"+skillsQuery(project), nil, &d)
 			if err == nil && d.Error != "" {
@@ -377,6 +429,9 @@ func (a *App) resetHost() {
 	a.models = nil
 	a.routes = nil
 	a.providers = nil
+	a.channels = nil
+	a.channelSetup = ""
+	a.channelList = ui.ListState{}
 	a.logs = nil
 	a.memories = nil
 	a.skills = Skills{}
@@ -385,6 +440,19 @@ func (a *App) resetHost() {
 	a.project = ""
 	a.targets = ""
 	a.skillSelection = map[string]bool{}
+	a.skillFilter, a.skillTag = "", skillsTagAll
+	a.skillScopeOpen = false
+	a.skillExpanded = map[string]bool{}
+	a.skillSource = skillSourceRepo
+	a.market = MarketPage{}
+	a.marketQuery, a.marketSort = "", "推荐"
+	a.marketPage = 1
+	a.marketInstalled = nil
+	a.marketExpanded = map[string]bool{}
+	a.modelPickerOpen = false
+	a.modelPickerFilter = ""
+	a.modelPickerList = ui.ListState{}
+	a.modelCategory = modelCategoryAll
 	a.prompt = Prompt{}
 	a.promptDraft = ""
 	a.configs = map[string]ClientConfig{}
@@ -410,6 +478,49 @@ func skillsQuery(project string) string {
 		return ""
 	}
 	return "?project=" + url.QueryEscape(project)
+}
+
+// marketSortParam 把市场排序选项的中文标签映射到商城 API 的 sort 值。
+func marketSortParam(label string) string {
+	switch label {
+	case "最多安装":
+		return "installs"
+	case "名称":
+		return "name"
+	default:
+		return "featured"
+	}
+}
+
+// marketInstalledByName 按商城技能目录名查本机安装记录。
+func (a *App) marketInstalledByName(name string) (MarketInstalled, bool) {
+	for _, m := range a.marketInstalled {
+		if m.Name == name {
+			return m, true
+		}
+	}
+	return MarketInstalled{}, false
+}
+
+// filteredChatModels 按搜索词筛助理模型：前缀匹配优先、其后包含，
+// 均不分大小写；无过滤词时返回含“网关默认”的全量目录。
+func (a *App) filteredChatModels() []string {
+	all := append([]string{chatDefaultOption}, a.chatModels...)
+	q := strings.ToLower(strings.TrimSpace(a.modelPickerFilter))
+	if q == "" {
+		return all
+	}
+	var starts, contains []string
+	for _, m := range all {
+		l := strings.ToLower(m)
+		switch {
+		case strings.HasPrefix(l, q):
+			starts = append(starts, m)
+		case strings.Contains(l, q):
+			contains = append(contains, m)
+		}
+	}
+	return append(starts, contains...)
 }
 func split(value string) []string {
 	out := []string{}

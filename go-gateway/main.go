@@ -104,7 +104,11 @@ func main() {
 		FailureThreshold: cfg.CircuitFailureThreshold,
 		RecoveryTimeout:  time.Duration(cfg.CircuitRecoverySeconds) * time.Second,
 		SuccessThreshold: cfg.CircuitSuccessThreshold,
+		RateLimitInitial: time.Duration(cfg.RateLimitInitialSeconds) * time.Second,
+		RateLimitMax:     time.Duration(cfg.RateLimitMaxSeconds) * time.Second,
 	})
+
+	router.SetRoutingPolicy(provider.RoutingPolicy{FirstOutputTimeout: time.Duration(cfg.FirstOutputSeconds) * time.Second, ReasoningFirstOutputTimeout: time.Duration(cfg.ReasoningFirstOutputSeconds) * time.Second, StreamIdleTimeout: time.Duration(cfg.StreamIdleSeconds) * time.Second, AttemptTimeout: time.Duration(cfg.AttemptSeconds) * time.Second, FallbackWaitBudget: time.Duration(cfg.FallbackWaitSeconds) * time.Second})
 
 	// 账号渠道（第二类）：交互式登录取得凭据的渠道。必须先于 providers.yaml
 	// 装载注册工厂，因为 type: channel 的条目在装载时就要构造 provider 实例。
@@ -196,8 +200,10 @@ func main() {
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
 	skillsHandler := handlers.NewSkillsHandler(skillsRepoPath(), logger)
+	skillsMarketHandler := handlers.NewSkillsMarketHandler(skillsMarketSkillsDir(), os.Getenv("SKILLS_MARKET_BASE_URL"), skillsMarketEnabled(), logger)
 	fsHandler := handlers.NewFSHandler()
 	channelAdminHandler := handlers.NewChannelAdminHandler(channelRegistry, logger)
+	channelAdminHandler.SetRouter(router)
 
 	// 常驻助理（EasyAgent SDK）：LLM 调用回环走网关自身，吃同一套路由与指标。
 	var assistantHandler *handlers.AssistantHandler
@@ -211,14 +217,15 @@ func main() {
 		if apiKey == "" {
 			apiKey = cfg.MasterKey
 		}
-		// 聊天模型清单：router 里具备文本能力的模型（排除 embedding/ASR）。
+		// 聊天模型清单：具备文本能力、非单一用途模型（向量/语音转写）、
+		// 且当前可用（渠道已登录、provider 已启用）。配置加载会给所有
+		// 模型补 text 能力（聊天路由需要），因此 embedding 与
+		// audio_transcription 必须显式排除；未登录渠道的模型选了也无法
+		// 对话，一并排除。
 		chatModels := []string{}
-		for _, info := range router.ListModelInfos() {
-			for _, cap := range info.Capabilities {
-				if cap == "text" {
-					chatModels = append(chatModels, info.ID)
-					break
-				}
+		for _, id := range assistantChatModelIDs(router.ListModelInfos()) {
+			if router.ModelUsable(id) {
+				chatModels = append(chatModels, id)
 			}
 		}
 		resident, err := assistant.New(assistant.Config{
@@ -308,11 +315,17 @@ func main() {
 		admin.GET("/skills/:id", skillsHandler.HandleDetail)
 		admin.PUT("/skills/config", skillsHandler.HandleUpdateConfig)
 		admin.POST("/skills/sync", skillsHandler.HandleSync)
+		admin.GET("/skills/market/browse", skillsMarketHandler.HandleBrowse)
+		admin.GET("/skills/market/sections", skillsMarketHandler.HandleSections)
+		admin.GET("/skills/market/installed", skillsMarketHandler.HandleInstalled)
+		admin.POST("/skills/market/install", skillsMarketHandler.HandleInstall)
+		admin.POST("/skills/market/uninstall", skillsMarketHandler.HandleUninstall)
 		admin.GET("/fs/dirs", fsHandler.HandleDirs)
 		admin.GET("/channels", channelAdminHandler.HandleList)
 		admin.GET("/channels/:channel", channelAdminHandler.HandleStatus)
 		admin.POST("/channels/:channel/login", channelAdminHandler.HandleLoginStart)
 		admin.GET("/channels/:channel/login/:id", channelAdminHandler.HandleLoginPoll)
+		admin.DELETE("/channels/:channel/login/:id", channelAdminHandler.HandleLoginCancel)
 		admin.DELETE("/channels/:channel", channelAdminHandler.HandleLogout)
 		admin.DELETE("/channels/:channel/accounts/:index", channelAdminHandler.HandleRemoveAccount)
 	}
@@ -347,6 +360,8 @@ func runCommand(args []string) error {
 		}
 		_, err := fmt.Fprintln(os.Stdout, version)
 		return err
+	case "benchmark":
+		return benchmarkModels(args[1:])
 	case "setup":
 		if len(args) < 2 || args[1] != "pi" {
 			return fmt.Errorf("usage: llm-gateway setup pi [--endpoint URL] [--dry-run]")
@@ -437,6 +452,46 @@ func defaultDshHome() string {
 // 时技能面板保持未配置状态（configured=false），不影响网关其他功能。
 func skillsRepoPath() string {
 	return os.Getenv("SKILLS_REPO_PATH")
+}
+
+// assistantChatModelIDs 从模型目录里选出助理聊天可用的模型：具备 text
+// 能力、且不含单一用途能力（embedding 向量化、audio_transcription 语音
+// 转写）。这些模型无法用于对话，不应出现在助理的可选清单里。
+func assistantChatModelIDs(infos []provider.ModelInfo) []string {
+	ids := []string{}
+	for _, info := range infos {
+		hasText, singlePurpose := false, false
+		for _, capability := range info.Capabilities {
+			switch capability {
+			case "text":
+				hasText = true
+			case "embedding", "audio_transcription":
+				singlePurpose = true
+			}
+		}
+		if hasText && !singlePurpose {
+			ids = append(ids, info.ID)
+		}
+	}
+	return ids
+}
+
+// skillsMarketEnabled 默认启用技能市场面板；SKILLS_MARKET_ENABLED=false 关闭。
+func skillsMarketEnabled() bool {
+	return os.Getenv("SKILLS_MARKET_ENABLED") != "false"
+}
+
+// skillsMarketSkillsDir 返回市场技能安装目录，默认 ~/.agents/skills，与
+// EasyAgent 同源：两边共用安装清单标记，互相识别对方安装的技能。
+func skillsMarketSkillsDir() string {
+	if dir := os.Getenv("SKILLS_MARKET_SKILLS_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".agents", "skills")
 }
 
 func defaultPiHome() string {
