@@ -119,7 +119,7 @@ func (a *App) skillsView(c *ui.Context) {
 			ui.Textf(c, "%d 个已选", len(sortedSelection(a.skillSelection)))
 		}
 	})
-	if a.unloadedOrEmpty(c, "") {
+	if a.notLoaded(c) {
 		return
 	}
 	if a.skillSource == skillSourceMarket {
@@ -557,7 +557,7 @@ func (a *App) memoryView(c *ui.Context) {
 			})
 		})
 	}).Grow(1).Children(func() {
-		if a.unloadedOrEmpty(c, "没有此状态的记忆") {
+		if a.unloadedOrEmpty(c, len(a.memories), "没有此状态的记忆") {
 			return
 		}
 	})

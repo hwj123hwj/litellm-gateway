@@ -10,8 +10,7 @@ import (
 )
 
 func (a *App) channelsView(c *ui.Context) {
-	if len(a.channels) == 0 {
-		a.unloadedOrEmpty(c, "网关尚未提供账号渠道，请确认已更新网关。")
+	if a.unloadedOrEmpty(c, len(a.channels), "网关尚未提供账号渠道，请确认已更新网关。") {
 		return
 	}
 	muted(c, "先登录账号，再验证模型调用。无需额外应用密钥的渠道排在前面。")

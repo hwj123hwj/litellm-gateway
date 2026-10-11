@@ -62,12 +62,27 @@ func (c *Client) request(ctx context.Context, method, endpoint string, body any)
 		return nil, errors.New("无法连接网关，请检查地址、网络和证书")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		resp.Body.Close()
+		defer resp.Body.Close()
+		detail := ""
+		if b, err := io.ReadAll(io.LimitReader(resp.Body, 4096)); err == nil {
+			var payload struct {
+				Error string `json:"error"`
+			}
+			if json.Unmarshal(b, &payload) == nil && strings.TrimSpace(payload.Error) != "" {
+				detail = strings.TrimSpace(payload.Error)
+			}
+		}
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			if detail != "" {
+				return nil, fmt.Errorf("%s（HTTP %d）", detail, resp.StatusCode)
+			}
 			return nil, errors.New("管理 Token 无效或没有访问权限")
 		}
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			return nil, errors.New("网关返回重定向，请使用最终网关地址")
+		}
+		if detail != "" {
+			return nil, fmt.Errorf("%s（HTTP %d）", detail, resp.StatusCode)
 		}
 		return nil, fmt.Errorf("网关请求失败（HTTP %d）", resp.StatusCode)
 	}

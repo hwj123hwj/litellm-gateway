@@ -213,16 +213,26 @@ func empty(c *ui.Context, text string) {
 	ui.Column(c).Grow(1).Center().Children(func() { ui.Text(c, text).FontSize(14).TextColor(c.Theme().TextMuted) })
 }
 
-// unloadedOrEmpty 处理页面数据区的空态：载入失败给重试提示并返回 true
-// （避免把加载失败误读成“没有数据”），正常载入但无数据时展示 emptyText
-// 并返回 false。
-func (a *App) unloadedOrEmpty(c *ui.Context, emptyText string) bool {
+// unloadedOrEmpty 处理页面数据区的空态：载入失败给重试提示并返回 true；
+// 正常载入但 count == 0 时展示 emptyText 并返回 true；有数据返回 false。
+// count 必须传真实数据量，否则有数据时也会误渲染空文案。
+func (a *App) unloadedOrEmpty(c *ui.Context, count int, emptyText string) bool {
 	if !a.loaded {
 		empty(c, "数据未加载，点击右上角“刷新”重试。")
 		return true
 	}
-	if emptyText != "" {
+	if count == 0 {
 		empty(c, emptyText)
+		return true
+	}
+	return false
+}
+
+// notLoaded 仅处理载入失败的情况（数据区自身的空态由页面自行处理）。
+func (a *App) notLoaded(c *ui.Context) bool {
+	if !a.loaded {
+		empty(c, "数据未加载，点击右上角“刷新”重试。")
+		return true
 	}
 	return false
 }
@@ -497,7 +507,7 @@ func status(c *ui.Context, value string) {
 	chip(c, text, statusColor(c, value))
 }
 func (a *App) overviewView(c *ui.Context) {
-	if a.unloadedOrEmpty(c, "") {
+	if a.notLoaded(c) {
 		return
 	}
 	s := a.dashboard.Summary
@@ -604,7 +614,7 @@ func (a *App) modelsView(c *ui.Context) {
 			visible = append(visible, m)
 		}
 	}
-	if a.unloadedOrEmpty(c, "没有匹配的模型") {
+	if a.unloadedOrEmpty(c, len(visible), "没有匹配的模型") {
 		return
 	}
 	ui.List(c, &a.listViews.modelList, len(visible), func(i int) {
@@ -645,7 +655,7 @@ func (a *App) modelsView(c *ui.Context) {
 	}).Grow(1)
 }
 func (a *App) providersView(c *ui.Context) {
-	if a.unloadedOrEmpty(c, "没有 Provider") {
+	if a.unloadedOrEmpty(c, len(a.providers), "没有 Provider") {
 		return
 	}
 	ui.List(c, nil, len(a.providers), func(i int) {
@@ -691,7 +701,7 @@ func (a *App) logsView(c *ui.Context) {
 		a.logSelected = -1
 		a.table = ui.ListState{}
 	}
-	if a.unloadedOrEmpty(c, "暂无匹配的请求日志") {
+	if a.unloadedOrEmpty(c, filtered.Len(), "暂无匹配的请求日志") {
 		return
 	}
 	a.table.Selected = &a.logSelected
