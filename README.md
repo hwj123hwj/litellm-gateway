@@ -1,6 +1,16 @@
 # EasyGateway
 
-轻量级个人 LLM API 网关，用 Go 编写（前身 litellm-gateway / LLM Gateway）。支持智谱 GLM、GitHub Copilot、ChatGPT 等提供商，支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套对外接口，并支持自动 fallback。
+个人 AI 基础设施网关，用 Go 编写（前身 litellm-gateway / LLM Gateway）：把所有 AI 应用接到一个统一入口，按模型能力调度多个提供商，并提供原生桌面管理端、账号渠道、技能市场、记忆与常驻助理。对外支持 OpenAI Chat Completions、Anthropic Messages、OpenAI Responses API 三套协议，自动 fallback 与熔断恢复。
+
+## 核心功能
+
+- **统一接入**：一个端点、一套密钥接入 Claude Code、Codex CLI、Pi 等所有 AI 应用；三协议兼容，支持流式、工具调用与多模态。
+- **能力调度**：按 text/vision 等能力选模型，多级模型链自动 fallback，健康检查与熔断恢复，请求级追踪与聚合指标。
+- **账号渠道**：桌面端登录上游账号（OAuth/授权码），跨 AI 客户端复用已有订阅额度，支持自动续期与熔断联动。
+- **技能中心**：custom-skills 仓库清单同步（符号链接落盘），远端技能市场浏览、搜索、安装与卸载，全局与项目两级范围。
+- **记忆与助理**：跨客户端个人记忆层（candidate/active 治理、密钥守门）与流式常驻助理。
+- **归档与导出**：可控的完整对话归档（脱敏、限长、保留期清理），JSONL 增量导出供知识库消费。
+- **原生桌面端**：MyGo Go 原生控件的管理端，管理本机与远程网关，无 WebView、无 Node.js。
 
 ## 一键安装
 
@@ -46,7 +56,7 @@ go build -o gateway . && ./gateway
 
 ### 桌面管理端
 
-`desktop/` 使用 MyGo 的 Go 原生控件实现桌面管理界面，提供模型、路由、Provider、日志、技能、记忆与助理管理，可保存并切换本机和远程网关连接。桌面端无需 React、WebView 或 Node.js 构建。它管理已有网关，不替换正在运行的服务。构建、连接与安装说明见 [desktop/README.md](desktop/README.md)。
+`desktop/` 使用 MyGo 的 Go 原生控件实现桌面管理界面，提供模型、路由、Provider、账号渠道、请求日志、技能库与技能市场、记忆和助理管理，可保存并切换本机和远程网关连接。桌面端无需 React、WebView 或 Node.js 构建。它管理已有网关，不替换正在运行的服务。构建、连接与安装说明见 [desktop/README.md](desktop/README.md)。
 
 ### 更新本机 macOS 网关
 
@@ -194,12 +204,15 @@ litellm-gateway/
 ├── go-gateway/              # Go 网关（主项目）
 │   ├── main.go              # 启动入口
 │   ├── internal/
-│   │   ├── config/          # 配置加载
-│   │   ├── provider/        # 提供商实现
-│   │   ├── handlers/        # HTTP 路由处理
+│   │   ├── provider/        # 提供商、能力路由、熔断与探测
+│   │   ├── channel/         # 账号渠道：登录、账号与续期
+│   │   ├── handlers/        # Admin API 与三协议入口
+│   │   ├── skills/          # 技能清单、同步与技能市场面板
+│   │   ├── memory/          # 个人记忆层
+│   │   ├── assistant/       # 常驻助理（EasyAgent SDK）
+│   │   ├── archive/         # 对话归档与增量导出
 │   │   ├── auth/            # Bearer token 认证
-│   │   ├── middleware/      # request ID、日志与指标中间件
-│   │   └── requestmeta/     # 请求关联元数据契约
+│   │   └── middleware/      # request ID、日志与指标中间件
 │   ├── .env.example         # 环境变量模板
 │   ├── Dockerfile
 │   └── README.md            # 完整文档
@@ -237,6 +250,13 @@ litellm-gateway/
 | `CHATGPT_AUTH_FILE` | 否 | ChatGPT/Pi OAuth `auth.json` 路径；默认自动查找两个标准路径 |
 | `ADMIN_TOKEN` | 否 | 原生管理端/Admin API 独立 token；未设置时回退到主 token |
 | `PORT` | 否 | 监听端口（默认 4001） |
+| `SKILLS_REPO_PATH` | 否 | custom-skills 技能仓库路径；未设置时技能库面板显示未配置 |
+| `SKILLS_MARKET_ENABLED` | 否 | 技能市场面板开关（默认开启） |
+| `SKILLS_MARKET_BASE_URL` | 否 | 远端技能商城地址（默认官方站） |
+| `SKILLS_MARKET_SKILLS_DIR` | 否 | 市场技能安装目录（默认 `~/.agents/skills`，与 EasyAgent 共用） |
+| `ASSISTANT_ENABLED` | 否 | 常驻助理开关（默认 false） |
+| `ASSISTANT_MODEL` | 否 | 助理默认模型 |
+| `ASSISTANT_API_KEY` | 否 | 助理 API Key（默认复用 MASTER_KEY） |
 | `ARCHIVE_ENABLED` | 否 | 对话归档总开关（默认 false）；启用后供知识库增量导出 |
 | `ARCHIVE_MAX_BODY_KB` | 否 | 单条归档 body 安全上限（默认 16384 KB） |
 | `ARCHIVE_RETENTION_DAYS` | 否 | 归档保留天数（默认 90） |
