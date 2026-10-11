@@ -50,7 +50,8 @@ type App struct {
 	skillExpanded                                                         map[string]bool
 	skillSource                                                           string
 	market                                                                MarketPage
-	marketQuery, marketSort                                               string
+	marketQuery, marketSort, marketSection                                string
+	marketSections                                                        []MarketSection
 	marketPage                                                            int
 	marketInstalled                                                       []MarketInstalled
 	marketExpanded                                                        map[string]bool
@@ -86,7 +87,7 @@ type App struct {
 func New(store *connection.Store) *App {
 	a := &App{store: store, profiles: store.State(), page: "connections", logLimit: "50", logSelected: -1,
 		memoryScope: "global", memoryFilter: "all", skillSelection: map[string]bool{}, skillTag: skillsTagAll,
-		modelCategory: modelCategoryAll,
+		modelCategory: modelCategoryAll, marketSection: marketSectionAll,
 		skillExpanded: map[string]bool{}, skillSource: skillSourceRepo, marketSort: "推荐", marketPage: 1,
 		marketExpanded: map[string]bool{}, configs: map[string]ClientConfig{}, configSelection: map[string]map[string]bool{}}
 	if a.profiles.ActiveID != "" {
@@ -193,7 +194,7 @@ func (a *App) launch(label string, timeout time.Duration, task func(context.Cont
 }
 func (a *App) reload() {
 	page, project, filter, limit := a.page, a.loadedProject, a.memoryFilter, a.logLimit
-	source, marketQuery, marketSort, marketPage := a.skillSource, a.marketQuery, a.marketSort, a.marketPage
+	source, marketQuery, marketSort, marketSection, marketPage := a.skillSource, a.marketQuery, a.marketSort, a.marketSection, a.marketPage
 	a.work("正在读取", 35*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
 		switch page {
 		case "overview":
@@ -232,9 +233,25 @@ func (a *App) reload() {
 			return func() { a.logs = d.Logs; a.logSelected = -1; a.loaded = true }, err
 		case "skills":
 			if source == skillSourceMarket {
-				var browse MarketPage
+				// 分类列表尽力而为：拉取失败只影响筛选下拉，不影响浏览。
+				var sections struct {
+					Sections []MarketSection `json:"sections"`
+				}
+				if err2 := c.JSON(ctx, "GET", "/skills/market/sections", nil, &sections); err2 != nil {
+					sections.Sections = nil
+				}
+				sectionID := 0
+				for _, s := range sections.Sections {
+					if s.Name == marketSection {
+						sectionID = s.ID
+					}
+				}
 				endpoint := fmt.Sprintf("/skills/market/browse?q=%s&sort=%s&page=%d",
 					url.QueryEscape(marketQuery), url.QueryEscape(marketSortParam(marketSort)), marketPage)
+				if sectionID > 0 {
+					endpoint += fmt.Sprintf("&section=%d", sectionID)
+				}
+				var browse MarketPage
 				err := c.JSON(ctx, "GET", endpoint, nil, &browse)
 				if err == nil && browse.Error != "" {
 					err = errors.New(browse.Error)
@@ -249,6 +266,7 @@ func (a *App) reload() {
 				}
 				return func() {
 					a.market = browse
+					a.marketSections = sections.Sections
 					a.marketInstalled = local.Installed
 					a.loaded = true
 				}, err
@@ -445,7 +463,8 @@ func (a *App) resetHost() {
 	a.skillExpanded = map[string]bool{}
 	a.skillSource = skillSourceRepo
 	a.market = MarketPage{}
-	a.marketQuery, a.marketSort = "", "推荐"
+	a.marketQuery, a.marketSort, a.marketSection = "", "推荐", marketSectionAll
+	a.marketSections = nil
 	a.marketPage = 1
 	a.marketInstalled = nil
 	a.marketExpanded = map[string]bool{}

@@ -123,13 +123,12 @@ func (a *App) View(c *ui.Context) {
 						ui.Button(c, "收起").OnClick(func() { a.notice = "" })
 					})
 				}
-				if a.page != "connections" && !a.loaded {
+				// 载入进行中才整体占位；载入失败时页面工具栏保持可用
+				// （技能页切来源、模型页换分类都能直接自愈），数据区由
+				// 各页的 unloadedOrEmpty 给出明确提示。
+				if a.page != "connections" && !a.loaded && a.busy != "" {
 					ui.Column(c).Grow(1).Center().Children(func() {
-						text := "暂未加载数据，点击刷新重试"
-						if a.busy != "" {
-							text = "正在载入网关数据"
-						}
-						muted(c, text)
+						muted(c, "正在载入网关数据")
 					})
 					return
 				}
@@ -188,6 +187,20 @@ func meta(c *ui.Context, parts ...string) {
 }
 func empty(c *ui.Context, text string) {
 	ui.Column(c).Grow(1).Center().Children(func() { ui.Text(c, text).FontSize(14).TextColor(c.Theme().TextMuted) })
+}
+
+// unloadedOrEmpty 处理页面数据区的空态：载入失败给重试提示并返回 true
+// （避免把加载失败误读成“没有数据”），正常载入但无数据时展示 emptyText
+// 并返回 false。
+func (a *App) unloadedOrEmpty(c *ui.Context, emptyText string) bool {
+	if !a.loaded {
+		empty(c, "数据未加载，点击右上角“刷新”重试。")
+		return true
+	}
+	if emptyText != "" {
+		empty(c, emptyText)
+	}
+	return false
 }
 func (a *App) connectionsView(c *ui.Context) {
 	ui.Row(c).Gap(12).Children(func() {
@@ -460,6 +473,9 @@ func status(c *ui.Context, value string) {
 	chip(c, text, statusColor(c, value))
 }
 func (a *App) overviewView(c *ui.Context) {
+	if a.unloadedOrEmpty(c, "") {
+		return
+	}
 	s := a.dashboard.Summary
 	theme := c.Theme()
 	metrics := []struct{ Title, Value string }{
@@ -549,8 +565,7 @@ func (a *App) modelsView(c *ui.Context) {
 			visible = append(visible, m)
 		}
 	}
-	if len(visible) == 0 {
-		empty(c, "没有匹配的模型")
+	if a.unloadedOrEmpty(c, "没有匹配的模型") {
 		return
 	}
 	ui.List(c, &a.listViews.modelList, len(visible), func(i int) {
@@ -591,8 +606,7 @@ func (a *App) modelsView(c *ui.Context) {
 	}).Grow(1)
 }
 func (a *App) providersView(c *ui.Context) {
-	if len(a.providers) == 0 {
-		empty(c, "没有 Provider")
+	if a.unloadedOrEmpty(c, "没有 Provider") {
 		return
 	}
 	ui.List(c, nil, len(a.providers), func(i int) {
@@ -638,8 +652,7 @@ func (a *App) logsView(c *ui.Context) {
 		a.logSelected = -1
 		a.table = ui.ListState{}
 	}
-	if filtered.Len() == 0 {
-		empty(c, "暂无匹配的请求日志")
+	if a.unloadedOrEmpty(c, "暂无匹配的请求日志") {
 		return
 	}
 	a.table.Selected = &a.logSelected
