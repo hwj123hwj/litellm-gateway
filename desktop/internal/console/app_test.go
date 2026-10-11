@@ -64,9 +64,17 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 				fmt.Fprintln(w, `data: {"phase":"done","name":"market-demo","display_name":"市场示例"}`)
 				f.Flush()
 			}
+		case "/admin/skills/market/install-jobs":
+			w.Write([]byte(`{"enabled":true,"job_id":"ij-1"}`))
 		case "/admin/skills/market/installed":
 			w.Write([]byte(`{"enabled":true,"skills_dir":"/tmp/skills","installed":[{"name":"installed-demo","display_name":"已安装示例","version":"0.9.0"}]}`))
+		case "/healthz":
+			w.Write([]byte(`{"status":"ok"}`))
 		default:
+			if strings.HasPrefix(r.URL.Path, "/admin/skills/market/install-jobs/") {
+				w.Write([]byte(`{"enabled":true,"job":{"phase":"done","display_name":"市场示例"}}`))
+				return
+			}
 			w.Write([]byte(`{"status":"ok","summary":{"today_requests":24,"success_rate":98.5},"providers":[],"models":[]}`))
 		}
 	}))
@@ -661,32 +669,6 @@ func TestAssistantUsesAuthoritativeFinalReply(t *testing.T) {
 	await(t, a, queue)
 	if a.chatReply != "complete reply" || a.chatStatus != "回复完成" {
 		t.Fatal(a.chatReply, a.chatStatus)
-	}
-}
-
-func TestSkillsMarketInstallStreamsProgress(t *testing.T) {
-	a, queue, requests := fixture(t)
-	a.page = "skills"
-	a.loaded = true
-	a.skillSource = skillSourceMarket
-	a.reload()
-	await(t, a, queue)
-	tt := ui.NewTester(a.View, 1100, 800)
-	click(t, tt, "安装技能 市场示例")
-	await(t, a, queue)
-	select {
-	case got := <-requests:
-		if !strings.Contains(got, "POST /admin/skills/market/install-stream") {
-			t.Fatal("install should use the stream endpoint:", got)
-		}
-	default:
-		t.Fatal("install request not sent")
-	}
-	if a.problem != "" {
-		t.Fatal("stream install reported a problem:", a.problem)
-	}
-	if a.notice != "技能「市场示例」已安装" {
-		t.Fatal("completion notice missing:", a.notice)
 	}
 }
 

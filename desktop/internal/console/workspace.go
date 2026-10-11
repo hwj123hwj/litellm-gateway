@@ -226,50 +226,85 @@ func (a *App) marketRow(c *ui.Context, s MarketSkill) {
 	})
 }
 
-// installMarketSkill 通过 SSE 进度流安装商城技能：阶段与字节进度
-// 实时写进顶部忙碌条，失败与完成按事件收尾。
+// installMarketSkill 提交网关侧后台安装任务并轮询进度：任务归网关所有，
+// 切换连接、甚至关闭桌面端都不影响安装本身；轮询超时只说明“本端不再
+// 等待”，安装仍在后台进行。
 func (a *App) installMarketSkill(id int, name string) {
-	a.work("正在安装技能", 120*time.Second, func(ctx context.Context, client *connection.Client) (func(), error) {
+	dispatch := a.dispatch
+	a.work("正在安装技能", 10*time.Minute, func(ctx context.Context, client *connection.Client) (func(), error) {
 		seq := a.sequence
-		var streamErr error
-		err := client.Stream(ctx, "/skills/market/install-stream", map[string]int{"id": id}, func(data []byte) bool {
-			var e MarketInstallEvent
-			if json.Unmarshal(data, &e) != nil {
-				return true
+		var start struct {
+			JobID string `json:"job_id"`
+			Error string `json:"error"`
+		}
+		if err := client.JSON(ctx, "POST", "/skills/market/install-jobs", map[string]int{"id": id}, &start); err != nil {
+			return nil, err
+		}
+		if start.Error != "" {
+			return nil, errors.New(start.Error)
+		}
+		if start.JobID == "" {
+			return nil, errors.New("网关未返回安装任务号")
+		}
+
+		for {
+			var job struct {
+				Job struct {
+					Phase      string `json:"phase"`
+					BytesDone  int64  `json:"bytes_done"`
+					BytesTotal int64  `json:"bytes_total"`
+					Error      string `json:"error"`
+				} `json:"job"`
+				Error string `json:"error"`
 			}
-			dispatch := a.dispatch
-			dispatch(func() {
-				if seq != a.sequence {
-					return
+			if err := client.JSON(ctx, "GET", "/skills/market/install-jobs/"+start.JobID, nil, &job); err != nil {
+				return nil, err
+			}
+			if job.Error != "" {
+				return nil, errors.New(job.Error)
+			}
+			// 进度文案在任务协程里算好成副本，dispatch 闭包只写 UI 状态，
+			// 不与工作协程共享可变变量。
+			busyText := ""
+			switch job.Job.Phase {
+			case "downloading":
+				if job.Job.BytesTotal > 0 {
+					busyText = fmt.Sprintf("正在下载技能 %s / %s", shortNumber(job.Job.BytesDone), shortNumber(job.Job.BytesTotal))
+				} else {
+					busyText = "正在下载技能 " + shortNumber(job.Job.BytesDone)
 				}
-				switch e.Phase {
-				case "resolving":
-					a.busy = "正在获取技能信息"
-				case "downloading":
-					if e.BytesTotal > 0 {
-						a.busy = fmt.Sprintf("正在下载技能 %s / %s", shortNumber(e.BytesDone), shortNumber(e.BytesTotal))
-					} else {
-						a.busy = "正在下载技能 " + shortNumber(e.BytesDone)
+			case "verifying":
+				busyText = "正在校验安装包"
+			case "extracting":
+				busyText = "正在解包安装"
+			}
+			if busyText != "" {
+				busyTextCopy := busyText
+				dispatch(func() {
+					if seq == a.sequence {
+						a.busy = busyTextCopy
 					}
-				case "verifying":
-					a.busy = "正在校验安装包"
-				case "extracting":
-					a.busy = "正在解包安装"
-				case "failed":
-					streamErr = errors.New(e.Error)
-				}
-			})
-			return e.Phase != "failed" && e.Phase != "done"
-		})
-		if err == nil && streamErr != nil {
-			err = streamErr
+				})
+			}
+			if job.Job.Phase == "failed" {
+				return nil, errors.New(job.Job.Error)
+			}
+			if job.Job.Phase == "done" {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				// 本端停止等待；网关后台任务继续执行。
+				return func() {
+					a.notice = "安装仍在后台进行，稍后刷新技能列表查看结果"
+				}, nil
+			case <-time.After(time.Second):
+			}
 		}
 		return func() {
-			if err == nil {
-				a.reload()
-				a.notice = "技能「" + name + "」已安装"
-			}
-		}, err
+			a.reload()
+			a.notice = "技能「" + name + "」已安装"
+		}, nil
 	})
 }
 

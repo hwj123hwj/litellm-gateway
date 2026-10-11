@@ -148,7 +148,11 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 | `/admin/skills/market/browse` | GET | 技能市场目录：`q`/`category`/`sort`/`page`/`section`（默认启用，`SKILLS_MARKET_ENABLED=false` 时返回 `enabled:false`） |
 | `/admin/skills/market/sections` | GET | 技能市场主题分组 |
 | `/admin/skills/market/installed` | GET | 已安装的市场技能（含 EasyAgent 安装的，按安装清单识别） |
-| `/admin/skills/market/install` | POST | 安装市场技能 `{"id":<技能 ID>}`：下载、SHA-256 校验、解包到安装目录 |
+| `/admin/skills/market/install` | POST | 安装市场技能 `{"id":<技能 ID>}`（同步等待完成）：下载、SHA-256 校验、解包到安装目录 |
+| `/admin/skills/market/install-stream` | POST | 同上，以 SSE 逐事件推送阶段与字节进度 |
+| `/admin/skills/market/install-jobs` | POST | 提交后台安装任务 `{"id":<技能 ID>}`，立刻返回任务号；安装归网关所有，客户端断开不影响。同一时刻仅允许一个安装任务（并发提交返回 409） |
+| `/admin/skills/market/install-jobs/:id` | GET | 查询安装任务进度（phase / bytes / display_name；任务随网关重启清空） |
+| `/admin/skills/market/install-jobs` | GET | 最近安装任务列表（保留最近 20 条） |
 | `/admin/skills/market/uninstall` | POST | 卸载市场技能 `{"name":"<目录名>"}`（只删带安装清单的目录） |
 
 ### 技能面板（custom-skills 技能市场）

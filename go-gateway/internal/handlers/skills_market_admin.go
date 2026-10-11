@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hwj123hwj/easyagent/sdk/skillmarket"
@@ -24,17 +25,22 @@ type SkillsMarketHandler struct {
 }
 
 // NewSkillsMarketHandler 创建技能市场 handler；enabled=false 或缺少安装
-// 目录时返回未启用状态。
+// 目录时返回未启用状态。市场 HTTP 客户端的超时放宽到 10 分钟：安装包
+// 下载（最大 200MB）在慢速链路上需要远超默认 15 秒的时间。
 func NewSkillsMarketHandler(skillsDir, baseURL string, enabled bool, logger *log.Logger) *SkillsMarketHandler {
 	if !enabled || skillsDir == "" {
 		return &SkillsMarketHandler{logger: logger}
 	}
-	opts := []skillmarket.Option{}
+	opts := []skillmarket.Option{skillmarket.WithHTTPClient(&http.Client{Timeout: 10 * time.Minute})}
 	if baseURL != "" {
 		opts = append(opts, skillmarket.WithBaseURL(baseURL))
 	}
 	return &SkillsMarketHandler{client: skillmarket.NewClient(skillsDir, opts...), logger: logger}
 }
+
+// Client 暴露市场客户端给安装任务 handler，共用同一实例以保证
+// 安装串行化与进度回调一致。
+func (h *SkillsMarketHandler) Client() *skillmarket.Client { return h.client }
 
 // HandleBrowse GET /admin/skills/market/browse?q=&category=&sort=&page=&section=
 func (h *SkillsMarketHandler) HandleBrowse(c *gin.Context) {
