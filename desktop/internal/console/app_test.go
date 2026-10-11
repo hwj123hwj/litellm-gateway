@@ -790,3 +790,27 @@ func TestConnectionSwitcherInTitleBar(t *testing.T) {
 		t.Fatal("overview should reload for the newly selected gateway")
 	}
 }
+
+// 有数据时不得渲染“没有匹配的模型”（曾因空态判定缺陷在列表上方误渲染）。
+func TestModelsPageNoFalseEmptyState(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "models"
+	a.loaded = true
+	a.models = []Model{
+		{Name: "chat", Provider: "alpha", Status: "online", Capabilities: []string{"text"}},
+		{Name: "BAAI/bge-m3", Provider: "alpha", Status: "online", Capabilities: []string{"embedding", "text"}},
+	}
+	tt := ui.NewTester(a.View, 1280, 850)
+	if tt.HasText("没有匹配的模型") {
+		t.Fatalf("models present but empty state rendered: %v", tt.Texts())
+	}
+	if !tt.HasText("chat") {
+		t.Fatal("models missing")
+	}
+	// 数据为空（无匹配）时空态保留。
+	a.modelCategory = "视频"
+	tt.Frame()
+	if !tt.HasText("没有匹配的模型") {
+		t.Fatal("empty state missing for zero matches")
+	}
+}

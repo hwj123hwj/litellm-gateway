@@ -13,6 +13,27 @@ import (
 	"time"
 )
 
+func TestJSONSurfacesGatewayErrorBody(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"助理未启用（ASSISTANT_ENABLED=true + ASSISTANT_MODEL）"}`))
+	}))
+	defer upstream.Close()
+	store, err := New(filepath.Join(t.TempDir(), "connections.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 直接构造 Client：Save 会先做连通性验证，503 服务过不了那一步。
+	client := &Client{profile: storedProfile{Name: "mini", URL: upstream.URL, Token: "t"}, http: http.DefaultClient}
+	_ = store
+	var out map[string]any
+	err = client.JSON(context.Background(), "GET", "/admin/assistant/models", nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "助理未启用") || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("gateway error body should surface: %v", err)
+	}
+}
+
 func profile(t *testing.T, s *Store, name, addr, token string) State {
 	t.Helper()
 	state, err := s.Save(context.Background(), Input{Name: name, URL: addr, Token: token})
