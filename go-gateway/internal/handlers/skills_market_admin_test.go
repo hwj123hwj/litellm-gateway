@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -282,5 +283,93 @@ func TestSkillsMarketInstallStreamRejectsInvalidBody(t *testing.T) {
 	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin/skills/market/install-stream", strings.NewReader(`{"id":0}`)))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("非法 ID 应返回 400: %d", w.Code)
+	}
+}
+
+// TestSkillsMarketInstallJobLifecycle 后台安装任务：提交即返回、进度可查询、
+// 完成落盘；进行中拒绝并发任务。
+func TestSkillsMarketInstallJobLifecycle(t *testing.T) {
+	store := newMarketStore(t, "")
+	defer store.Close()
+	skillsDir := t.TempDir()
+	jobs := NewSkillsInstallJobsHandler(NewSkillsMarketHandler(skillsDir, store.URL, true, log.New(io.Discard, "", 0)).Client(), log.New(io.Discard, "", 0))
+	engine := gin.New()
+	engine.POST("/jobs", jobs.HandleInstallJobStart)
+	engine.GET("/jobs/:id", jobs.HandleInstallJobGet)
+	engine.GET("/jobs", jobs.HandleInstallJobList)
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/jobs", strings.NewReader(`{"id":7}`)))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("提交任务应返回 202: %d %s", w.Code, w.Body.String())
+	}
+	var start struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &start); err != nil || start.JobID == "" {
+		t.Fatalf("任务号缺失: %s", w.Body.String())
+	}
+
+	// 轮询直到完成（上游是本地 httptest，应当秒级完成）。
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		w = httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/jobs/"+start.JobID, nil))
+		var job struct {
+			Job struct {
+				Phase string `json:"phase"`
+				Error string `json:"error"`
+			} `json:"job"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil {
+			t.Fatal(err)
+		}
+		if job.Job.Phase == "done" {
+			break
+		}
+		if job.Job.Phase == "failed" {
+			t.Fatalf("任务失败: %s", job.Job.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("任务超时未完成: %s", w.Body.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "demo-skill", "SKILL.md")); err != nil {
+		t.Fatalf("技能未落盘: %v", err)
+	}
+
+	// 进行中的任务会拒绝并发提交；当前无进行中任务，提交后立即查询到 done 也不影响列表。
+	w = httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/jobs", nil))
+	var list struct {
+		Jobs []struct {
+			JobID string `json:"job_id"`
+			Phase string `json:"phase"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Jobs) != 1 || list.Jobs[0].Phase != "done" {
+		t.Fatalf("任务列表不符: %+v", list)
+	}
+
+	// 未知任务号：带说明的 404。
+	w = httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/jobs/ij-none", nil))
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "重新安装") {
+		t.Fatalf("未知任务应返回 404 与说明: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSkillsMarketInstallJobsDisabled(t *testing.T) {
+	jobs := NewSkillsInstallJobsHandler(nil, log.New(io.Discard, "", 0))
+	engine := gin.New()
+	engine.POST("/jobs", jobs.HandleInstallJobStart)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/jobs", strings.NewReader(`{"id":7}`)))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("未启用应返回 200 + enabled=false: %d %s", w.Code, w.Body.String())
 	}
 }
