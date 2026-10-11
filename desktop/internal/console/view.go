@@ -61,7 +61,31 @@ func (a *App) View(c *ui.Context) {
 					dot = okGreen
 				}
 				ui.Box(c).Size(9, 9).Radius(999).Background(dot).AlignSelf(ui.Center)
-				ui.Text(c, profile.Name+" · "+profile.URL).SingleLine().TextColor(theme.TextMuted)
+				// 连接快速切换：与 EasyAgent 一致，标题栏直接切换活动网关。
+				names := make([]string, 0, len(a.profiles.Profiles))
+				inList := false
+				for _, p := range a.profiles.Profiles {
+					names = append(names, p.Name)
+					if p.Name == a.connSelect {
+						inList = true
+					}
+				}
+				if !inList {
+					a.connSelect = profile.Name
+				}
+				if len(names) > 1 {
+					if ui.Select(c, &a.connSelect, names).Label("活动网关").Disabled(a.busy != "").Changed() {
+						for _, p := range a.profiles.Profiles {
+							if p.Name == a.connSelect {
+								a.selectConnection(p.ID)
+								break
+							}
+						}
+					}
+					ui.Text(c, profile.URL).SingleLine().TextColor(theme.TextMuted)
+				} else {
+					ui.Text(c, profile.Name+" · "+profile.URL).SingleLine().TextColor(theme.TextMuted)
+				}
 			}
 		})
 		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {

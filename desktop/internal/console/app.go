@@ -67,6 +67,7 @@ type App struct {
 	configSelection                                                       map[string]map[string]bool
 	feedback                                                              []Feedback
 	chatInput, chatReply, chatUser, chatStatus, feedbackNote              string
+	connSelect                                                            string
 	chatModels                                                            []string
 	chatModel, chatDefault                                                string
 	chatList                                                              ui.ScrollState
@@ -402,6 +403,7 @@ func (a *App) selectConnection(id string) {
 	a.profiles = st
 	a.resetHost()
 	a.page = "overview"
+	a.connSelect = a.active().Name
 	a.reload()
 }
 
