@@ -172,6 +172,10 @@ func (h *PiConfigHandler) desiredModels() []map[string]any {
 		if !hasTextCapability(info.Capabilities) || hasCapabilityFlagValue(info.Capabilities) {
 			continue
 		}
+		// 渠道未登录或 provider 已停用的模型写进客户端也无法使用，不推荐。
+		if !h.router.ModelUsable(info.ID) {
+			continue
+		}
 		model := map[string]any{"id": info.ID, "name": info.ID}
 		if info.Protocol == "responses" {
 			model["api"] = "openai-responses"

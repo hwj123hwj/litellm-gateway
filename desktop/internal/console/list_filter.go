@@ -7,9 +7,12 @@ import (
 )
 
 type listViewState struct {
-	models    rowFilter[Model]
-	logs      rowFilter[Log]
-	modelList ui.ListState
+	models     rowFilter[Model]
+	logs       rowFilter[Log]
+	skills     rowFilter[Skill]
+	modelList  ui.ListState
+	skillList  ui.ListState
+	marketList ui.ListState
 }
 
 // rowFilter keeps only one search result. API reloads replace the source slice;
@@ -87,6 +90,38 @@ func (f *rowFilter[T]) apply(source []T, query string, text func(T) string) (vis
 }
 
 func modelSearchText(m Model) string { return m.Name + " " + m.Provider }
+
+// modelCategoryAll 是能力分类的“不过滤”哨兵选项。
+const modelCategoryAll = "全部能力"
+
+// modelCategories 是模型页的能力分类，值映射到网关能力名；
+// 向量与语音转写模型在目录里与对话模型并列，靠分类区分用途。
+var modelCategories = []string{modelCategoryAll, "文本", "视觉", "视频", "向量", "语音转写", "推理", "工具调用"}
+
+// modelInCategory 报告模型是否属于所选能力分类。
+func modelInCategory(m Model, category string) bool {
+	if category == "" || category == modelCategoryAll {
+		return true
+	}
+	capability := map[string]string{
+		"文本": "text", "视觉": "vision", "视频": "video",
+		"向量": "embedding", "语音转写": "audio_transcription",
+		"推理": "reasoning", "工具调用": "tool_calling",
+	}[category]
+	if capability == "" {
+		return true
+	}
+	for _, c := range m.Capabilities {
+		if c == capability {
+			return true
+		}
+	}
+	return false
+}
+
+func skillSearchText(s Skill) string {
+	return s.ID + " " + s.Name + " " + s.Emoji + " " + s.Description + " " + s.Author + " " + strings.Join(s.Tags, " ")
+}
 
 func logSearchText(l Log) string {
 	return l.Model + " " + l.Provider + " " + l.RequestID + " " + l.Error

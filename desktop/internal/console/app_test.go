@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,17 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 			w.Write([]byte(`{"models":[{"model":"coding","provider":"alpha","providers":["alpha","beta"],"status":"online","capabilities":["text","audio_transcription"],"input_modalities":["text"]}]}`))
 		case "/admin/routes":
 			w.Write([]byte(`{"routes":[{"model":"coding","providers":[{"name":"alpha"},{"name":"beta"}]}]}`))
+		case "/admin/skills/market/browse":
+			if r.URL.Query().Get("q") != "" {
+				w.Write([]byte(`{"enabled":true,"skills":[],"total":0,"page":1}`))
+				return
+			}
+			w.Write([]byte(`{"enabled":true,"skills":[` +
+				`{"id":5,"name":"market-demo","display_name":"市场示例","description":"来自市场的演示技能","version":"1.0.0","install_count":9,"tarball_size":2048},` +
+				`{"id":6,"name":"installed-demo","display_name":"已安装示例","description":"已经装好的技能","version":"0.9.0","install_count":4,"tarball_size":1024}` +
+				`],"total":2,"page":1}`))
+		case "/admin/skills/market/installed":
+			w.Write([]byte(`{"enabled":true,"skills_dir":"/tmp/skills","installed":[{"name":"installed-demo","display_name":"已安装示例","version":"0.9.0"}]}`))
 		default:
 			w.Write([]byte(`{"status":"ok","summary":{"today_requests":24,"success_rate":98.5},"providers":[],"models":[]}`))
 		}
@@ -206,7 +218,9 @@ func TestSkillsProjectBrowserPicksHostDirectory(t *testing.T) {
 	a, queue, _ := fixture(t)
 	a.page = "skills"
 	a.loaded = true
+	seedSkills(a)
 	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "展开安装范围设置")
 	click(t, tt, "浏览项目路径")
 	await(t, a, queue)
 	tt.Frame()
@@ -222,10 +236,20 @@ func TestSkillsProjectBrowserPicksHostDirectory(t *testing.T) {
 	}
 }
 
+// seedSkills 配置一个可用的技能库，供技能页交互测试使用。
+func seedSkills(a *App) {
+	a.skills = Skills{Configured: true, Targets: []string{"/tmp/skills"}, Skills: []Skill{
+		{ID: "review", Name: "代码评审", Description: "检查实现与边界", Author: "hwj", Tags: []string{"开发工具"}},
+		{ID: "slides", Name: "演示制作", Description: "生成演示幻灯片", Tags: []string{"演示与设计"}},
+	}, Manifest: "/tmp/manifest.json"}
+	a.acceptSkills(a.skills)
+}
+
 func TestLocalNativePickFillsProjectPath(t *testing.T) {
 	a, queue, _ := fixture(t)
 	a.page = "skills"
 	a.loaded = true
+	seedSkills(a)
 	if !a.localConnection() {
 		t.Fatal("fixture connection should count as local")
 	}
@@ -233,6 +257,7 @@ func TestLocalNativePickFillsProjectPath(t *testing.T) {
 	a.PickFolder = func(done func(path string, ok bool)) { done("/Users/demo/project", true) }
 	defer func() { a.PickFolder = previous }()
 	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "展开安装范围设置")
 	click(t, tt, "本机选择目录")
 	drainDispatcher(a, queue)
 	if a.project != "/Users/demo/project" {
@@ -243,6 +268,228 @@ func TestLocalNativePickFillsProjectPath(t *testing.T) {
 	drainDispatcher(a, queue)
 	if a.project != "/Users/demo/project" {
 		t.Fatal("cancel must keep the old value:", a.project)
+	}
+}
+
+func TestSkillsSearchAndTagFilter(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	seedSkills(a)
+	tt := ui.NewTester(a.View, 1100, 800)
+	a.skillFilter = "评审"
+	tt.Frame()
+	if !tt.HasText("代码评审") {
+		t.Fatal("search filter hid the matching skill")
+	}
+	if tt.HasText("演示制作") {
+		t.Fatal("search filter did not hide unmatched skill")
+	}
+	a.skillFilter = ""
+	a.skillTag = "演示与设计"
+	tt.Frame()
+	if !tt.HasText("演示制作") {
+		t.Fatal("tag filter hid the matching skill")
+	}
+	if tt.HasText("代码评审") {
+		t.Fatal("tag filter did not hide untagged skill")
+	}
+}
+
+func TestSkillsRowDetailExpansion(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	seedSkills(a)
+	tt := ui.NewTester(a.View, 1100, 800)
+	if tt.HasText("作者 hwj") {
+		t.Fatal("detail metadata should stay hidden before expansion")
+	}
+	click(t, tt, "技能详情 review")
+	tt.Frame()
+	if !tt.HasText("作者 hwj") {
+		t.Fatal("expanded row should show skill metadata")
+	}
+	click(t, tt, "技能详情 review")
+	tt.Frame()
+	if tt.HasText("作者 hwj") {
+		t.Fatal("collapsed row should hide skill metadata")
+	}
+}
+
+func TestSkillsSaveSendsConfigThenSync(t *testing.T) {
+	a, queue, requests := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	seedSkills(a)
+	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "代码评审") // 勾选启用
+	if !a.skillDirty {
+		t.Fatal("selection change should mark the manifest dirty")
+	}
+	click(t, tt, "保存并同步")
+	await(t, a, queue)
+	config, sync := <-requests, <-requests
+	if !strings.Contains(config, "PUT /admin/skills/config") || !strings.Contains(config, `"enabled":["review"]`) {
+		t.Fatal("config PUT missing or wrong:", config)
+	}
+	if !strings.Contains(sync, "POST /admin/skills/sync") {
+		t.Fatal("sync POST missing:", sync)
+	}
+	if a.skillDirty {
+		t.Fatal("successful save should clear the dirty flag")
+	}
+}
+
+func TestSkillsMarketBrowseAndInstall(t *testing.T) {
+	a, queue, requests := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	a.skillSource = skillSourceMarket
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1100, 800)
+	if !tt.HasText("市场示例") || !tt.HasText("已安装示例") {
+		t.Fatal("market browse rows missing")
+	}
+	if !tt.HasText("已安装") {
+		t.Fatal("installed chip missing for installed skill")
+	}
+	click(t, tt, "安装技能 市场示例")
+	await(t, a, queue)
+	select {
+	case got := <-requests:
+		if !strings.Contains(got, "POST /admin/skills/market/install") || !strings.Contains(got, `"id":5`) {
+			t.Fatal("install request wrong:", got)
+		}
+	default:
+		t.Fatal("install request not sent")
+	}
+}
+
+func TestSkillsMarketUninstallRequiresConfirm(t *testing.T) {
+	a, queue, requests := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	a.skillSource = skillSourceMarket
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1100, 800)
+	click(t, tt, "卸载技能 已安装示例")
+	tt.Frame()
+	if !tt.HasText("从本机卸载") {
+		t.Fatal("uninstall confirmation dialog missing")
+	}
+	click(t, tt, "移除")
+	await(t, a, queue)
+	select {
+	case got := <-requests:
+		if !strings.Contains(got, "POST /admin/skills/market/uninstall") || !strings.Contains(got, `"name":"installed-demo"`) {
+			t.Fatal("uninstall request wrong:", got)
+		}
+	default:
+		t.Fatal("uninstall request not sent")
+	}
+}
+
+func TestSkillsMarketDisabledShowsHint(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "skills"
+	a.loaded = true
+	a.skillSource = skillSourceMarket
+	a.market = MarketPage{Hint: "技能市场未启用：设置 SKILLS_MARKET_ENABLED 后重启网关"}
+	tt := ui.NewTester(a.View, 1100, 800)
+	if !tt.HasText("技能市场未启用") {
+		t.Fatal("disabled market hint missing")
+	}
+	if tt.HasText("搜索市场") {
+		t.Fatal("market controls should stay hidden when disabled")
+	}
+}
+
+func TestModelPickerSearchFilterAndChoose(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "assistant"
+	a.loaded = true
+	for i := 0; i < 20; i++ {
+		a.chatModels = append(a.chatModels, fmt.Sprintf("cloudcode/gemini-3.8-flash-%03d", i))
+		a.chatModels = append(a.chatModels, fmt.Sprintf("mini-max/m%03d-model", i))
+	}
+	a.chatModel = chatDefaultOption
+	tt := ui.NewTester(a.View, 1280, 850)
+	click(t, tt, "选择模型，当前 "+chatDefaultOption)
+	tt.Frame()
+	if !a.modelPickerOpen {
+		t.Fatal("picker should open")
+	}
+	if !tt.HasText("共 41 个模型，显示 41 个") {
+		t.Fatal("picker count missing")
+	}
+	if !tt.HasText("当前") {
+		t.Fatal("current selection chip missing")
+	}
+	a.modelPickerFilter = "gem"
+	tt.Frame()
+	if !tt.HasText("cloudcode/gemini-3.8-flash-000") {
+		t.Fatal("filter hid matching models")
+	}
+	if tt.HasText("mini-max/m000-model") {
+		t.Fatal("filter kept non-matching models")
+	}
+	click(t, tt, "选择模型 cloudcode/gemini-3.8-flash-003")
+	tt.Frame()
+	if a.chatModel != "cloudcode/gemini-3.8-flash-003" || a.modelPickerOpen {
+		t.Fatal("choosing did not apply and close:", a.chatModel, a.modelPickerOpen)
+	}
+	if a.modelPickerFilter != "" {
+		t.Fatal("filter should reset after closing")
+	}
+}
+
+func TestModelPickerEmptyState(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "assistant"
+	a.loaded = true
+	a.chatModels = []string{"glm-5.3-flash"}
+	a.modelPickerOpen = true
+	a.modelPickerFilter = "不存在的模型"
+	tt := ui.NewTester(a.View, 1280, 850)
+	if !tt.HasText("没有匹配的模型") {
+		t.Fatal("empty state missing")
+	}
+}
+
+func TestModelsCategoryFilter(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "models"
+	a.loaded = true
+	a.models = []Model{
+		{Name: "chat", Provider: "alpha", Status: "online", Capabilities: []string{"text", "tool_calling"}},
+		{Name: "BAAI/bge-m3", Provider: "alpha", Status: "online", Capabilities: []string{"embedding", "text"}},
+		{Name: "asr-v3", Provider: "alpha", Status: "online", Capabilities: []string{"audio_transcription", "text"}},
+		{Name: "vision-chat", Provider: "beta", Status: "online", Capabilities: []string{"text", "vision", "reasoning"}},
+	}
+	tt := ui.NewTester(a.View, 1280, 850)
+	if !tt.HasText("BAAI/bge-m3") || !tt.HasText("asr-v3") {
+		t.Fatal("all models should show without a category")
+	}
+	a.modelCategory = "向量"
+	tt.Frame()
+	if !tt.HasText("BAAI/bge-m3") {
+		t.Fatal("embedding category hid the embedding model")
+	}
+	if tt.HasText("asr-v3") || tt.HasText("vision-chat") {
+		t.Fatal("embedding category kept non-embedding models")
+	}
+	a.modelCategory = "语音转写"
+	tt.Frame()
+	if !tt.HasText("asr-v3") || tt.HasText("BAAI/bge-m3") {
+		t.Fatal("transcription category filter wrong")
+	}
+	a.modelCategory = modelCategoryAll
+	tt.Frame()
+	if !tt.HasText("chat") || !tt.HasText("vision-chat") {
+		t.Fatal("resetting the category lost models")
 	}
 }
 

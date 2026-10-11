@@ -32,62 +32,315 @@ func sortedSelection(m map[string]bool) []string {
 	sort.Strings(ids)
 	return ids
 }
-func (a *App) skillsView(c *ui.Context) {
-	ui.Row(c).Gap(10).Children(func() {
-		ui.TextInput(c, &a.project).Grow(1).Label("项目路径").Placeholder("留空管理全局技能；填写网关主机上的项目绝对路径").Disabled(a.busy != "" || a.skillDirty)
-		if a.localConnection() && a.PickFolder != nil {
-			ui.Button(c, "本机选择").Label("本机选择目录").Disabled(a.busy != "" || a.skillDirty).OnClick(a.pickLocalFolder)
+
+// skillsTagAll 是标签筛选里表示“不过滤”的哨兵选项。
+const skillsTagAll = "全部标签"
+
+// skillTagOptions 汇总技能目录里出现过的标签，供筛选下拉使用。
+func (a *App) skillTagOptions() []string {
+	tags := map[string]bool{}
+	for _, s := range a.skills.Skills {
+		for _, t := range s.Tags {
+			if t != "" {
+				tags[t] = true
+			}
 		}
-		ui.Button(c, "浏览").Label("浏览项目路径").Disabled(a.busy != "" || a.skillDirty).OnClick(a.openBrowser)
-		ui.Button(c, "读取范围").Disabled(a.busy != "" || a.skillDirty).OnClick(func() { a.loadedProject = strings.TrimSpace(a.project); a.loaded = false; a.reload() })
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	out := []string{skillsTagAll}
+	for t := range tags {
+		out = append(out, t)
+	}
+	sort.Strings(out[1:])
+	return out
+}
+
+func skillHasTag(s Skill, tag string) bool {
+	for _, t := range s.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// skillInstallState 汇总一个技能在各安装目录的落盘状态和展示文案。
+func (a *App) skillInstallState(s Skill) (text string, ok bool) {
+	installed := 0
+	for _, target := range a.skills.Targets {
+		if s.Installed[target] {
+			installed++
+		}
+	}
+	switch {
+	case len(a.skills.Targets) > 0 && installed == len(a.skills.Targets):
+		return "已安装", true
+	case installed > 0:
+		return fmt.Sprintf("部分安装 %d/%d", installed, len(a.skills.Targets)), false
+	default:
+		return "未安装", false
+	}
+}
+
+// 技能页的两种来源：技能库（custom-skills 仓库清单）与技能市场（远端商城）。
+const (
+	skillSourceRepo   = "技能库"
+	skillSourceMarket = "技能市场"
+)
+
+func (a *App) skillsView(c *ui.Context) {
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		if ui.Select(c, &a.skillSource, []string{skillSourceRepo, skillSourceMarket}).Label("技能来源").Changed() {
+			a.loaded = false
+			a.reload()
+		}
+		ui.Spacer(c)
+		if a.skillSource == skillSourceRepo {
+			ui.Textf(c, "%d 个已选", len(sortedSelection(a.skillSelection)))
+		}
 	})
+	if a.skillSource == skillSourceMarket {
+		a.marketView(c)
+		return
+	}
+	a.repoSkillsView(c)
+}
+
+// marketView 渲染技能市场来源：搜索商城目录，安装到个人技能目录。
+func (a *App) marketView(c *ui.Context) {
+	if !a.market.Enabled {
+		card(c, func() { ui.Text(c, "技能市场未启用").Bold(); muted(c, a.market.Hint) })
+		return
+	}
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.TextInput(c, &a.marketQuery).Label("搜索市场").Placeholder("输入技能名称或描述，点击搜索").Grow(1)
+		if ui.Select(c, &a.marketSort, []string{"推荐", "最多安装", "名称"}).Label("排序").Disabled(a.busy != "").Changed() {
+			a.marketPage = 1
+			a.reload()
+		}
+		ui.Button(c, "搜索").Label("搜索技能市场").Disabled(a.busy != "").OnClick(func() { a.marketPage = 1; a.reload() })
+	})
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		page := a.market.Page
+		if page < 1 {
+			page = 1
+		}
+		muted(c, fmt.Sprintf("共 %d 个技能 · 第 %d 页", a.market.Total, page))
+		ui.Spacer(c)
+		ui.Button(c, "上一页").Label("上一页市场结果").Disabled(a.busy != "" || a.market.Page <= 1).OnClick(func() { a.marketPage--; a.reload() })
+		ui.Button(c, "下一页").Label("下一页市场结果").Disabled(a.busy != "" || len(a.market.Skills) == 0).OnClick(func() { a.marketPage++; a.reload() })
+	})
+	if len(a.market.Skills) == 0 {
+		empty(c, "没有匹配的技能")
+		return
+	}
+	ui.List(c, &a.listViews.marketList, len(a.market.Skills), func(i int) {
+		a.marketRow(c, a.market.Skills[i])
+	}).Grow(1)
+}
+
+// marketRow 渲染一条市场技能：安装/卸载与详情展开。
+func (a *App) marketRow(c *ui.Context, s MarketSkill) {
+	name := s.DisplayName
+	if name == "" {
+		name = s.Name
+	}
+	_, installedAlready := a.marketInstalledByName(s.Name)
+	ui.Column(c.Key(fmt.Sprintf("market-%d", s.ID))).Children(func() {
+		row(c, func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, name).Bold().Grow(1).MinWidth(0).SingleLine()
+				if s.Version != "" {
+					muted(c, "v"+s.Version)
+				}
+				if installedAlready {
+					chip(c, "已安装", okGreen)
+					ui.Button(c, "卸载").Label("卸载技能 " + name).Disabled(a.busy != "").OnClick(func() {
+						a.editorTitle = "从本机卸载「" + name + "」？将删除其安装目录，不影响手写技能。"
+						a.deleteAction = func() { a.uninstallMarketSkill(s.Name, name) }
+						a.deleteOpen = true
+					})
+				} else {
+					ui.PrimaryButton(c, "安装").Label("安装技能 " + name).Disabled(a.busy != "").OnClick(func() { a.installMarketSkill(s.ID, name) })
+				}
+				label := "详情"
+				if a.marketExpanded[s.Name] {
+					label = "收起"
+				}
+				ui.Button(c, label).Label("市场技能详情 " + name).OnClick(func() {
+					if a.marketExpanded == nil {
+						a.marketExpanded = map[string]bool{}
+					}
+					a.marketExpanded[s.Name] = !a.marketExpanded[s.Name]
+				})
+			})
+			if a.marketExpanded[s.Name] {
+				ui.Text(c, s.Description).Selectable()
+				parts := []string{}
+				if s.Category != "" {
+					parts = append(parts, s.Category)
+				}
+				if len(s.Tags) > 0 {
+					parts = append(parts, strings.Join(s.Tags, " / "))
+				}
+				parts = append(parts, fmt.Sprintf("%d 次安装", s.InstallCount))
+				if s.SizeBytes > 0 {
+					parts = append(parts, shortNumber(s.SizeBytes))
+				}
+				meta(c, parts...)
+			} else if s.Description != "" {
+				ui.Text(c, s.Description).MaxLines(1).TextColor(c.Theme().TextMuted)
+			}
+		})
+	})
+}
+
+// installMarketSkill 通过网关下载并安装商城技能。
+func (a *App) installMarketSkill(id int, name string) {
+	a.work("正在安装技能", 120*time.Second, func(ctx context.Context, client *connection.Client) (func(), error) {
+		var result MarketPage
+		if err := client.JSON(ctx, "POST", "/skills/market/install", map[string]int{"id": id}, &result); err != nil {
+			return nil, err
+		}
+		if result.Error != "" {
+			return nil, errors.New(result.Error)
+		}
+		return func() { a.notice = "技能「" + name + "」已安装"; a.reload() }, nil
+	})
+}
+
+// uninstallMarketSkill 删除市场安装的技能目录（网关侧校验安装清单）。
+func (a *App) uninstallMarketSkill(name, display string) {
+	a.work("正在卸载技能", 60*time.Second, func(ctx context.Context, client *connection.Client) (func(), error) {
+		var result struct {
+			Error string `json:"error"`
+		}
+		if err := client.JSON(ctx, "POST", "/skills/market/uninstall", map[string]string{"name": name}, &result); err != nil {
+			return nil, err
+		}
+		if result.Error != "" {
+			return nil, errors.New(result.Error)
+		}
+		return func() { a.notice = "技能「" + display + "」已卸载"; a.reload() }, nil
+	})
+}
+
+// modelPickerModal 助理模型选择器：搜索框即输即滤，列表虚拟化，
+// 为上百个模型设计；当前选择带标记，空结果有明确提示。
+// 过滤词在打开与每个关闭路径上重置（Esc/点背景关闭由下次打开兜底）。
+func (a *App) modelPickerModal(c *ui.Context) {
+	ui.Modal(c, &a.modelPickerOpen, func() {
+		ui.Column(c).Width(640).Gap(14).Children(func() {
+			ui.Text(c, "选择模型").FontSize(20).Bold()
+			if ui.TextInput(c, &a.modelPickerFilter).Label("搜索模型").Placeholder("输入模型名称过滤").FillWidth().AutoFocus().Changed() {
+				a.modelPickerList = ui.ListState{}
+			}
+			models := a.filteredChatModels()
+			muted(c, fmt.Sprintf("共 %d 个模型，显示 %d 个", len(a.chatModels)+1, len(models)))
+			if len(models) == 0 {
+				empty(c, "没有匹配的模型")
+			} else {
+				ui.List(c, &a.modelPickerList, len(models), func(i int) {
+					name := models[i]
+					current := name == a.chatModel
+					ui.Row(c.Key(name)).Gap(10).AlignItems(ui.Center).Padding(0, 0, 4).Children(func() {
+						ui.Button(c, name).Label("选择模型 " + name).Grow(1).OnClick(func() {
+							a.chatModel = name
+							a.closeModelPicker()
+						})
+						if current {
+							chip(c, "当前", okGreen)
+						}
+					})
+				}).Grow(1).MinHeight(200).MaxHeight(420)
+			}
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				ui.Button(c, "取消").OnClick(a.closeModelPicker)
+			})
+		})
+	})
+}
+
+func (a *App) closeModelPicker() {
+	a.modelPickerOpen = false
+	a.modelPickerFilter = ""
+	a.modelPickerList = ui.ListState{}
+}
+
+func (a *App) repoSkillsView(c *ui.Context) {
 	if !a.skills.Configured {
 		card(c, func() { ui.Text(c, "技能库尚未配置").Bold(); muted(c, a.skills.Hint) })
 		return
 	}
-	ui.Row(c).Gap(12).Children(func() {
-		if ui.TextInput(c, &a.targets).Grow(1).Label("技能安装目录").Disabled(a.busy != "" || a.loadedProject != "").Changed() {
-			a.skillDirty = true
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.TextInput(c, &a.skillFilter).Label("搜索技能").Placeholder("搜索名称、描述、标签或作者").Grow(1)
+		if tags := a.skillTagOptions(); len(tags) > 0 {
+			ui.Select(c, &a.skillTag, tags).Label("标签筛选").Disabled(a.busy != "")
 		}
-		ui.Textf(c, "%d 个已选", len(sortedSelection(a.skillSelection)))
 	})
-	if a.loadedProject != "" {
-		muted(c, "项目范围："+a.loadedProject)
-	} else {
-		muted(c, "全局范围 · 多个安装目录用逗号分隔")
-	}
-	ui.List(c, nil, len(a.skills.Skills), func(i int) {
-		s := a.skills.Skills[i]
-		ui.Column(c.Key(s.ID)).Children(func() {
-			row(c, func() {
-				name := s.Name
-				if name == "" {
-					name = s.ID
+	// 安装范围（全局目录或项目路径）是低频配置，默认收起；摘要常驻显示。
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		var summary string
+		switch {
+		case a.loadedProject != "":
+			summary = "项目范围 · " + a.loadedProject
+		case len(split(a.targets)) > 0:
+			summary = "全局范围 · " + strings.Join(split(a.targets), ", ")
+		default:
+			summary = "全局范围 · 未设置安装目录"
+		}
+		ui.Text(c, summary).TextColor(c.Theme().TextMuted).SingleLine()
+		ui.Spacer(c)
+		if a.skillScopeOpen {
+			ui.Button(c, "收起").Label("收起安装范围设置").OnClick(func() { a.skillScopeOpen = false })
+		} else {
+			ui.Button(c, "安装范围").Label("展开安装范围设置").OnClick(func() { a.skillScopeOpen = true })
+		}
+	})
+	if a.skillScopeOpen {
+		card(c, func() {
+			ui.Text(c, "安装范围").Bold()
+			ui.Row(c).Gap(10).Children(func() {
+				ui.TextInput(c, &a.project).Grow(1).Label("项目路径").Placeholder("留空管理全局技能；填写网关主机上的项目绝对路径").Disabled(a.busy != "" || a.skillDirty)
+				if a.localConnection() && a.PickFolder != nil {
+					ui.Button(c, "本机选择").Label("本机选择目录").Disabled(a.busy != "" || a.skillDirty).OnClick(a.pickLocalFolder)
 				}
-				value := a.skillSelection[s.ID]
-				ui.Row(c).Gap(12).Children(func() {
-					if ui.Checkbox(c, &value, name).Grow(1).Disabled(a.busy != "").Changed() {
-						a.skillSelection[s.ID] = value
+				ui.Button(c, "浏览").Label("浏览项目路径").Disabled(a.busy != "" || a.skillDirty).OnClick(a.openBrowser)
+				ui.Button(c, "应用").Label("应用读取范围").Disabled(a.busy != "" || a.skillDirty).OnClick(func() { a.loadedProject = strings.TrimSpace(a.project); a.loaded = false; a.reload() })
+			})
+			if a.loadedProject != "" {
+				muted(c, "项目范围："+a.loadedProject+"（技能安装到该项目的 .agents/skills）")
+			} else {
+				ui.Row(c).Gap(10).Children(func() {
+					if ui.TextInput(c, &a.targets).Grow(1).Label("全局安装目录").Disabled(a.busy != "").Changed() {
 						a.skillDirty = true
 					}
-					installed := len(a.skills.Targets) > 0
-					for _, target := range a.skills.Targets {
-						installed = installed && s.Installed[target]
-					}
-					if installed {
-						chip(c, "已安装", okGreen)
-					} else {
-						muted(c, "未安装")
-					}
 				})
-				muted(c, s.Description)
-			})
+				muted(c, "多个安装目录用逗号分隔；改动安装目录需保存后生效。")
+			}
 		})
-	}).Grow(1).Children(func() {
-		if len(a.skills.Skills) == 0 {
-			muted(c, "技能库中暂无技能")
+	}
+	filtered, changed := a.listViews.skills.apply(a.skills.Skills, a.skillFilter, skillSearchText)
+	if changed {
+		a.listViews.skillList = ui.ListState{}
+	}
+	visible := []Skill{}
+	for i := 0; i < filtered.Len(); i++ {
+		if s := filtered.At(i); a.skillTag == skillsTagAll || skillHasTag(s, a.skillTag) {
+			visible = append(visible, s)
 		}
-	})
+	}
+	if len(a.skills.Skills) == 0 {
+		empty(c, "技能库中暂无技能")
+	} else if len(visible) == 0 {
+		empty(c, "没有匹配的技能")
+	} else {
+		ui.List(c, &a.listViews.skillList, len(visible), func(i int) {
+			a.skillRow(c, visible[i])
+		}).Grow(1)
+	}
 	if len(a.skills.Local) > 0 {
 		muted(c, fmt.Sprintf("另有 %d 个本地自定义技能，同步时保留。", len(a.skills.Local)))
 	}
@@ -99,45 +352,108 @@ func (a *App) skillsView(c *ui.Context) {
 			}
 		})
 		ui.Button(c, "撤销选择").Disabled(a.busy != "" || !a.skillDirty).OnClick(func() { a.acceptSkills(a.skills) })
-		ui.Button(c, "仅保存清单").Disabled(a.busy != "" || !a.skillDirty || len(split(a.targets)) == 0).OnClick(func() { a.saveSkills(false) })
-		ui.PrimaryButton(c, "保存并同步").Disabled(a.busy != "" || len(split(a.targets)) == 0).OnClick(func() { a.saveSkills(true) })
+		ui.PrimaryButton(c, "保存并同步").Disabled(a.busy != "" || len(split(a.targets)) == 0).OnClick(a.saveSkills)
 	})
 }
-func (a *App) saveSkills(sync bool) {
+
+// skillRow 渲染单个技能行：勾选启用、紧凑摘要，详情按需展开。
+func (a *App) skillRow(c *ui.Context, s Skill) {
+	name := s.Name
+	if name == "" {
+		name = s.ID
+	}
+	if s.Emoji != "" {
+		name = s.Emoji + " " + name
+	}
+	stateText, installed := a.skillInstallState(s)
+	ui.Column(c.Key(s.ID)).Children(func() {
+		row(c, func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				value := a.skillSelection[s.ID]
+				if ui.Checkbox(c, &value, name).Grow(1).Disabled(a.busy != "").Changed() {
+					a.skillSelection[s.ID] = value
+					a.skillDirty = true
+				}
+				if installed {
+					chip(c, stateText, okGreen)
+				} else if stateText != "未安装" {
+					chip(c, stateText, c.Theme().Accent)
+				} else {
+					muted(c, stateText)
+				}
+				label := "详情"
+				if a.skillExpanded[s.ID] {
+					label = "收起"
+				}
+				ui.Button(c, label).Label("技能详情 " + s.ID).OnClick(func() {
+					if a.skillExpanded == nil {
+						a.skillExpanded = map[string]bool{}
+					}
+					a.skillExpanded[s.ID] = !a.skillExpanded[s.ID]
+				})
+			})
+			if a.skillExpanded[s.ID] {
+				ui.Text(c, s.Description).Selectable()
+				if len(s.Tags) > 0 {
+					ui.Row(c).Wrap().Gap(8).Children(func() {
+						for _, tag := range s.Tags {
+							chip(c, tag, c.Theme().TextMuted)
+						}
+					})
+				}
+				parts := []string{}
+				if s.Author != "" {
+					parts = append(parts, "作者 "+s.Author)
+				}
+				if s.Updated != "" {
+					parts = append(parts, "更新 "+s.Updated)
+				}
+				if s.GithubURL != "" {
+					parts = append(parts, s.GithubURL)
+				}
+				if len(parts) > 0 {
+					meta(c, parts...)
+				}
+			} else if s.Description != "" {
+				ui.Text(c, s.Description).MaxLines(1).TextColor(c.Theme().TextMuted)
+			}
+		})
+	})
+}
+
+// saveSkills 保存启用清单（如有改动）并同步符号链接。同步是幂等的
+// 目录对齐，因此不再单独提供“仅保存清单”；修复链接也走同一按钮。
+func (a *App) saveSkills() {
 	body := map[string]any{"targets": split(a.targets), "enabled": sortedSelection(a.skillSelection)}
 	query := skillsQuery(a.loadedProject)
 	dirty := a.skillDirty
-	a.work("正在更新技能", 60*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
-		var result Skills
+	a.work("正在保存技能", 60*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
 		if dirty {
-			if err := c.JSON(ctx, "PUT", "/skills/config"+query, body, &result); err != nil {
+			var saved Skills
+			if err := c.JSON(ctx, "PUT", "/skills/config"+query, body, &saved); err != nil {
 				return nil, err
 			}
-			if result.Error != "" {
-				return nil, errors.New(result.Error)
+			if saved.Error != "" {
+				return nil, errors.New(saved.Error)
 			}
 		}
-		if sync {
-			if err := c.JSON(ctx, "POST", "/skills/sync"+query, nil, &result); err != nil {
-				return nil, err
-			}
-			if result.Error != "" {
-				return nil, errors.New(result.Error)
-			}
+		var result Skills
+		if err := c.JSON(ctx, "POST", "/skills/sync"+query, nil, &result); err != nil {
+			return nil, err
+		}
+		if result.Error != "" {
+			return nil, errors.New(result.Error)
 		}
 		return func() {
 			a.acceptSkills(result)
-			a.notice = "技能清单已保存"
-			if sync {
-				a.notice = "技能同步完成"
-				if result.Sync != nil {
-					for _, report := range result.Sync.Targets {
-						if len(report.Errors) > 0 {
-							a.problem += report.Target + "：" + strings.Join(report.Errors, "；") + "\n"
-						}
-						if len(report.Skipped) > 0 {
-							a.notice += "；保留 " + strings.Join(report.Skipped, ", ")
-						}
+			a.notice = "技能同步完成"
+			if result.Sync != nil {
+				for _, report := range result.Sync.Targets {
+					if len(report.Errors) > 0 {
+						a.problem += report.Target + "：" + strings.Join(report.Errors, "；") + "\n"
+					}
+					if len(report.Skipped) > 0 {
+						a.notice += "；保留 " + strings.Join(report.Skipped, ", ")
 					}
 				}
 			}
@@ -350,11 +666,16 @@ func bubble(c *ui.Context, who, text string, user bool) {
 }
 func (a *App) assistantView(c *ui.Context) {
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-		options := append([]string{chatDefaultOption}, a.chatModels...)
+		// 模型目录上百条：搜索选择走弹窗（Combobox 点击后输入会追加
+		// 到当前值上，无匹配时弹层静默消失，体验不可接受）。
 		if a.chatModel == "" {
 			a.chatModel = chatDefaultOption
 		}
-		ui.Select(c, &a.chatModel, options).Label("模型").Disabled(a.busy != "")
+		ui.Button(c, "模型 · "+a.chatModel).Label("选择模型，当前 " + a.chatModel).Disabled(a.busy != "").OnClick(func() {
+			a.modelFilter = ""
+			a.modelPickerList = ui.ListState{}
+			a.modelPickerOpen = true
+		})
 		if a.chatDefault != "" {
 			muted(c, "默认 "+a.chatDefault)
 		}
