@@ -197,3 +197,52 @@ func TestResponsesStructuredToolOutputAndImages(t *testing.T) {
 		t.Fatalf("inline image url = %s err=%v", userImage.ImageURL, err)
 	}
 }
+
+// ZCode 在 Responses input 数组里发 role=system 的条目（而非 instructions
+// 字段）。workbuddy 上游要求首条消息必须是 system，此前 normalizeRole 把
+// system 映射成 user，导致上游 400 "first message is not system prompt"。
+// 修复后 system 条目抽到顶层 system 字段，OpenAI 兼容 provider 重建时
+// 排在消息列表首位。
+func TestResponsesToProviderRequestKeepsSystemRole(t *testing.T) {
+	req := &responsesRequest{
+		Model: "workbuddy/deepseek-v4.1-flash",
+		Input: []byte(`[
+			{"role": "system", "content": "You are a coding agent."},
+			{"role": "user", "content": "hi"}
+		]`),
+	}
+
+	providerReq, err := responsesToProviderRequest(req)
+	if err != nil {
+		t.Fatalf("responsesToProviderRequest() error = %v", err)
+	}
+	if len(providerReq.Messages) != 1 {
+		t.Fatalf("messages count = %d, want 1 (system 条目已抽出)", len(providerReq.Messages))
+	}
+	if providerReq.Messages[0].Role != "user" {
+		t.Fatalf("first message role = %q, want user", providerReq.Messages[0].Role)
+	}
+	sysRaw, ok := providerReq.RawField("system")
+	if !ok {
+		t.Fatal("expected top-level system field to be set")
+	}
+	var sysText string
+	if err := json.Unmarshal(sysRaw, &sysText); err != nil {
+		t.Fatalf("system field not a string: %v", err)
+	}
+	if sysText != "You are a coding agent." {
+		t.Fatalf("system = %q, want full prompt", sysText)
+	}
+
+	// 模拟 OpenAI 兼容 provider 的重建逻辑：system 必须回到消息列表首位
+	var decoded []map[string]any
+	msgRaw, _ := providerReq.RawField("messages")
+	if err := json.Unmarshal(msgRaw, &decoded); err != nil {
+		t.Fatalf("raw messages not valid JSON: %v", err)
+	}
+	rebuilt := []map[string]any{{"role": "system", "content": sysText}}
+	rebuilt = append(rebuilt, decoded...)
+	if rebuilt[0]["role"] != "system" {
+		t.Fatalf("rebuilt first message = %v, want system", rebuilt[0])
+	}
+}
