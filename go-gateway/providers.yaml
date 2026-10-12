@@ -14,6 +14,9 @@ providers:
     # GLM-5.3 reasoning 请求可能超过常规 120 秒上游期限，显式放宽，
     # 避免长请求仍在处理时被本地超时中断并计入熔断。
     request_timeout_seconds: 900
+    # 始终思考模型：大上下文 + 工具结果时首 token 前的思考可能超过全局思考档
+    # 默认，per-provider 覆盖思考档首字期限（fallback 预算随之抬升）。
+    reasoning_first_output_timeout_seconds: 180
     models:
       - id: glm-5.3
         # 始终思考模型：上游不接受 thinking:disabled（网关侧自动丢弃该参数）

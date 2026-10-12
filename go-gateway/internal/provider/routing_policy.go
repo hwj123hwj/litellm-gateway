@@ -17,8 +17,11 @@ type RoutingPolicy struct {
 	FallbackWaitBudget          time.Duration
 }
 
+// DefaultRoutingPolicy 的思考档首字与等待预算是一对：预算必须容得下思考档
+// 首字期限（glm 等始终思考模型带大上下文时，首 token 前的思考可能远超 45s），
+// 否则更长的首字期限会被预算悄悄钳回，等于没放宽。
 func DefaultRoutingPolicy() RoutingPolicy {
-	return RoutingPolicy{15 * time.Second, 45 * time.Second, 30 * time.Second, 30 * time.Second, 60 * time.Second}
+	return RoutingPolicy{15 * time.Second, 120 * time.Second, 30 * time.Second, 30 * time.Second, 180 * time.Second}
 }
 
 func (r *Router) SetRoutingPolicy(p RoutingPolicy) {
@@ -131,25 +134,59 @@ func (r *Router) RunNonStreamAttempt(ctx context.Context, name string, forward f
 	return err
 }
 
-func (r *Router) firstOutputTimeout(req *Request, p Provider) time.Duration {
+// extendWaitingBudget 把本请求的共享等待预算抬升到至少 limit。per-provider
+// 首字覆盖表达的是运维对该档的显式等待取舍，被默认 fallback 预算钳回会让
+// 覆盖不生效；只做抬升，未配置覆盖的 provider 预算语义不变。
+func (r *Router) extendWaitingBudget(ctx context.Context, limit time.Duration) {
+	state, _ := ctx.Value(routingDeadlineKey{}).(*routingState)
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if needed := time.Now().Add(limit); needed.After(state.deadline) {
+		state.deadline = needed
+	}
+}
+
+// firstOutputTimeout 返回本次尝试的首字期限，以及它是否来自 per-provider
+// 显式覆盖（调用方需要据此抬升共享等待预算）。
+func (r *Router) firstOutputTimeout(req *Request, p Provider) (time.Duration, bool) {
 	r.mu.RLock()
 	policy := r.policy
 	r.mu.RUnlock()
+	reasoning := false
 	if req != nil {
 		for _, field := range []string{"thinking", "reasoning", "reasoning_effort"} {
 			if value, ok := req.RawField(field); ok && string(value) != "null" && string(value) != `"none"` && string(value) != `"off"` {
-				return policy.ReasoningFirstOutputTimeout
+				reasoning = true
+				break
 			}
 		}
 	}
-	if cp, ok := p.(CapabilityProvider); ok {
-		for _, c := range cp.Capabilities() {
-			if c == CapabilityReasoning {
-				return policy.ReasoningFirstOutputTimeout
+	if !reasoning {
+		if cp, ok := p.(CapabilityProvider); ok {
+			for _, c := range cp.Capabilities() {
+				if c == CapabilityReasoning {
+					reasoning = true
+					break
+				}
 			}
 		}
 	}
-	return policy.FirstOutputTimeout
+	if o, ok := p.(FirstOutputOverrideProvider); ok {
+		plain, reasoningOverride := o.FirstOutputTimeoutOverride()
+		if reasoning && reasoningOverride > 0 {
+			return reasoningOverride, true
+		}
+		if !reasoning && plain > 0 {
+			return plain, true
+		}
+	}
+	if reasoning {
+		return policy.ReasoningFirstOutputTimeout, false
+	}
+	return policy.FirstOutputTimeout, false
 }
 
 // Client cancellation must not poison a healthy provider's circuit.

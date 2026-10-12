@@ -19,7 +19,11 @@ type ProviderConfig struct {
 	APIKeyEnv             string `yaml:"api_key_env"`
 	AllowNoKey            bool   `yaml:"allow_no_key,omitempty"`
 	RequestTimeoutSeconds int    `yaml:"request_timeout_seconds,omitempty"`
-	RateLimitScope        string `yaml:"rate_limit_scope,omitempty"`
+	// 首字超时的 per-provider 覆盖（秒，0 表示沿用全局路由策略）。思考档
+	// 覆盖解决始终思考模型在长思考时被全局默认首字期限砍断的问题。
+	FirstOutputTimeoutSeconds          int    `yaml:"first_output_timeout_seconds,omitempty"`
+	ReasoningFirstOutputTimeoutSeconds int    `yaml:"reasoning_first_output_timeout_seconds,omitempty"`
+	RateLimitScope                     string `yaml:"rate_limit_scope,omitempty"`
 	// Channel 是账号渠道名（type: channel 时必填）。账号渠道的凭据由交互式登录
 	// 产生，不存在 api_key_env，因此构造实例由 main 注入的工厂完成。
 	Channel string        `yaml:"channel,omitempty"`
@@ -126,10 +130,12 @@ func NewOpenAIProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 	}
 
 	return NewOpenAIProvider(&Config{
-		Name:           cfg.Name,
-		URL:            cfg.URL,
-		APIKey:         apiKey,
-		RequestTimeout: time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
+		Name:                        cfg.Name,
+		URL:                         cfg.URL,
+		APIKey:                      apiKey,
+		RequestTimeout:              time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
+		FirstOutputTimeout:          time.Duration(cfg.FirstOutputTimeoutSeconds) * time.Second,
+		ReasoningFirstOutputTimeout: time.Duration(cfg.ReasoningFirstOutputTimeoutSeconds) * time.Second,
 	}), nil
 }
 
@@ -141,9 +147,11 @@ func NewAnthropicProviderFromConfig(cfg *ProviderConfig) (Provider, error) {
 	}
 
 	return NewAnthropicProvider(&Config{
-		Name:   cfg.Name,
-		URL:    cfg.URL,
-		APIKey: apiKey,
+		Name:                        cfg.Name,
+		URL:                         cfg.URL,
+		APIKey:                      apiKey,
+		FirstOutputTimeout:          time.Duration(cfg.FirstOutputTimeoutSeconds) * time.Second,
+		ReasoningFirstOutputTimeout: time.Duration(cfg.ReasoningFirstOutputTimeoutSeconds) * time.Second,
 	}), nil
 }
 
@@ -380,6 +388,15 @@ func (w *BoundModelProviderWrapper) Available() bool {
 
 func (w *BoundModelProviderWrapper) Capabilities() []string {
 	return append([]string(nil), w.capabilities...)
+}
+
+// FirstOutputTimeoutOverride 转发底层 provider 的 per-provider 首字超时覆盖。
+// 嵌入接口只会提升 Provider 自身的方法集，覆盖方法必须显式转发才能对路由层可见。
+func (w *BoundModelProviderWrapper) FirstOutputTimeoutOverride() (time.Duration, time.Duration) {
+	if o, ok := w.Provider.(FirstOutputOverrideProvider); ok {
+		return o.FirstOutputTimeoutOverride()
+	}
+	return 0, 0
 }
 
 // ForwardStream 转发到底层支持流式的 provider

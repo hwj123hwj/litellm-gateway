@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // AnthropicProvider 实现 Anthropic API 兼容的提供商
@@ -34,6 +35,11 @@ func (p *AnthropicProvider) Name() string    { return p.config.Name }
 func (p *AnthropicProvider) URL() string     { return p.config.URL }
 func (p *AnthropicProvider) APIKey() string  { return p.config.APIKey }
 func (p *AnthropicProvider) UseBearer() bool { return p.config.UseBearer }
+
+// FirstOutputTimeoutOverride 见 OpenAIProvider.FirstOutputTimeoutOverride。
+func (p *AnthropicProvider) FirstOutputTimeoutOverride() (time.Duration, time.Duration) {
+	return p.config.FirstOutputTimeout, p.config.ReasoningFirstOutputTimeout
+}
 
 // ForwardStream 转发流式请求到提供商（Anthropic SSE 直接透传）
 func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {

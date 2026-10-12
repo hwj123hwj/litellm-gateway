@@ -224,12 +224,14 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 | 环境变量 | 默认秒数 | 用途 |
 |---|---:|---|
 | `ROUTING_FIRST_OUTPUT_SECONDS` | 15 | 普通流等待首个实际输出 |
-| `ROUTING_REASONING_FIRST_OUTPUT_SECONDS` | 45 | 推理模型或启用推理的请求等待首个实际输出 |
+| `ROUTING_REASONING_FIRST_OUTPUT_SECONDS` | 120 | 推理模型或启用推理的请求等待首个实际输出 |
 | `ROUTING_STREAM_IDLE_SECONDS` | 30 | 已开始的流连续无实际进展；心跳不延长等待 |
 | `ROUTING_ATTEMPT_SECONDS` | 30 | 非流式单次完整响应上限 |
-| `ROUTING_FALLBACK_WAIT_SECONDS` | 60 | 同一请求所有尝试共用的等待预算 |
+| `ROUTING_FALLBACK_WAIT_SECONDS` | 180 | 同一请求所有尝试共用的等待预算 |
 
 流开始输出后只检查 idle 超时，不用总等待预算截断正在生成的长回答。客户端取消立即取消上游，不增加失败计数。普通超时按现有连续失败阈值熔断，不会因一次偶发慢响应永久删除模型。`provider_attempts` 中的 `first_output_ms` 记录实际首输出，排除响应头和心跳。
+
+始终思考的模型（如 GLM 系列）在长思考时可能超过思考档默认值。可在 `providers.yaml` 的 Provider 条目按需覆盖首字期限：`first_output_timeout_seconds` 覆盖普通档、`reasoning_first_output_timeout_seconds` 覆盖思考档（0 表示沿用全局）。覆盖生效时该请求的 fallback 等待预算会抬升到至少覆盖值，不会被默认预算钳回；等待预算仍约束未覆盖的其他档。
 
 默认按模型实例冷却。确实共用同一限流额度的 Provider，可在 `providers.yaml` 的 Provider 条目设置 `rate_limit_scope: channel`，使该条目所有模型共用 429 冷却；只在 429 时共享，普通失败仍按模型计数。`model` 或留空使用独立冷却。手动 reset 该组任意模型也会重置组的冷却。
 

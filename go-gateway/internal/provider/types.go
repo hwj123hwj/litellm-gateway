@@ -405,6 +405,15 @@ type BoundModelProvider interface {
 	BoundModel() string
 }
 
+// FirstOutputOverrideProvider 是可选接口：provider 借它给出 providers.yaml 里
+// 的 per-provider 首字超时覆盖（0 表示该档沿用全局路由策略）。路由层优先取
+// 覆盖值，并在覆盖生效时把本请求的共享等待预算抬升到至少该值，避免被默认
+// fallback 预算钳回。
+type FirstOutputOverrideProvider interface {
+	Provider
+	FirstOutputTimeoutOverride() (plain, reasoning time.Duration)
+}
+
 // Config 提供商配置
 type Config struct {
 	Name           string
@@ -412,6 +421,12 @@ type Config struct {
 	APIKey         string
 	UseBearer      bool
 	RequestTimeout time.Duration
+
+	// FirstOutputTimeout / ReasoningFirstOutputTimeout 是 per-provider 首字超时
+	// 覆盖，来自 providers.yaml（0 表示沿用全局路由策略）。思考请求走 Reasoning
+	// 档，其余走 FirstOutput 档，语义与 ROUTING_*_FIRST_OUTPUT_SECONDS 一致。
+	FirstOutputTimeout          time.Duration
+	ReasoningFirstOutputTimeout time.Duration
 
 	// Auth 为非空时取代 APIKey：每次请求从它取动态令牌，401/403 时调用其
 	// Refresh 续期并重试一次。账号渠道（internal/channel）用它注入 OAuth token。

@@ -213,6 +213,12 @@ func (p *OpenAIProvider) URL() string     { return p.config.URL }
 func (p *OpenAIProvider) APIKey() string  { return p.config.APIKey }
 func (p *OpenAIProvider) UseBearer() bool { return true }
 
+// FirstOutputTimeoutOverride 暴露 providers.yaml 的 per-provider 首字超时覆盖；
+// 放在基础 provider 上，BoundModelProviderWrapper 通过接口提升把它暴露给路由层。
+func (p *OpenAIProvider) FirstOutputTimeoutOverride() (time.Duration, time.Duration) {
+	return p.config.FirstOutputTimeout, p.config.ReasoningFirstOutputTimeout
+}
+
 // ForwardRequest 将 Anthropic 格式请求转为 OpenAI 格式，发出后将响应转回 Anthropic 格式
 func (p *OpenAIProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
 	oaiReq := toOpenAIRequest(req)
