@@ -394,6 +394,13 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 
 	// 解析 input（可能是数组或字符串）
 	var messages []provider.Message
+	// input 数组里 role=system/developer 的条目统一抽到顶层 system 字段。
+	// zcode 会在 input 里发 system 消息而不是 instructions；此前 normalizeRole
+	// 把它映射成 user，workbuddy 上游要求首条消息必须是 system，直接 400
+	// ("first message is not system prompt")。抽出后 OpenAI 兼容 provider
+	// 会把 raw["system"] 重建为第一条 system 消息，Anthropic provider 走顶层
+	// system 字段，两边都合法。
+	var systemTexts []string
 
 	// 先尝试作为字符串
 	var inputStr string
@@ -415,6 +422,10 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 				// 可能是简单 message（有 role 无 type）
 				if item.Role != "" {
 					content := parseContentField(item.Content)
+					if text := systemTextFromItem(item.Role, content); text != "" {
+						systemTexts = append(systemTexts, text)
+						continue
+					}
 					role := normalizeRole(item.Role)
 					if r := firstNonEmpty(item.ReasoningContent, item.ReasoningText); r != "" && role == "assistant" {
 						content = prependThinkingBlock(content, r)
@@ -426,6 +437,10 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 				}
 			case item.Type == "message":
 				content := parseContentField(item.Content)
+				if text := systemTextFromItem(item.Role, content); text != "" {
+					systemTexts = append(systemTexts, text)
+					continue
+				}
 				role := normalizeRole(item.Role)
 				if r := firstNonEmpty(item.ReasoningContent, item.ReasoningText); r != "" && role == "assistant" {
 					content = prependThinkingBlock(content, r)
@@ -496,8 +511,12 @@ func responsesToProviderRequest(req *responsesRequest) (*provider.Request, error
 
 	// 构建 raw 字段
 	out.SetRawField("messages", out.Messages)
+	// system：instructions 在前，input 数组里的 system 条目按出现顺序合并在后
 	if req.Instructions != "" {
-		out.SetRawField("system", req.Instructions)
+		systemTexts = append([]string{req.Instructions}, systemTexts...)
+	}
+	if len(systemTexts) > 0 {
+		out.SetRawField("system", strings.Join(systemTexts, "\n\n"))
 	}
 	// Responses API 的 max_output_tokens 对应内部/Anthropic 兼容请求的
 	// max_tokens。之前为了规避部分 GLM 在极小预算下的空响应而直接丢弃，
@@ -590,6 +609,24 @@ func parseContentField(content json.RawMessage) provider.MessageContent {
 	}
 
 	return provider.NewStringContent(string(content))
+}
+
+// systemTextFromItem 判断 Responses input 条目是否是 system/developer 角色的
+// 纯文本消息；是则返回其文本内容（调用方合并进顶层 system 字段），否则返回空串。
+// 仅接受纯文本：system 消息携带图片/工具块等非文本内容时仍按普通消息走原路径，
+// 避免把多模态内容压扁丢失。
+func systemTextFromItem(role string, content provider.MessageContent) string {
+	if role != "system" && role != "developer" {
+		return ""
+	}
+	if blocks := content.Blocks(); len(blocks) > 0 {
+		for _, b := range blocks {
+			if b.Type != "text" {
+				return ""
+			}
+		}
+	}
+	return content.String()
 }
 
 // normalizeRole 将 Responses API 的 role 映射到 Anthropic 格式
