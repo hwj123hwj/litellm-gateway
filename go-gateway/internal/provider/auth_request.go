@@ -3,13 +3,20 @@ package provider
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
+	"syscall"
 )
 
 // postWithAuth 发送一次 POST 并注入鉴权头；上游返回 401/403 且配置了 AuthSource
 // 时，先用它续期一次再重试，让 OAuth token 过期不影响本次请求。
+//
+// 复用已被对端提前关闭的 keep-alive 连接时，请求可能没写完就 broken pipe /
+// connection reset。这类失败发生在请求完整发出之前、上游尚未处理，立即原样
+// 重发一次是安全的，单 provider 链的瞬时网络抖动因此不再直接打死请求。
 //
 // 返回值语义：成功或非鉴权失败时返回响应，body 未读取，由调用方 Close；
 // 未登录或续期失败时返回 *ProviderError，此时上游 body 已被读掉并关闭，
@@ -22,22 +29,44 @@ func postWithAuth(ctx context.Context, client *http.Client, name, url string, cf
 			Message:    "channel has no credential; login required",
 		}
 	}
-	for attempt := 0; ; attempt++ {
+	networkRetried, authRefreshed := false, false
+	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
 		}
 		setHeaders(req)
+		// WroteRequest 只在请求体完整写出后回调，用来区分「没发出去」和
+		// 「上游可能已收到」的失败；后者不重发，避免重复生成、重复计费。
+		var wroteRequest bool
+		trace := &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) { wroteRequest = true },
+		}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 		resp, err := client.Do(req)
 		if err != nil {
+			if !networkRetried && !wroteRequest && isTransientSendError(err) {
+				networkRetried = true
+				continue
+			}
 			return nil, fmt.Errorf("send request: %w", err)
 		}
-		if attempt == 0 && cfg.refreshAuth(ctx, resp.StatusCode) {
+		if !authRefreshed && cfg.refreshAuth(ctx, resp.StatusCode) {
+			authRefreshed = true
 			drainAndClose(resp.Body)
 			continue
 		}
 		return resp, nil
 	}
+}
+
+// isTransientSendError 判断 send 阶段错误是否为对端提前断连类瞬时故障。
+// 复用已被关闭的 keep-alive 连接表现为 broken pipe / connection reset / EOF。
+func isTransientSendError(err error) bool {
+	return errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // applyTransform 对请求体做渠道自定义改写。未配置 Transform 时原样返回。
