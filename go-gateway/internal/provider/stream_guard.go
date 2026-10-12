@@ -19,7 +19,10 @@ type StreamTiming struct{ FirstOutputMs *float64 }
 // The callback must honor context cancellation, as all built-in providers do.
 func (r *Router) RunStreamAttempt(ctx context.Context, req *Request, p Provider, dst io.Writer, forward func(context.Context, io.Writer) error) (StreamTiming, error) {
 	ctx = r.BeginRouting(ctx)
-	firstLimit := r.firstOutputTimeout(req, p)
+	firstLimit, overridden := r.firstOutputTimeout(req, p)
+	if overridden {
+		r.extendWaitingBudget(ctx, firstLimit)
+	}
 	limit := r.waitingTimeout(ctx, firstLimit)
 	if limit <= 0 {
 		return StreamTiming{}, routingTimeout(p.Name(), "fallback wait budget")
