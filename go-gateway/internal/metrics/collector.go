@@ -204,6 +204,8 @@ func (c *Collector) SetStore(store Store) {
 				c.todayTotal += ms.Requests
 				c.todaySuccess += ms.Successes
 				c.todayErrors += ms.Errors
+				// 日汇总不限于日志窗口，重启后的今日 Token 必须从同一基线恢复。
+				c.todayTokens += int64(ms.TotalTokens)
 				c.todayLatencySum += ms.AvgLatency * float64(ms.Requests)
 				c.todayCacheStats.CacheReadInputTokens += ms.CacheReadInputTokens
 				c.todayCacheStats.CacheCreationInputTokens += ms.CacheCreationInputTokens
@@ -258,7 +260,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		c.todayErrors++
 	}
 	c.todayLatencySum += r.Latency
-	c.todayTokens += int64(r.InputTokens + r.OutputTokens)
+	c.todayTokens += int64(totalTokens(r))
 
 	// 更新模型统计
 	if r.Model != "" {
