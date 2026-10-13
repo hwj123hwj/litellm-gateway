@@ -178,6 +178,7 @@ func (a *Assistant) Chat(ctx context.Context, message, model string, onUpdate fu
 		return "", fmt.Errorf("assistant prompt: %w", err)
 	}
 	var final string
+	var turnErr error
 	for ev := range events {
 		switch ev.Type {
 		case piagent.StreamEventTextDelta:
@@ -197,8 +198,18 @@ func (a *Assistant) Chat(ctx context.Context, message, model string, onUpdate fu
 				final = ev.FinalMessage.Text
 			}
 		case piagent.StreamEventError:
-			return final, fmt.Errorf("assistant turn error: %s", ev.Error)
+			// SDK 随后仍会发送部分结果并完成清理；读到 channel 关闭后
+			// 再返回，才能保留回答并允许下一轮复用同一 agent。
+			if turnErr == nil {
+				turnErr = fmt.Errorf("assistant turn error: %s", ev.Error)
+			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return final, fmt.Errorf("assistant turn error: %w", err)
+	}
+	if turnErr != nil {
+		return final, turnErr
 	}
 	if final == "" {
 		return "", fmt.Errorf("assistant turn finished without output")
