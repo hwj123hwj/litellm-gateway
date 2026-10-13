@@ -30,7 +30,12 @@ func (h *AssistantHandler) HandleModels(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "助理未启用（ASSISTANT_ENABLED=true + ASSISTANT_MODEL）"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"default": h.assistant.DefaultModel(), "models": h.assistant.Models()})
+	options := h.assistant.ModelOptions()
+	models := make([]string, 0, len(options))
+	for _, option := range options {
+		models = append(models, option.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"default": h.assistant.DefaultModel(), "models": models, "model_options": options})
 }
 
 // HandleChat POST /admin/assistant/chat {message, model?} → SSE 流。

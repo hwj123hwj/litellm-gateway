@@ -198,3 +198,9 @@ type Event struct {
 	Content string `json:"content"`
 	Tool    string `json:"tool"`
 }
+
+type ChatModelOption struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider,omitempty"`
+	Channel  string `json:"channel,omitempty"`
+}

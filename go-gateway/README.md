@@ -682,3 +682,9 @@ docker-compose up -d
 降级链遇到 Gemini 的 `400 User location is not supported for the API use` 时，会继续尝试下一供应商；其他 HTTP 400 参数错误与 HTTP 422 仍终止降级。
 
 DeepV 的 `claude-haiku-5-5` 不接受 `temperature`；网关转换该模型请求时会省略此字段，其他模型保持原有转发行为。
+
+### 助理模型目录与 OpenCode 限制
+
+`GET /admin/assistant/models` 每次读取当前路由目录，渠道登录、退出或 Provider 启停后无需重启网关。`models` 保持模型 ID 数组，同时新增 `model_options`（`id`、`provider`、`channel`）供客户端搜索模型或渠道名；多渠道 fallback 不强行标成单个渠道。默认模型仍由 `ASSISTANT_MODEL` 决定，但未登录或已停用时不再列为可选模型。
+
+OpenCode 免费档仅允许官方 OpenCode 客户端使用，上游登录不能解除此限制，见 [维护者说明](https://github.com/anomalyco/opencode/issues/49588)。配置中的免费模型保留目录兼容性，网关不将其推荐给助理；渠道页面明确提示此限制。付费模型需在 `providers.yaml` 中添加并获得对应授权。转换器只保留调用方真实工具，不再补不能执行的 bash/read 占位工具。助理继续通过网关自身的 OpenAI 端点调用，保留渠道鉴权、路由、指标与 fallback。

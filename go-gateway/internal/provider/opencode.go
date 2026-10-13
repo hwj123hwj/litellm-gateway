@@ -6,27 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// OpenCodeProvider 是 OpenCode Zen（opencode.ai/zen）专用 provider。
-//
-// 上游是标准 OpenAI Chat Completions 协议，因此复用 OpenAIProvider 的全部协议
-// 转换（Anthropic 请求 → OpenAI 请求、OpenAI SSE → Anthropic SSE）。唯一的差别在
-// 于上游对「免费通道」的请求形态有硬性要求：
-//
-//	(a) 请求体必须 stream:true（stream:false 直接返回 403 FreeTierError）；
-//	(b) 请求体必须带 tools 数组，且其中同时含 bash 与 read 两项；
-//	(c) User-Agent 必须形如 opencode/<version>；
-//	(d) 请求头 x-opencode-session 必须是 ses_ + 26 位 base62 字符。
-//
-// (a)(b) 由渠道的 Transform 补齐，(c)(d) 由渠道的请求头提供。provider 侧只需要
-// 保证「即使下游要的是非流式响应，也走流式端点，再把 SSE 累积回完整响应」——
-// 这正是 ForwardRequest 覆盖做的事。它沿用 TraeProvider 的既有模式
-// （上游只提供流式端点时的标准处理），只是这里复用 OpenAIProvider 的
-// ForwardStream 来做转换，不再自己解析私有 SSE。
+// OpenCodeProvider converts the paid Zen endpoint's SSE to gateway protocols.
+// Free models are restricted to the official OpenCode client and cannot be
+// recommended to external callers, even when an account is logged in.
 type OpenCodeProvider struct {
 	*OpenAIProvider
 }
@@ -36,10 +25,38 @@ func NewOpenCodeProvider(config *Config) *OpenCodeProvider {
 	return &OpenCodeProvider{OpenAIProvider: NewOpenAIProvider(config)}
 }
 
+func openCodeFreeModel(id string) bool {
+	return id == "big-pickle" || strings.HasSuffix(id, "-free")
+}
+func (p *OpenCodeProvider) Available() bool {
+	if openCodeFreeModel(p.config.Name) {
+		return false
+	}
+	if p.config.Auth != nil {
+		token := p.config.Auth.BearerToken()
+		return token != "" && token != "public"
+	}
+	return p.config.APIKey != "" && p.config.APIKey != "public"
+}
+func (p *OpenCodeProvider) ForwardStream(ctx context.Context, req *Request, w io.Writer) error {
+	if openCodeFreeModel(req.Model) {
+		return &ProviderError{Provider: p.Name(), StatusCode: http.StatusForbidden,
+			Message: "OpenCode 免费档仅供官方 OpenCode 客户端使用；登录不会解除限制。请使用 OpenCode，或选择已授权的付费模型/其他渠道。"}
+	}
+	return p.OpenAIProvider.ForwardStream(ctx, req, w)
+}
+
+func (p *OpenCodeProvider) UnavailableReason() string {
+	if openCodeFreeModel(p.config.Name) {
+		return "OpenCode 免费档仅供官方 OpenCode 客户端使用；登录不会解除限制，请选择已授权的付费模型或其他渠道"
+	}
+	return "OpenCode 付费模型需要有效账号授权"
+}
+
 // ForwardRequest 发一次非流式请求：内部走流式端点，把 Anthropic SSE 累积成完整响应。
 //
 // 为什么不直接复用 OpenAIProvider.ForwardRequest：那条路径把上游响应体当普通 JSON
-// 解析，而 OpenCode 免费通道强制 stream:true，响应体是 SSE 文本，Unmarshal 必然失败。
+// 解析；此适配器统一使用 stream:true，响应体是 SSE 文本，需要累积后转换。
 func (p *OpenCodeProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

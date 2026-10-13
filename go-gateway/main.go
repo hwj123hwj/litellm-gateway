@@ -215,20 +215,10 @@ func main() {
 		if apiKey == "" {
 			apiKey = cfg.MasterKey
 		}
-		// 聊天模型清单：具备文本能力、非单一用途模型（向量/语音转写）、
-		// 且当前可用（渠道已登录、provider 已启用）。配置加载会给所有
-		// 模型补 text 能力（聊天路由需要），因此 embedding 与
-		// audio_transcription 必须显式排除；未登录渠道的模型选了也无法
-		// 对话，一并排除。
-		chatModels := []string{}
-		for _, id := range assistantChatModelIDs(router.ListModelInfos()) {
-			if router.ModelUsable(id) {
-				chatModels = append(chatModels, id)
-			}
-		}
 		resident, err := assistant.New(assistant.Config{
-			Enabled: true, Model: cfg.Assistant.Model, Models: chatModels,
-			BaseURL: baseURL, APIKey: apiKey,
+			Enabled: true, Model: cfg.Assistant.Model,
+			ModelCatalog: func() []assistant.ModelOption { return assistantChatModelOptions(router) },
+			BaseURL:      baseURL, APIKey: apiKey,
 		}, memoryStore, logger)
 		if err != nil {
 			logger.Printf("Warning: assistant init failed: %v（继续运行，助理端点返回 503）", err)
@@ -719,4 +709,19 @@ func startCleanupTask(ctx context.Context, store *storage.SQLiteStore, archiveCf
 			}
 		}
 	}
+}
+
+func assistantChatModelOptions(router *provider.Router) []assistant.ModelOption {
+	infos := router.ListModelInfos()
+	byID := make(map[string]provider.ModelInfo, len(infos))
+	for _, info := range infos {
+		byID[info.ID] = info
+	}
+	options := []assistant.ModelOption{}
+	for _, id := range assistantChatModelIDs(infos) {
+		if router.ModelUsable(id) {
+			options = append(options, assistant.ModelOption{ID: id, Provider: byID[id].Provider, Channel: router.ModelChannel(id)})
+		}
+	}
+	return options
 }

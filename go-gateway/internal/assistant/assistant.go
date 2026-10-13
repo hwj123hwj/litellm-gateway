@@ -29,6 +29,8 @@ type Config struct {
 	Model string
 	// Models 是聊天端点允许按请求切换的模型清单（应包含 Model）；空则只有 Model。
 	Models []string
+	// ModelCatalog supplies a fresh catalog on each list and chat request.
+	ModelCatalog func() []ModelOption
 	// BaseURL 指向网关自身（默认 http://127.0.0.1:<port>）。
 	BaseURL string
 	// APIKey 默认复用 MasterKey。
@@ -47,6 +49,7 @@ type Assistant struct {
 	system    string
 	defaultM  string
 	available []string
+	catalog   func() []ModelOption
 	memories  memory.Store
 	log       *log.Logger
 }
@@ -61,25 +64,14 @@ func New(cfg Config, memories memory.Store, logger *log.Logger) (*Assistant, err
 	registry := providers.NewRegistry()
 	registry.Register(providers.NewOpenAIProvider(cfg.APIKey, cfg.BaseURL))
 	available := dedupeModels(append([]string{cfg.Model}, cfg.Models...))
-	models := map[string]ai.Model{}
-	for _, id := range available {
-		models[id] = ai.Model{
-			ID:            id,
-			Name:          id,
-			API:           "openai-completions",
-			Provider:      "openai", // 必须与 provider.Name() 一致，Agent 以此解析
-			BaseURL:       cfg.BaseURL,
-			ContextWindow: 128000,
-			MaxTokens:     8192,
-		}
-	}
+
 	system := cfg.System
 	if system == "" {
 		system = DefaultSystemPrompt
 	}
 	build := func(modelID, sys string) *piagent.Agent {
 		return piagent.New(piagent.Options{
-			Model:    models[modelID],
+			Model:    ai.Model{ID: modelID, Name: modelID, API: "openai-completions", Provider: "openai", BaseURL: cfg.BaseURL, ContextWindow: 128000, MaxTokens: 8192},
 			Registry: registry,
 			System:   sys,
 			Tools: []piagent.Tool{
@@ -98,6 +90,7 @@ func New(cfg Config, memories memory.Store, logger *log.Logger) (*Assistant, err
 		system:    system,
 		defaultM:  cfg.Model,
 		available: available,
+		catalog:   cfg.ModelCatalog,
 		memories:  memories,
 		log:       logger,
 	}, nil
@@ -119,10 +112,39 @@ func dedupeModels(ids []string) []string {
 // DefaultModel returns the model used when a chat request omits one.
 func (a *Assistant) DefaultModel() string { return a.defaultM }
 
+// ModelOption carries the identity and searchable origin of a chat model.
+type ModelOption struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider,omitempty"`
+	Channel  string `json:"channel,omitempty"`
+}
+
+func (a *Assistant) ModelOptions() []ModelOption {
+	if a.catalog != nil {
+		options := a.catalog()
+		out := make([]ModelOption, 0, len(options))
+		seen := map[string]bool{}
+		for _, option := range options {
+			if option.ID != "" && !seen[option.ID] {
+				out = append(out, option)
+				seen[option.ID] = true
+			}
+		}
+		return out
+	}
+	out := make([]ModelOption, 0, len(a.available))
+	for _, id := range a.available {
+		out = append(out, ModelOption{ID: id})
+	}
+	return out
+}
+
 // Models lists the model IDs a chat request may select.
 func (a *Assistant) Models() []string {
-	out := make([]string, len(a.available))
-	copy(out, a.available)
+	out := []string{}
+	for _, option := range a.ModelOptions() {
+		out = append(out, option.ID)
+	}
 	return out
 }
 
@@ -165,7 +187,7 @@ func (a *Assistant) Chat(ctx context.Context, message, model string, onUpdate fu
 		model = a.defaultM
 	}
 	if !a.modelAllowed(model) {
-		return "", fmt.Errorf("未知模型 %q；可用模型：%s", model, strings.Join(a.available, ", "))
+		return "", fmt.Errorf("模型 %q 当前不可用或未配置；可用模型：%s", model, strings.Join(a.Models(), ", "))
 	}
 	agent, ok := a.agents[model]
 	if !ok {
@@ -218,7 +240,7 @@ func (a *Assistant) Chat(ctx context.Context, message, model string, onUpdate fu
 }
 
 func (a *Assistant) modelAllowed(model string) bool {
-	for _, id := range a.available {
+	for _, id := range a.Models() {
 		if id == model {
 			return true
 		}

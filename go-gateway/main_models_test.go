@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log"
 	"testing"
@@ -55,5 +56,35 @@ func TestAssistantChatModelIDsExcludeSinglePurpose(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("assistant chat models = %v, want %v", got, want)
 		}
+	}
+}
+
+type catalogAuth struct{ token string }
+
+func (a *catalogAuth) BearerToken() string          { return a.token }
+func (a *catalogAuth) Refresh(context.Context) bool { return false }
+func TestAssistantCatalogTracksChannelLoginAndDisable(t *testing.T) {
+	auth := &catalogAuth{}
+	r := provider.NewRouter(log.New(io.Discard, "", 0))
+	r.RegisterProvider("bound", provider.NewOpenAIProvider(&provider.Config{Name: "bound", Auth: auth}))
+	r.SetProviderChannel("bound", "cline")
+	r.RegisterChain("mimo-model", []string{"bound"})
+	r.RegisterModel(provider.ModelInfo{ID: "mimo-model", Provider: "bound", Capabilities: []string{"text"}})
+	if len(assistantChatModelOptions(r)) != 0 {
+		t.Fatal("logged out model advertised")
+	}
+	auth.token = "test-key"
+	got := assistantChatModelOptions(r)
+	if len(got) != 1 || got[0].Channel != "cline" {
+		t.Fatal(got)
+	}
+	r.SetProviderEnabled("bound", false)
+	if len(assistantChatModelOptions(r)) != 0 {
+		t.Fatal("disabled model advertised")
+	}
+	r.SetProviderEnabled("bound", true)
+	auth.token = ""
+	if len(assistantChatModelOptions(r)) != 0 {
+		t.Fatal("logout ignored")
 	}
 }

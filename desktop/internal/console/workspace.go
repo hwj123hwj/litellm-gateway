@@ -331,7 +331,7 @@ func (a *App) modelPickerModal(c *ui.Context) {
 	ui.Modal(c, &a.modelPickerOpen, func() {
 		ui.Column(c).Width(640).Gap(14).Children(func() {
 			ui.Text(c, "选择模型").FontSize(20).Bold()
-			if ui.TextInput(c, &a.modelPickerFilter).Label("搜索模型").Placeholder("输入模型名称过滤").FillWidth().AutoFocus().Changed() {
+			if ui.TextInput(c, &a.modelPickerFilter).Label("搜索模型").Placeholder("输入模型、Provider 或渠道名称过滤").FillWidth().AutoFocus().Changed() {
 				a.modelPickerList = ui.ListState{}
 			}
 			models := a.filteredChatModels()
@@ -348,6 +348,9 @@ func (a *App) modelPickerModal(c *ui.Context) {
 							a.closeModelPicker()
 							a.savePrefs()
 						})
+						if channel := a.chatModelOptions[name].Channel; channel != "" {
+							muted(c, channel)
+						}
 						if current {
 							chip(c, "当前", okGreen)
 						}
@@ -770,7 +773,8 @@ func (a *App) assistantView(c *ui.Context) {
 			a.chatModel = chatDefaultOption
 		}
 		ui.Button(c, "模型 · "+a.chatModel).Label("选择模型，当前 " + a.chatModel).Disabled(a.busy != "").OnClick(func() {
-			a.modelFilter = ""
+			a.modelPickerFilter = ""
+			a.reload()
 			a.modelPickerList = ui.ListState{}
 			a.modelPickerOpen = true
 		})

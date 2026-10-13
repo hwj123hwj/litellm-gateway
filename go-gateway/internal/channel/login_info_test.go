@@ -31,7 +31,7 @@ func TestLoginInfoReportsMissingConfigurationWithoutCredentials(t *testing.T) {
 			t.Fatalf("%s %+v", ch.Name(), info)
 		}
 	}
-	if !LoginInfoFor(NewOpenCodeChannel(dir)).Anonymous {
-		t.Fatal("OpenCode anonymous capability missing")
+	if info := LoginInfoFor(NewOpenCodeChannel(dir)); info.Anonymous || !strings.Contains(info.SetupHint, "免费档") {
+		t.Fatal("OpenCode restriction missing")
 	}
 }

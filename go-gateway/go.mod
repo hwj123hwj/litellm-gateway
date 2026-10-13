@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
-	github.com/hwj123hwj/easyagent v0.13.2-0.20261013052019-93e77ec75bf8
+	github.com/hwj123hwj/easyagent v0.13.2
 	github.com/joho/godotenv v1.5.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0
