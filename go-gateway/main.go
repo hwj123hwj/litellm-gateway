@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -77,7 +76,6 @@ func main() {
 	} else {
 		collector.SetStore(store)
 		sqliteStore = store
-		defer store.Close()
 		logger.Printf("SQLite metrics store: %s", sqlitePath)
 
 		// 归档复用同一个 SQLite 文件（独立的 conversation_archives 表），
@@ -97,7 +95,6 @@ func main() {
 
 	// 构建归档器（即便 ARCHIVE_ENABLED=false 也是安全的 no-op）
 	archiver = archive.NewArchiver(archiveStore, cfg.Archive, logger)
-	defer archiver.Close()
 
 	// 初始化路由器
 	router := provider.NewRouterWithCircuitConfig(logger, provider.CircuitBreakerConfig{
@@ -343,18 +340,17 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
-	go func() {
-		<-shutdownSignals.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			logger.Printf("Graceful shutdown timed out: %v", err)
-		}
-	}()
-
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Printf("Failed to start server: %v", err)
+	if err := serveGateway(shutdownSignals, server, server.ListenAndServe, 15*time.Second); err != nil {
+		logger.Printf("Server stopped: %v", err)
 	}
+	// 所有正常请求已提交终态；异步指标和归档共用一个有界清理窗口，数据库最后关闭。
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelCleanup()
+	var persistenceStore storeCloser
+	if sqliteStore != nil {
+		persistenceStore = sqliteStore
+	}
+	closeGatewayPersistence(cleanupCtx, collector, archiver, persistenceStore, logger)
 }
 
 func runCommand(args []string) error {

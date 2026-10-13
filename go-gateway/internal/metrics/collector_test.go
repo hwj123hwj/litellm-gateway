@@ -146,3 +146,27 @@ func TestDashboardSummaryAggregatesTodayTokens(t *testing.T) {
 		t.Fatalf("today tokens = %d, want 200", summary.TodayTokens)
 	}
 }
+
+type dailyStore struct {
+	memoryStore
+	stats []ModelStats
+}
+
+func (s *dailyStore) GetDailyStats(string) ([]ModelStats, error) { return s.stats, nil }
+
+func TestCollectorRestoresDailyTokensBeyondLogWindow(t *testing.T) {
+	store := &dailyStore{stats: []ModelStats{
+		{Model: "first", Requests: 2100, Successes: 2100, TotalTokens: 210000},
+		{Model: "second", Requests: 1, Successes: 1, TotalTokens: 120},
+	}}
+	c := NewCollector()
+	c.SetStore(store)
+	if got := c.GetDashboard().TodayTokens; got != 210120 {
+		t.Fatalf("restored today_tokens = %d, want 210120", got)
+	}
+	c.Record(RequestRecord{Timestamp: time.Now(), Method: http.MethodPost, Path: "/v1/messages", Model: "second", StatusCode: 200,
+		InputTokens: 10, OutputTokens: 20, CacheUsageKnown: true, CacheInputTokens: 110})
+	if got := c.GetDashboard().TodayTokens; got != 210250 {
+		t.Fatalf("today_tokens after cached request = %d, want 210250", got)
+	}
+}

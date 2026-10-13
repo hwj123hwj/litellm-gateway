@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -107,14 +108,25 @@ func IsBusinessRequest(method, path string) bool {
 	}
 }
 
+// SSE 已提交 HTTP 200 后仍可能中断；最终请求错误比响应头更能反映终态。
+func RequestSucceeded(r RequestRecord) bool {
+	return r.StatusCode >= 200 && r.StatusCode < 400 && r.Error == ""
+}
+
 // Collector 内存指标收集器
 type Collector struct {
-	mu         sync.RWMutex
-	records    []RequestRecord // 环形缓冲
-	maxRecords int
-	startTime  time.Time
-	todayStart time.Time
-	store      Store // 可选的持久化存储
+	mu            sync.RWMutex
+	records       []RequestRecord // 环形缓冲
+	maxRecords    int
+	startTime     time.Time
+	todayStart    time.Time
+	store         Store // 可选的持久化存储
+	persistCtx    context.Context
+	cancelWrites  context.CancelFunc
+	pendingWrites int
+	writesDone    chan struct{}
+	persistError  error
+	closed        bool
 
 	// 按天重置的计数器
 	todayTotal      int
@@ -138,6 +150,9 @@ type Collector struct {
 func NewCollector() *Collector {
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	persistCtx, cancelWrites := context.WithCancel(context.Background())
+	writesDone := make(chan struct{})
+	close(writesDone)
 	return &Collector{
 		records:       make([]RequestRecord, 0, 2000),
 		maxRecords:    2000,
@@ -146,6 +161,9 @@ func NewCollector() *Collector {
 		modelStats:    make(map[string]*ModelStats),
 		providerStats: make(map[string]*ProviderStats),
 		activeModels:  make(map[string]bool),
+		persistCtx:    persistCtx,
+		cancelWrites:  cancelWrites,
+		writesDone:    writesDone,
 	}
 }
 
@@ -204,6 +222,8 @@ func (c *Collector) SetStore(store Store) {
 				c.todayTotal += ms.Requests
 				c.todaySuccess += ms.Successes
 				c.todayErrors += ms.Errors
+				// 日汇总不限于日志窗口，重启后的今日 Token 必须从同一基线恢复。
+				c.todayTokens += int64(ms.TotalTokens)
 				c.todayLatencySum += ms.AvgLatency * float64(ms.Requests)
 				c.todayCacheStats.CacheReadInputTokens += ms.CacheReadInputTokens
 				c.todayCacheStats.CacheCreationInputTokens += ms.CacheCreationInputTokens
@@ -240,11 +260,55 @@ func (c *Collector) Record(r RequestRecord) {
 	}
 
 	// 持久化到 SQLite
-	if c.store != nil {
-		go c.store.SaveRecord(r)
+	if c.store != nil && !c.closed {
+		if c.pendingWrites == 0 {
+			c.writesDone = make(chan struct{})
+		}
+		c.pendingWrites++
+		store := c.store
+		go c.saveRecord(store, r)
 	}
 
 	c.applyToAggregates(r)
+}
+
+func (c *Collector) saveRecord(store Store, r RequestRecord) {
+	var err error
+	if contextual, ok := store.(interface {
+		SaveRecordContext(context.Context, RequestRecord) error
+	}); ok {
+		err = contextual.SaveRecordContext(c.persistCtx, r)
+	} else {
+		err = store.SaveRecord(r)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.persistError == nil {
+		c.persistError = err
+	}
+	c.pendingWrites--
+	if c.pendingWrites == 0 {
+		close(c.writesDone)
+	}
+}
+
+// Close 必须在 HTTP 请求排空后调用；接收过的异步指标先落盘，再关闭数据库。
+// 共用退出 deadline，写入挂起时取消支持 context 的存储，不无限等待。
+func (c *Collector) Close(ctx context.Context) error {
+	c.mu.Lock()
+	c.closed = true
+	done := c.writesDone
+	c.mu.Unlock()
+	select {
+	case <-done:
+		c.cancelWrites()
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		return c.persistError
+	case <-ctx.Done():
+		c.cancelWrites()
+		return ctx.Err()
+	}
 }
 
 // applyToAggregates 把一条业务请求计入今日计数器与模型/提供商聚合。
@@ -252,13 +316,13 @@ func (c *Collector) Record(r RequestRecord) {
 func (c *Collector) applyToAggregates(r RequestRecord) {
 	// 更新每日计数
 	c.todayTotal++
-	if r.StatusCode >= 200 && r.StatusCode < 400 {
+	if RequestSucceeded(r) {
 		c.todaySuccess++
 	} else {
 		c.todayErrors++
 	}
 	c.todayLatencySum += r.Latency
-	c.todayTokens += int64(r.InputTokens + r.OutputTokens)
+	c.todayTokens += int64(totalTokens(r))
 
 	// 更新模型统计
 	if r.Model != "" {
@@ -270,7 +334,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		}
 		ms.Requests++
 		ms.TotalTokens += totalTokens(r)
-		if r.StatusCode >= 200 && r.StatusCode < 400 {
+		if RequestSucceeded(r) {
 			ms.Successes++
 		} else {
 			ms.Errors++
@@ -290,7 +354,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		}
 		ps.Requests++
 		ps.LastCheck = r.Timestamp
-		if r.StatusCode >= 200 && r.StatusCode < 400 {
+		if RequestSucceeded(r) {
 			ps.Successes++
 		} else {
 			ps.Errors++

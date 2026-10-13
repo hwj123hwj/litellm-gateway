@@ -77,3 +77,37 @@ func TestSQLiteStoreMigratesLegacyRequestLogsTable(t *testing.T) {
 		t.Fatalf("SaveRecord() after migration error = %v", err)
 	}
 }
+
+func TestSQLiteStoreCountsInterruptedHTTP200AsError(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "metrics.db"), log.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Now()
+	if err := store.SaveRecord(metrics.RequestRecord{Timestamp: now, Method: "POST", Path: "/v1/messages", Model: "mock", StatusCode: 200, IsStream: true, Error: "upstream stream interrupted"}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := store.GetDailyStats(now.Format("2006-01-02"))
+	if err != nil || len(stats) != 1 || stats[0].Successes != 0 || stats[0].Errors != 1 {
+		t.Fatalf("daily stats=%+v, err=%v", stats, err)
+	}
+}
+
+func TestSQLiteStoreRollsBackRecordWhenDailyStatsFail(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "metrics.db"), log.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.db.Exec(`CREATE TRIGGER fail_daily_stats BEFORE INSERT ON daily_stats BEGIN SELECT RAISE(ABORT, 'fixture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRecord(metrics.RequestRecord{Timestamp: time.Now(), Model: "mock"}); err == nil {
+		t.Fatal("injected daily stats failure was ignored")
+	}
+	logs, err := store.GetRecentLogs(10)
+	if err != nil || len(logs) != 0 {
+		t.Fatalf("partial transaction retained request log: logs=%v, err=%v", logs, err)
+	}
+}

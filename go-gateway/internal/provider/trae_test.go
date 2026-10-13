@@ -216,7 +216,7 @@ func TestTraeStreamTranslatesToAnthropicSSE(t *testing.T) {
 // TestTraeSSEDataAppends 验证同一帧内的多条 data: 行是**追加**拼接（不是覆盖、
 // 也不是各成独立帧）：拼出的 JSON 若合法则解析成一帧。
 func TestTraeSSEDataAppends(t *testing.T) {
-	frames := []string{"event: output\ndata: {\"response\":\"ok\",\ndata: \"extra\":1}\n\n"}
+	frames := []string{"event: output\ndata: {\"response\":\"ok\",\ndata: \"extra\":1}\n\n", traeFrame("done", `{"finish_reason":"stop"}`)}
 
 	p := traeProviderForTest(t, traeFakeServer(t, frames, nil, nil).URL, "trae/glm-5.2", NewStaticAuth("tok"))
 	var sb strings.Builder

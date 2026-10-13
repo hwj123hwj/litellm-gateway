@@ -310,6 +310,7 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 		if err := h.streamFromProvider(c, req, p, sink); err == nil {
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
+			lastErr = nil
 			streamOK = true
 			break
 		} else {
@@ -344,12 +345,7 @@ func (h *openAIChatCompletionsHandler) handleStream(c *gin.Context, req *provide
 			c.JSON(routingErrorStatus(lastErr), gin.H{"error": fmt.Sprintf("all providers failed: %v", lastErr)})
 			return
 		}
-		status, reason := parseStreamEndState(sink.Bytes(), func() error {
-			if !streamOK {
-				return lastErr
-			}
-			return nil
-		}())
+		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
 		submitArchive(c, h.archiver, archive.ProtocolChatCompletions, reqBody, sink.Bytes(),
 			status, c.Writer.Status(), reason)
 		return

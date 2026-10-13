@@ -143,7 +143,12 @@ func (h *SkillsInstallJobsHandler) lookup(id string) (*installJob, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	job, ok := h.jobs[id]
-	return job, ok
+	if !ok {
+		return nil, false
+	}
+	// 响应在锁外编码，不能暴露后台安装协程仍在修改的共享对象。
+	snapshot := *job
+	return &snapshot, true
 }
 
 // record 登记新任务并清理超出保留数量的已完结任务。
