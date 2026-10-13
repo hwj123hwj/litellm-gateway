@@ -97,7 +97,7 @@ func (c *OpenCodeChannel) ChatURL() string { return c.apiBase + opencodeChatPath
 
 // ClientHeaders 是复刻 opencode 客户端所需的**固定**请求头。
 //
-// User-Agent 必须是 opencode/<version>：缺失或形如 curl / go-llm-gateway 一律 403。
+// 沿用已有渠道头；这些头不保证第三方客户端可访问免费档。
 // Authorization 由 provider.applyAuth 写入；随时变化的会话头见 DynamicHeaders。
 func (c *OpenCodeChannel) ClientHeaders() map[string]string {
 	return map[string]string{
@@ -109,9 +109,7 @@ func (c *OpenCodeChannel) ClientHeaders() map[string]string {
 
 // DynamicHeaders 返回每个请求重新求值的会话头。
 //
-// x-opencode-session 是唯一被上游校验的动态头（必须 ses_ + 26 位 base62），
-// project/request 不被校验但一并发送以保持形态一致（project 由当前令牌派生，
-// 与官方「身份 → 项目」的派生方式相同）。
+// 会话、项目和请求身份每次生成；它们用于协议兼容，不解除免费档限制。
 func (c *OpenCodeChannel) DynamicHeaders() func() map[string]string {
 	return func() map[string]string {
 		identity := c.accounts.BearerToken()

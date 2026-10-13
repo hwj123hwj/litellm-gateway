@@ -56,7 +56,7 @@ func (p *OpenCodeProvider) UnavailableReason() string {
 // ForwardRequest 发一次非流式请求：内部走流式端点，把 Anthropic SSE 累积成完整响应。
 //
 // 为什么不直接复用 OpenAIProvider.ForwardRequest：那条路径把上游响应体当普通 JSON
-// 解析，而 OpenCode 免费通道强制 stream:true，响应体是 SSE 文本，Unmarshal 必然失败。
+// 解析；此适配器统一使用 stream:true，响应体是 SSE 文本，需要累积后转换。
 func (p *OpenCodeProvider) ForwardRequest(ctx context.Context, req *Request) (*Response, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -112,7 +112,7 @@ func dedupeModels(ids []string) []string {
 // DefaultModel returns the model used when a chat request omits one.
 func (a *Assistant) DefaultModel() string { return a.defaultM }
 
-// Models lists the model IDs a chat request may select.
+// ModelOption carries the identity and searchable origin of a chat model.
 type ModelOption struct {
 	ID       string `json:"id"`
 	Provider string `json:"provider,omitempty"`
@@ -138,6 +138,8 @@ func (a *Assistant) ModelOptions() []ModelOption {
 	}
 	return out
 }
+
+// Models lists the model IDs a chat request may select.
 func (a *Assistant) Models() []string {
 	out := []string{}
 	for _, option := range a.ModelOptions() {
@@ -185,7 +187,7 @@ func (a *Assistant) Chat(ctx context.Context, message, model string, onUpdate fu
 		model = a.defaultM
 	}
 	if !a.modelAllowed(model) {
-		return "", fmt.Errorf("未知模型 %q；可用模型：%s", model, strings.Join(a.Models(), ", "))
+		return "", fmt.Errorf("模型 %q 当前不可用或未配置；可用模型：%s", model, strings.Join(a.Models(), ", "))
 	}
 	agent, ok := a.agents[model]
 	if !ok {
