@@ -11,7 +11,7 @@
 |---|---|
 | 网关（本仓库） | 记忆存储、作用域路由、命中观测、治理 API、（后续）请求注入 |
 | agent-lessons | 从归档流编译候选知识（后续接入：编译产物以 candidate 落回本层） |
-| hwj-wiki personal | 长文档与代码事实的检索，与本层互补不重叠 |
+| 项目 `docs/` 与 agent-lessons 经验文档 | 长文档与代码事实的查阅，与命题记忆互补；具体存储以当前项目结构为准 |
 
 设计原则：
 
@@ -92,6 +92,10 @@
 返回 `error`，已收到的 `text_delta` 保留供展示。助理等待 SDK 本轮收尾后
 释放会话，随后可继续请求；客户端取消时保留取消错误并结束本轮。
 
+SDK 版本以 [go.mod](../go-gateway/go.mod) 为准。`PromptStream` 的 `error` 后仍可能产生部分结果和清理事件，消费者须读到 channel 关闭再返回；不能把带部分消息的 `done` 当成成功覆盖原错误。设计参考 ZCode 的流式生命周期，网关适配与验证见 [PR #93](https://github.com/hwj123hwj/litellm-gateway/pull/93) 和 [PR #94](https://github.com/hwj123hwj/litellm-gateway/pull/94)。
+
+`GET /admin/assistant/models` 返回默认值和可选模型，聊天 body 为 `{"message":"...","model":"可选模型 ID"}`；省略 model 使用 `ASSISTANT_MODEL`，按次选择不改写默认配置。每个模型各有独立的内存历史，助理 Chat 整体串行执行；更新人设重建全部模型实例。客户端断开取消本轮，已断开的连接不保证收到收尾帧。
+
 **人设自定义与反馈（v1.2）**：
 - `GET/PUT /admin/assistant/prompt` — 用户自定义 system prompt（存 `agent_settings` 表，
   保存后热更新无需重启；空串恢复内置默认）。内置默认已编码核心纪律：
@@ -104,6 +108,8 @@
 - LLM 调用**回环走网关自身**（`ASSISTANT_BASE_URL` 默认 `http://127.0.0.1:<port>`，
   Key 默认复用 MasterKey）——助理流量与普通客户端同路，享受 fallback 链与指标记录；
 - 挂载网关域工具（EasyAgent `agent.Tool` 接口）：
+  - `gateway_status`：只读查询 Provider 健康、熔断和今日统计；
+  - `gateway_logs`：只读查询近期请求及失败日志；
   - `memory_lookup`：按作用域检索 active 记忆；
   - `memory_list_pending`：列出待确认候选；
   - `memory_propose`：提案候选记忆（**只能进 candidate，无权确认**）——
