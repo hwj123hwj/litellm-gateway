@@ -88,6 +88,10 @@
 网关内嵌一个基于 EasyAgent SDK（`github.com/hwj123hwj/easyagent/sdk`）的常驻智能体，
 端点 `POST /admin/assistant/chat`（Admin Token，SSE 流式）。
 
+成功完成返回 `done`；上游缺少完成标记就断开，或发送显式业务错误时，
+返回 `error`，已收到的 `text_delta` 保留供展示。助理等待 SDK 本轮收尾后
+释放会话，随后可继续请求；客户端取消时保留取消错误并结束本轮。
+
 **人设自定义与反馈（v1.2）**：
 - `GET/PUT /admin/assistant/prompt` — 用户自定义 system prompt（存 `agent_settings` 表，
   保存后热更新无需重启；空串恢复内置默认）。内置默认已编码核心纪律：
