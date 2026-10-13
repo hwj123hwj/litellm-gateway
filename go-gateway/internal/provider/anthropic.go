@@ -77,7 +77,7 @@ func (p *AnthropicProvider) ForwardStream(ctx context.Context, req *Request, w i
 	kick, idleTripped := startStreamIdleWatchdog(streamCtx, idleTimeout, cancel)
 
 	// 透传没有行循环，包装 reader 在每次 Read 时喂看门狗
-	_, err = io.Copy(w, kickingReader{R: resp.Body, Kick: kick})
+	err = copyValidatedStream(p.Name(), w, kickingReader{R: resp.Body, Kick: kick})
 	if err != nil && idleTripped() {
 		return fmt.Errorf("upstream stream idle over %v: no data received", idleTimeout)
 	}

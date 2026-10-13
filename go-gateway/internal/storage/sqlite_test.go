@@ -78,6 +78,22 @@ func TestSQLiteStoreMigratesLegacyRequestLogsTable(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreCountsInterruptedHTTP200AsError(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "metrics.db"), log.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Now()
+	if err := store.SaveRecord(metrics.RequestRecord{Timestamp: now, Method: "POST", Path: "/v1/messages", Model: "mock", StatusCode: 200, IsStream: true, Error: "upstream stream interrupted"}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := store.GetDailyStats(now.Format("2006-01-02"))
+	if err != nil || len(stats) != 1 || stats[0].Successes != 0 || stats[0].Errors != 1 {
+		t.Fatalf("daily stats=%+v, err=%v", stats, err)
+	}
+}
+
 func TestSQLiteStoreRollsBackRecordWhenDailyStatsFail(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "metrics.db"), log.Default())
 	if err != nil {

@@ -65,18 +65,19 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 		if err := h.streamFromProvider(c, providerReq, p, originalModel, sink); err == nil {
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
+			lastErr = nil
 			streamOK = true
 			break
 		} else {
 			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
+			lastErr = err
 			h.logger.Printf("Responses stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
 				_ = writeResponsesStreamError(c.Writer, err)
 				streamOK = true
 				break
 			}
-			lastErr = err
 			if !provider.ShouldFallback(err) {
 				setProviderErrorHeaders(c, err)
 				c.JSON(routingErrorStatus(err), gin.H{"error": gin.H{
@@ -102,12 +103,7 @@ func (h *responsesHandler) handleStream(c *gin.Context, req *responsesRequest, r
 			}})
 			return
 		}
-		status, reason := parseStreamEndState(sink.Bytes(), func() error {
-			if !streamOK {
-				return lastErr
-			}
-			return nil
-		}())
+		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
 		submitArchive(c, h.archiver, archive.ProtocolResponses, rawBody, sink.Bytes(),
 			status, c.Writer.Status(), reason)
 		return

@@ -760,6 +760,7 @@ func consumeTraeSSE(body io.Reader, em traeEmitter) error {
 		currentEvent string
 		currentData  strings.Builder
 		sawEvent     bool
+		terminal     bool
 		emitErr      error
 	)
 	dispatch := func() error {
@@ -775,6 +776,7 @@ func consumeTraeSSE(body io.Reader, em traeEmitter) error {
 		if json.Unmarshal([]byte(data), &frame) != nil {
 			return nil // 解析失败按空帧处理（与官方一致）
 		}
+		terminal = terminal || event == "done"
 		return applyTraeFrame(event, frame, em)
 	}
 
@@ -806,6 +808,9 @@ func consumeTraeSSE(body io.Reader, em traeEmitter) error {
 	}
 	if !sawEvent {
 		return fmt.Errorf("trae: upstream returned no events (empty response before first model event)")
+	}
+	if !terminal {
+		return incompleteStreamError("trae")
 	}
 	return nil
 }

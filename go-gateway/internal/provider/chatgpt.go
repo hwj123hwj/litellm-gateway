@@ -720,8 +720,7 @@ func (p *ChatGPTProvider) ForwardRawResponsesStream(ctx context.Context, reqBody
 		return NewHTTPError(p.Name(), resp, body)
 	}
 
-	_, err = io.Copy(w, resp.Body)
-	return err
+	return copyValidatedStream(p.Name(), w, resp.Body)
 }
 
 func (p *ChatGPTProvider) doResponsesRequest(ctx context.Context, body []byte, accessToken, accountID string) (*http.Response, error) {

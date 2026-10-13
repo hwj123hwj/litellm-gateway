@@ -885,6 +885,7 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 	openTextIndex := -1
 	openThinkingIndex := -1
 	stopReason := "end_turn"
+	terminal := false
 	var outputTokens int
 	var toolCalls deepVToolCalls
 
@@ -922,6 +923,7 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 			continue
 		}
 		if data == "[DONE]" {
+			terminal = true
 			break
 		}
 
@@ -938,6 +940,7 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 
 		for _, candidate := range genaiResp.Candidates {
 			if candidate.FinishReason != "" {
+				terminal = true
 				if reason := mapDeepVFinishReason(candidate.FinishReason); reason != "" {
 					stopReason = reason
 				}
@@ -985,6 +988,9 @@ func (p *DeepVProvider) convertStream(r io.Reader, w io.Writer, model string) er
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read DeepV stream: %w", err)
+	}
+	if !terminal {
+		return incompleteStreamError(p.Name())
 	}
 	blocks, err := toolCalls.blocks()
 	if err != nil {

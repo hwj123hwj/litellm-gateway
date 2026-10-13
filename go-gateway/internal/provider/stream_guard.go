@@ -54,8 +54,8 @@ func (r *Router) RunStreamAttempt(ctx context.Context, req *Request, p Provider,
 	if timeoutErr != nil {
 		return timing, routingTimeout(p.Name(), timeoutErr.Error())
 	}
-	if err == nil && !w.released {
-		return timing, fmt.Errorf("provider %s ended without model output or terminal event", p.Name())
+	if err == nil && !w.terminal {
+		return timing, incompleteStreamError(p.Name())
 	}
 	if err == context.DeadlineExceeded {
 		return timing, routingTimeout(p.Name(), "response")
@@ -74,6 +74,7 @@ type progressWriter struct {
 	mu                 sync.Mutex
 	timer              *time.Timer
 	finished, released bool
+	terminal           bool
 	err                error
 	timing             StreamTiming
 	pending, prelude   []byte
@@ -137,6 +138,7 @@ func (w *progressWriter) prepareWrite(p []byte) ([]byte, error) {
 			return nil, err
 		}
 		more, done := sseProgress(w.pending[:end])
+		w.terminal = w.terminal || done
 		progress, terminal = progress || more, terminal || done
 		w.pending = w.pending[end+width:]
 	}
@@ -196,7 +198,7 @@ func sseProgress(frame []byte) (bool, bool) {
 	}
 	text := func(raw json.RawMessage) bool { var s string; return json.Unmarshal(raw, &s) == nil && s != "" }
 	switch kind {
-	case "message_stop", "response.completed":
+	case "message_stop", "response.completed", "response.incomplete":
 		return false, true
 	case "content_block_delta":
 		var delta map[string]json.RawMessage
@@ -232,24 +234,41 @@ func streamFrameError(frame []byte) error {
 			lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
 	}
+	return streamPayloadError(kind, []byte(strings.Join(lines, "\n")))
+}
+
+// 转换器在丢弃未知 chunk 前也必须识别错误；[DONE] 不会覆盖先前的失败。
+func streamPayloadError(kind string, payload []byte) error {
 	var event struct {
-		Type  string `json:"type"`
-		Error struct {
-			Type string `json:"type"`
-			Code string `json:"code"`
-		} `json:"error"`
+		Type     string          `json:"type"`
+		Error    json.RawMessage `json:"error"`
+		Response struct {
+			Error json.RawMessage `json:"error"`
+		} `json:"response"`
 	}
-	if json.Unmarshal([]byte(strings.Join(lines, "\n")), &event) != nil {
+	if json.Unmarshal(payload, &event) != nil {
 		return nil
 	}
 	if event.Type != "" {
 		kind = event.Type
 	}
-	if kind != "error" && kind != "response.failed" {
+	errorPayload := event.Error
+	if len(errorPayload) == 0 || string(errorPayload) == "null" {
+		errorPayload = event.Response.Error
+	}
+	if kind != "error" && kind != "response.failed" && (len(errorPayload) == 0 || string(errorPayload) == "null") {
 		return nil
 	}
+	var details struct {
+		Type   string          `json:"type"`
+		Code   json.RawMessage `json:"code"`
+		Status string          `json:"status"`
+	}
+	_ = json.Unmarshal(errorPayload, &details)
 	status := 500
-	if event.Error.Type == "rate_limit_error" || strings.Contains(event.Error.Code, "rate_limit") {
+	var code string
+	_ = json.Unmarshal(details.Code, &code)
+	if details.Type == "rate_limit_error" || strings.Contains(code, "rate_limit") || string(details.Code) == "429" || details.Status == "RESOURCE_EXHAUSTED" {
 		status = 429
 	}
 	return &ProviderError{StatusCode: status, Message: "upstream stream failed"}

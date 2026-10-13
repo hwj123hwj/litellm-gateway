@@ -132,18 +132,19 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, raw
 		if err := h.streamFromProvider(c, req, p, sink); err == nil {
 			recordProviderAttempt(c, p.Name(), started, nil)
 			h.router.RecordProviderSuccessFor(originalModel, p)
+			lastErr = nil
 			streamOK = true
 			break
 		} else {
 			recordProviderAttempt(c, p.Name(), started, err)
 			h.router.RecordProviderFailureFor(originalModel, p, err)
+			lastErr = err
 			h.logger.Printf("Stream provider %s failed: %v", p.Name(), err)
 			if c.Writer.Written() {
 				_ = writeAnthropicStreamError(c.Writer, err)
 				streamOK = true // headers already sent → this is the terminal state
 				break
 			}
-			lastErr = err
 			if !provider.ShouldFallback(err) {
 				setProviderErrorHeaders(c, err)
 				c.JSON(routingErrorStatus(err), gin.H{"error": err.Error()})
@@ -176,14 +177,8 @@ func (h *MessageHandler) handleStream(c *gin.Context, req *provider.Request, raw
 			return
 		}
 		// Bytes were streamed → archive the captured transcript.
-		// When a fallback provider succeeded, lastErr is stale (from the failed
-		// first provider) — pass nil so parseStreamEndState doesn't misclassify
-		// a completed stream as interrupted.
-		var archiveErr error
-		if !streamOK {
-			archiveErr = lastErr
-		}
-		status, reason := parseStreamEndState(sink.Bytes(), archiveErr)
+		// 成功的 fallback 已清掉旧错误；已输出后的错误仍须保留为归档中断原因。
+		status, reason := parseStreamEndState(sink.Bytes(), lastErr)
 		submitArchive(c, h.archiver, archive.ProtocolMessages, reqBody, sink.Bytes(),
 			status, c.Writer.Status(), reason)
 		return

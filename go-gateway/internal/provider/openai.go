@@ -311,6 +311,7 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 	kick, idleTripped := startStreamIdleWatchdog(streamCtx, idleTimeout, cancel)
 
 	finishReason := ""
+	terminal := false
 	var streamUsage *openAIStreamUsage
 
 	for scanner.Scan() {
@@ -321,7 +322,11 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		}
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
+			terminal = true
 			break
+		}
+		if err := streamPayloadError("", []byte(payload)); err != nil {
+			return err
 		}
 
 		var chunk openAIStreamChunk
@@ -405,6 +410,7 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 		// --- finish_reason ---
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
 			finishReason = *choice.FinishReason
+			terminal = true
 		}
 	}
 
@@ -413,6 +419,9 @@ func (p *OpenAIProvider) ForwardStream(ctx context.Context, req *Request, w io.W
 			return fmt.Errorf("upstream stream idle over %v: no data received", idleTimeout)
 		}
 		return err
+	}
+	if !terminal {
+		return incompleteStreamError(p.Name())
 	}
 
 	// 关闭 thinking / 文本 block

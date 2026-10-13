@@ -928,14 +928,24 @@ func consumeCloudCodeSSE(body io.Reader, em cloudCodeEmitter) error {
 
 	bestTotal := -1
 	toolIndex := 0
+	terminal := false
+	onFinish := em.onFinish
+	em.onFinish = func(reason string) { terminal = true; onFinish(reason) }
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
+		if payload == "[DONE]" {
+			terminal = true
 			continue
+		}
+		if payload == "" {
+			continue
+		}
+		if err := streamPayloadError("", []byte(payload)); err != nil {
+			return err
 		}
 		var frame map[string]any
 		if json.Unmarshal([]byte(payload), &frame) != nil {
@@ -960,7 +970,13 @@ func consumeCloudCodeSSE(body io.Reader, em cloudCodeEmitter) error {
 			}
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if !terminal {
+		return incompleteStreamError("cloudcode")
+	}
+	return nil
 }
 
 func consumeCloudCodeFrame(inner map[string]any, em cloudCodeEmitter, toolIndex *int) {
@@ -995,7 +1011,7 @@ func consumeCloudCodeFrame(inner map[string]any, em cloudCodeEmitter, toolIndex 
 			}
 		}
 	}
-	if reason, ok := cand["finishReason"].(string); ok {
+	if reason, ok := cand["finishReason"].(string); ok && reason != "" {
 		em.onFinish(mapCloudCodeFinish(reason))
 	}
 }

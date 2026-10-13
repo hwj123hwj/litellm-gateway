@@ -108,6 +108,11 @@ func IsBusinessRequest(method, path string) bool {
 	}
 }
 
+// SSE 已提交 HTTP 200 后仍可能中断；最终请求错误比响应头更能反映终态。
+func RequestSucceeded(r RequestRecord) bool {
+	return r.StatusCode >= 200 && r.StatusCode < 400 && r.Error == ""
+}
+
 // Collector 内存指标收集器
 type Collector struct {
 	mu            sync.RWMutex
@@ -311,7 +316,7 @@ func (c *Collector) Close(ctx context.Context) error {
 func (c *Collector) applyToAggregates(r RequestRecord) {
 	// 更新每日计数
 	c.todayTotal++
-	if r.StatusCode >= 200 && r.StatusCode < 400 {
+	if RequestSucceeded(r) {
 		c.todaySuccess++
 	} else {
 		c.todayErrors++
@@ -329,7 +334,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		}
 		ms.Requests++
 		ms.TotalTokens += totalTokens(r)
-		if r.StatusCode >= 200 && r.StatusCode < 400 {
+		if RequestSucceeded(r) {
 			ms.Successes++
 		} else {
 			ms.Errors++
@@ -349,7 +354,7 @@ func (c *Collector) applyToAggregates(r RequestRecord) {
 		}
 		ps.Requests++
 		ps.LastCheck = r.Timestamp
-		if r.StatusCode >= 200 && r.StatusCode < 400 {
+		if RequestSucceeded(r) {
 			ps.Successes++
 		} else {
 			ps.Errors++

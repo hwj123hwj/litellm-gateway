@@ -196,7 +196,7 @@ func (s *SQLiteStore) SaveRecordContext(ctx context.Context, r metrics.RequestRe
 	// 更新每日统计
 	date := r.Timestamp.Format("2006-01-02")
 	success := 0
-	if r.StatusCode >= 200 && r.StatusCode < 400 {
+	if metrics.RequestSucceeded(r) {
 		success = 1
 	}
 	totalInput := r.InputTokens

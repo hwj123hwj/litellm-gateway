@@ -209,6 +209,7 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
 
 	finishReason := ""
+	terminal := false
 	var streamUsage *openAIStreamUsage
 
 	for scanner.Scan() {
@@ -218,7 +219,11 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 		}
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
+			terminal = true
 			break
+		}
+		if err := streamPayloadError("", []byte(payload)); err != nil {
+			return err
 		}
 
 		var chunk openAIStreamChunk
@@ -263,6 +268,7 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 		// --- finish_reason ---
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
 			finishReason = *choice.FinishReason
+			terminal = true
 		}
 		// --- usage（最后一条 chunk 携带） ---
 		if chunk.Usage != nil {
@@ -272,6 +278,9 @@ func (p *CopilotProvider) ForwardStream(ctx context.Context, req *Request, w io.
 
 	if err := scanner.Err(); err != nil {
 		return err
+	}
+	if !terminal {
+		return incompleteStreamError(p.Name())
 	}
 
 	// 关闭文本 block
