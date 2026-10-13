@@ -235,10 +235,15 @@ func (a *App) reload() {
 				Channels []AccountChannel `json:"channels"`
 			}
 			// 渠道清单用于过期提醒；拉取失败不影响概览指标。
-			if err2 := c.JSON(ctx, "GET", "/channels", nil, &channels); err2 == nil {
-				a.channels = channels.Channels
-			}
-			return func() { a.dashboard = d; a.loaded = true }, err
+			channelsErr := c.JSON(ctx, "GET", "/channels", nil, &channels)
+			return func() {
+				// 后台直接写渠道状态会与原生渲染竞态，并绕过主机切换的序列校验。
+				if channelsErr == nil {
+					a.channels = channels.Channels
+				}
+				a.dashboard = d
+				a.loaded = true
+			}, err
 		case "models":
 			var m struct {
 				Models []Model `json:"models"`
