@@ -500,6 +500,11 @@ func (r *Router) AllowProviderRequestFor(modelName string, p Provider) bool {
 func (r *Router) RecordProviderSuccess(name string) {
 	r.mu.RLock()
 	runtime := r.runtime[name]
+	if runtime != nil {
+		// runtime 的指针字段也会被渠道刷新替换，必须在 Router 锁内取快照。
+		snapshot := *runtime
+		runtime = &snapshot
+	}
 	r.mu.RUnlock()
 	if runtime != nil {
 		runtime.breaker.RecordSuccess()
@@ -524,6 +529,10 @@ func (r *Router) RecordProviderFailure(name string, err error) {
 	}
 	r.mu.RLock()
 	runtime := r.runtime[name]
+	if runtime != nil {
+		snapshot := *runtime
+		runtime = &snapshot
+	}
 	r.mu.RUnlock()
 	if runtime != nil {
 		if isClientCancellation(err) || errors.Is(err, ErrRoutingBudgetExceeded) || !ShouldFallback(err) {
@@ -597,9 +606,9 @@ func (r *Router) SetProviderEnabled(name string, enabled bool) error {
 // 同时清掉上一次探测结论：重置的语义是「忘掉历史判断」，留着一个旧的
 // offline 结论会让面板继续显示已修好的 provider 为离线。
 func (r *Router) ResetProvider(name string) error {
-	r.mu.RLock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	runtime, ok := r.runtime[name]
-	r.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownProvider, name)
 	}
@@ -607,11 +616,9 @@ func (r *Router) ResetProvider(name string) error {
 	if runtime.quota != nil {
 		runtime.quota.Reset()
 	}
-	r.mu.Lock()
 	runtime.hasProbe = false
 	runtime.lastProbe = ProbeResult{}
 	runtime.lastProbeAt = time.Time{}
-	r.mu.Unlock()
 	return nil
 }
 
@@ -625,6 +632,10 @@ func (r *Router) CheckProviderHealth(ctx context.Context, name string) ProbeResu
 	r.mu.RLock()
 	p, ok := r.providers[name]
 	runtime := r.runtime[name]
+	if runtime != nil {
+		snapshot := *runtime
+		runtime = &snapshot
+	}
 	r.mu.RUnlock()
 	if !ok || runtime == nil {
 		return ProbeResult{Status: ProbeUnknown, Detail: fmt.Sprintf("%v: %s", ErrUnknownProvider, name)}
@@ -635,16 +646,30 @@ func (r *Router) CheckProviderHealth(ctx context.Context, name string) ProbeResu
 
 	result := probeProvider(ctx, p)
 	r.mu.Lock()
-	runtime.lastProbe = result
-	runtime.lastProbeAt = time.Now()
-	runtime.hasProbe = true
+	// 旧实例的在途探测不能覆盖渠道刷新后的新实例状态。
+	current := r.runtime[name]
+	if current == nil || !providersEqual(r.providers[name], p) {
+		r.mu.Unlock()
+		return result
+	}
+	current.lastProbe = result
+	current.lastProbeAt = time.Now()
+	current.hasProbe = true
+	snapshot := *current
+	runtime = &snapshot
 	r.mu.Unlock()
 	switch result.Status {
 	case ProbeOnline:
-		r.RecordProviderSuccess(name)
+		runtime.breaker.RecordSuccess()
+		if runtime.quota != nil {
+			runtime.quota.RecordSuccess()
+		}
 	case ProbeDegraded, ProbeOffline:
 		if result.StatusCode == http.StatusTooManyRequests {
-			r.RecordProviderFailure(name, &ProviderError{StatusCode: result.StatusCode, RetryAfter: result.RetryAfter})
+			runtime.breaker.RecordRateLimit(result.RetryAfter)
+			if runtime.quota != nil {
+				runtime.quota.RecordRateLimit(result.RetryAfter)
+			}
 		} else {
 			runtime.breaker.RecordFailure()
 		}
@@ -666,8 +691,8 @@ func probeProvider(ctx context.Context, p Provider) ProbeResult {
 
 func (r *Router) ProviderStatus(name string) (RuntimeProviderStatus, bool) {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	runtime, ok := r.runtime[name]
-	r.mu.RUnlock()
 	if !ok || runtime == nil {
 		return RuntimeProviderStatus{}, false
 	}
