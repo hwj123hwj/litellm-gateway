@@ -796,3 +796,25 @@ func TestModelsPageNoFalseEmptyState(t *testing.T) {
 		t.Fatal("empty state missing for zero matches")
 	}
 }
+
+func TestAssistantModelPickerSearchesChannelWithoutRenamingModel(t *testing.T) {
+	a, _, _ := fixture(t)
+	a.page = "assistant"
+	a.loaded = true
+	a.chatModels = []string{"mimo-model", "other-model"}
+	a.chatModelOptions = map[string]ChatModelOption{"mimo-model": {ID: "mimo-model", Provider: "bound-provider", Channel: "cline"}}
+	a.modelPickerOpen = true
+	tt := ui.NewTester(a.View, 1280, 850)
+	for _, query := range []string{"CLINE", "bound-provider"} {
+		a.modelPickerFilter = query
+		tt.Frame()
+		if !tt.HasText("mimo-model") || tt.HasText("other-model") {
+			t.Fatal("metadata filter failed", query)
+		}
+	}
+	click(t, tt, "选择模型 mimo-model")
+	tt.Frame()
+	if a.chatModel != "mimo-model" || a.modelPickerOpen {
+		t.Fatal("model ID changed")
+	}
+}

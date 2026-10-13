@@ -15,25 +15,9 @@ import (
 	"time"
 )
 
-// OpenCode（opencode.ai Zen）账号渠道。
-//
-// 与其它渠道最大的不同：免费模型**不需要登录**。上游允许匿名访问（Bearer 常量
-// "public"），但只对「从 OpenCode 客户端发出」的请求放行——判定依据是请求形态，
-// 三条硬性要求缺一即 403 FreeTierError：
-//
-//	(a) 请求体 stream:true（免费通道只有流式端点）；
-//	(b) 请求体带 tools，且同时含 bash 与 read 两项（客户端运行时的占位工具）；
-//	(c) User-Agent 形如 opencode/<version>，且 x-opencode-session 为 ses_ + 26 位 base62。
-//
-// (a)(b) 由 OpenCodeTransformRequest 补齐，(c) 由 ClientHeaders / DynamicHeaders 提供。
-//
-// 推理走标准 OpenAI Chat Completions（POST /zen/v1/chat/completions），因此复用
-// provider.OpenAIProvider 的协议转换；由于强制流式，provider 侧用 OpenCodeProvider
-// 把「非流式」请求也走流式端点再累积回完整响应。
-//
-// 登录是标准设备码流程（POST /console/auth/device/code 取码 → 轮询
-// /console/auth/device/token），登录拿到的令牌即 Zen 的 Bearer key，可用于非免费模型；
-// 免费模型则始终可用，无需登录。
+// OpenCode Zen account channel. Its free tier is restricted to OpenCode itself;
+// logging in or imitating client headers does not enable other harnesses.
+// Paid models use the authenticated OpenAI-compatible endpoint.
 const (
 	opencodeChannel  = "opencode"
 	opencodeSiteBase = "https://opencode.ai"
@@ -48,7 +32,7 @@ const (
 	opencodeDeviceGrantType  = "urn:ietf:params:oauth:grant-type:device_code"
 	opencodeDefaultUserAgent = "opencode/1.18.22"
 
-	// 匿名通道的固定 Bearer。免费模型以此为凭据，无需任何账号。
+	// 旧配置的匿名 Bearer；不能用于网关付费模型。
 	opencodeAnonymousKey = "public"
 
 	// opencode-cli 是官方 CLI 的公开 client_id（非密钥，与 cline 的 WorkOS client
@@ -64,9 +48,6 @@ const (
 
 	opencodeLoginTimeout = 5 * time.Minute
 )
-
-// opencodeGateTools 是免费通道要求请求体必须携带的占位工具名（顺序即补入顺序）。
-var opencodeGateTools = []string{"bash", "read"}
 
 // OpenCodeChannel 持有 opencode 的账号池与登录逻辑。
 type OpenCodeChannel struct {
@@ -105,7 +86,7 @@ func opencodeUserAgent() string {
 func (c *OpenCodeChannel) Accounts() *Accounts { return c.accounts }
 
 // AuthSource 返回注入 provider 的鉴权源：未登录时退化为匿名 Bearer "public"，
-// 保证免费通道在「没有任何账号」时也能工作。
+// 匿名值仅用于兼容旧配置，不代表付费模型已有有效凭据。
 func (c *OpenCodeChannel) AuthSource() *openCodeAuth { return &openCodeAuth{Accounts: c.accounts} }
 
 // Name 实现 Channel。
@@ -148,7 +129,7 @@ func (c *OpenCodeChannel) DynamicHeaders() func() map[string]string {
 // openCodeAuth 包装账号池，把「未登录」映射成匿名常量而非空串。
 //
 // 关键点：provider.applyAuth 在 BearerToken() 为空时不写任何头并让调用方短路。
-// 免费通道恰恰要求未登录也能发请求，因此这里必须返回 "public"。
+// 匿名值不代表网关可使用上游免费档。
 type openCodeAuth struct {
 	*Accounts
 }
@@ -161,72 +142,15 @@ func (a *openCodeAuth) BearerToken() string {
 	return opencodeAnonymousKey
 }
 
-// OpenCodeTransformRequest 复刻官方客户端的免费通道请求形态：
-//  1. 强制 stream:true；
-//  2. tools 里补齐 bash / read 两个占位工具（去重，不改动已有同名工具）；
-//  3. 仅当调用方原本没给任何工具时，补 tool_choice:"none"（避免占位工具被模型真的调用）。
-//
-// 解析失败时原样返回（这类请求会由上游给出更准确的错误）。
+// OpenCodeTransformRequest retains stream compatibility without advertising
+// tools that the caller cannot execute. Free-tier restrictions are upstream policy.
 func OpenCodeTransformRequest(body []byte) ([]byte, error) {
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
 		return body, nil
 	}
 	payload["stream"] = json.RawMessage("true")
-
-	var tools []json.RawMessage
-	if raw, ok := payload["tools"]; ok {
-		_ = json.Unmarshal(raw, &tools)
-	}
-
-	names := make(map[string]bool, len(tools))
-	for _, tool := range tools {
-		var probe struct {
-			Function struct {
-				Name string `json:"name"`
-			} `json:"function"`
-		}
-		if json.Unmarshal(tool, &probe) == nil && probe.Function.Name != "" {
-			names[probe.Function.Name] = true
-		}
-	}
-
-	missing := make([]string, 0, len(opencodeGateTools))
-	for _, gate := range opencodeGateTools {
-		if !names[gate] {
-			missing = append(missing, gate)
-		}
-	}
-	if len(missing) == 0 {
-		return json.Marshal(payload)
-	}
-
-	hadCallerTools := len(tools) > 0
-	for _, name := range missing {
-		tools = append(tools, opencodeGateTool(name))
-	}
-	encoded, err := json.Marshal(tools)
-	if err != nil {
-		return body, nil
-	}
-	payload["tools"] = encoded
-	if !hadCallerTools {
-		payload["tool_choice"] = json.RawMessage(`"none"`)
-	}
 	return json.Marshal(payload)
-}
-
-// opencodeGateTool 构造一个占位工具定义（描述明确提示勿调用）。
-func opencodeGateTool(name string) json.RawMessage {
-	tool, _ := json.Marshal(map[string]any{
-		"type": "function",
-		"function": map[string]any{
-			"name":        name,
-			"description": "Reserved for the host runtime; do not call it.",
-			"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
-		},
-	})
-	return tool
 }
 
 // BeginLogin 实现 Channel：申请设备码并返回可轮询的登录会话。

@@ -142,58 +142,26 @@ func TestOpenCodeDynamicHeadersUsesAccountIdentity(t *testing.T) {
 	}
 }
 
-// TestOpenCodeTransformAddsGateTools 是免费通道的核心回归测试：上游要求请求体
-// 同时含 bash 与 read 两个占位工具，缺一即 403 FreeTierError。
-func TestOpenCodeTransformAddsGateTools(t *testing.T) {
-	out, err := OpenCodeTransformRequest([]byte(`{"model":"big-pickle","messages":[]}`))
-	if err != nil {
-		t.Fatalf("OpenCodeTransformRequest: %v", err)
-	}
-	var payload struct {
-		Stream     bool              `json:"stream"`
-		ToolChoice string            `json:"tool_choice"`
-		Tools      []json.RawMessage `json:"tools"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		t.Fatalf("输出不是合法 JSON: %v", err)
-	}
-	if !payload.Stream {
-		t.Fatalf("必须强制 stream:true（免费通道只有流式端点）")
-	}
-	if payload.ToolChoice != "none" {
-		t.Fatalf("调用方原本没有工具时应补 tool_choice:none，得到 %q", payload.ToolChoice)
-	}
-	if names := gateToolNames(t, payload.Tools); !names["bash"] || !names["read"] {
-		t.Fatalf("必须补齐 bash 与 read 两个占位工具，得到 %v", names)
-	}
-}
-
-// TestOpenCodeTransformKeepsCallerTools 验证补齐是**追加**而非覆盖：调用方自己的工具
-// 必须原样保留，且只在调用方一个工具都没给时才补 tool_choice:none。
-func TestOpenCodeTransformKeepsCallerTools(t *testing.T) {
-	body := `{"model":"big-pickle","messages":[],"tools":[{"type":"function","function":{"name":"lookup","description":"find","parameters":{"type":"object"}}}]}`
-	out, err := OpenCodeTransformRequest([]byte(body))
-	if err != nil {
-		t.Fatalf("OpenCodeTransformRequest: %v", err)
-	}
-	var payload struct {
-		ToolChoice string            `json:"tool_choice"`
-		Tools      []json.RawMessage `json:"tools"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		t.Fatalf("输出不是合法 JSON: %v", err)
-	}
-	names := gateToolNames(t, payload.Tools)
-	for _, want := range []string{"lookup", "bash", "read"} {
-		if !names[want] {
-			t.Fatalf("工具 %s 应保留/补齐，得到 %v", want, names)
+func TestOpenCodeTransformPreservesCallerToolContract(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"paid-model","messages":[]}`,
+		`{"model":"paid-model","messages":[],"tool_choice":"auto","tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`,
+	} {
+		out, err := OpenCodeTransformRequest([]byte(body))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if len(payload.Tools) != 3 {
-		t.Fatalf("应恰好 3 个工具（调用方 1 个 + 占位 2 个），得到 %d", len(payload.Tools))
-	}
-	if payload.ToolChoice != "" {
-		t.Fatalf("调用方有工具时不应写 tool_choice，得到 %q", payload.ToolChoice)
+		var before, after map[string]json.RawMessage
+		json.Unmarshal([]byte(body), &before)
+		json.Unmarshal(out, &after)
+		if string(after["stream"]) != "true" {
+			t.Fatal("stream missing")
+		}
+		for _, key := range []string{"tools", "tool_choice"} {
+			if string(before[key]) != string(after[key]) {
+				t.Fatalf("invented or changed %s: %s", key, out)
+			}
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -200,6 +201,7 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 
 	var result []Provider
 	var unavailable []string
+	var reasons []string
 	for _, name := range providerNames {
 		p, ok := r.providers[name]
 		if !ok {
@@ -214,13 +216,16 @@ func (r *Router) Route(modelName string) ([]Provider, error) {
 		}
 		// 账号渠道未登录时直接跳过：否则每次请求都要先发一次必然 401 的上游调用。
 		if !providerAvailable(p) {
+			if detail, ok := p.(interface{ UnavailableReason() string }); ok && detail.UnavailableReason() != "" {
+				reasons = append(reasons, detail.UnavailableReason())
+			}
 			unavailable = append(unavailable, name)
 			continue
 		}
 		result = append(result, p)
 	}
 	if len(result) == 0 {
-		return nil, &NoAvailableProvidersError{Model: modelName, Configured: append([]string(nil), providerNames...), Reason: "disabled, unavailable, or circuit open"}
+		return nil, &NoAvailableProvidersError{Model: modelName, Configured: append([]string(nil), providerNames...), Reason: strings.Join(append([]string{"disabled, unavailable, or circuit open"}, reasons...), "; ")}
 	}
 	if len(unavailable) > 0 {
 		r.logger.Printf("Skipping unavailable providers for model %s: %v", modelName, unavailable)
@@ -866,6 +871,25 @@ func (r *Router) SetProviderRateLimitGroup(name, group string) {
 		r.rateGroups[group] = quota
 	}
 	runtime.quota = quota
+}
+
+// ModelChannel identifies a channel only when the model's entire chain belongs
+// to one channel; mixed fallback chains have no single channel label.
+func (r *Router) ModelChannel(model string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	channel := ""
+	for _, name := range r.chains[model] {
+		runtime := r.runtime[name]
+		if runtime == nil || runtime.channel == "" {
+			return ""
+		}
+		if channel != "" && channel != runtime.channel {
+			return ""
+		}
+		channel = runtime.channel
+	}
+	return channel
 }
 
 // SetProviderChannel associates configured model instances with their login channel.

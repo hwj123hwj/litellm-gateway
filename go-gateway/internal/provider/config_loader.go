@@ -487,3 +487,10 @@ func modelInputModalities(capabilities, explicit []string) []string {
 	}
 	return modalities
 }
+
+func (w *BoundModelProviderWrapper) UnavailableReason() string {
+	if p, ok := w.Provider.(interface{ UnavailableReason() string }); ok {
+		return p.UnavailableReason()
+	}
+	return ""
+}

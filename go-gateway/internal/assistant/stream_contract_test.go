@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -181,5 +182,34 @@ func TestChatWaitsForSDKCompletionBeforeRetry(t *testing.T) {
 	}
 	if got := requests.Load(); got != 2 {
 		t.Fatalf("want one request per turn, got %d", got)
+	}
+}
+
+func TestDynamicModelCatalogControlsNewAndExistingAgents(t *testing.T) {
+	var sentModel string
+	a := newStreamContractAssistant(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		sentModel = body.Model
+		fmt.Fprint(w, streamContractDelta+"data: [DONE]\n\n")
+	})
+	options := []ModelOption{{ID: "new-model", Channel: "cline"}}
+	a.catalog = func() []ModelOption { return options }
+	if ids := a.Models(); len(ids) != 1 || ids[0] != "new-model" {
+		t.Fatal(ids)
+	}
+	text, err := a.Chat(t.Context(), "hi", "new-model", nil)
+	if err != nil || text != "部分回复" || sentModel != "new-model" {
+		t.Fatalf("new catalog model unusable: %q %v %q", text, err, sentModel)
+	}
+	options = nil // logout or disable; an already-built agent must also be rejected.
+	sentModel = ""
+	if _, err = a.Chat(t.Context(), "hi", "new-model", nil); err == nil || sentModel != "" {
+		t.Fatal("removed model still routed")
+	}
+	if _, err = a.Chat(t.Context(), "hi", "", nil); err == nil {
+		t.Fatal("unavailable default allowed")
 	}
 }

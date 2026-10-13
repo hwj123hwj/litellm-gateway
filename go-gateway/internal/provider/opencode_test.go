@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,18 +37,18 @@ func openCodeCaptureServer(t *testing.T, frames ...string) (*httptest.Server, *m
 // thinking / text / tool_use 三种块都在，工具参数拼成合法 JSON，用量与 stop_reason 正确。
 func TestOpenCodeForwardRequestAccumulatesStream(t *testing.T) {
 	srv, seen := openCodeCaptureServer(t,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[{"index":0,"delta":{"reasoning_content":"想一想。"},"finish_reason":null}]}`,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[{"index":0,"delta":{"content":"我来读文件。"},"finish_reason":null}]}`,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read","arguments":"{\"path\":"}}]},"finish_reason":null}]}`,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.go\"}"}}]},"finish_reason":null}]}`,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
-		`{"id":"c1","object":"chat.completion.chunk","model":"big-pickle","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[{"index":0,"delta":{"reasoning_content":"想一想。"},"finish_reason":null}]}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[{"index":0,"delta":{"content":"我来读文件。"},"finish_reason":null}]}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read","arguments":"{\"path\":"}}]},"finish_reason":null}]}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.go\"}"}}]},"finish_reason":null}]}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`{"id":"c1","object":"chat.completion.chunk","model":"paid-model","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}`,
 		`[DONE]`,
 	)
 
-	p := NewOpenCodeProvider(&Config{Name: "big-pickle", URL: srv.URL, Auth: NewStaticAuth("public")})
-	req := mustRequest(t, `{"model":"big-pickle","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`)
+	p := NewOpenCodeProvider(&Config{Name: "paid-model", URL: srv.URL, Auth: NewStaticAuth("test-paid-key")})
+	req := mustRequest(t, `{"model":"paid-model","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`)
 
 	resp, err := p.ForwardRequest(context.Background(), req)
 	if err != nil {
@@ -60,7 +63,7 @@ func TestOpenCodeForwardRequestAccumulatesStream(t *testing.T) {
 	if resp.Role != "assistant" || resp.Type != "message" {
 		t.Fatalf("响应外壳不正确: %+v", resp)
 	}
-	if resp.Model != "big-pickle" {
+	if resp.Model != "paid-model" {
 		t.Fatalf("模型名应为绑定的上游模型 ID，得到 %q", resp.Model)
 	}
 	if resp.StopReason != "tool_use" {
@@ -109,8 +112,8 @@ func TestOpenCodeForwardRequestKeepsBlockOrder(t *testing.T) {
 		`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 		`[DONE]`,
 	)
-	p := NewOpenCodeProvider(&Config{Name: "big-pickle", URL: srv.URL, Auth: NewStaticAuth("public")})
-	req := mustRequest(t, `{"model":"big-pickle","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	p := NewOpenCodeProvider(&Config{Name: "paid-model", URL: srv.URL, Auth: NewStaticAuth("test-paid-key")})
+	req := mustRequest(t, `{"model":"paid-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
 
 	resp, err := p.ForwardRequest(context.Background(), req)
 	if err != nil {
@@ -135,8 +138,8 @@ func TestOpenCodeForwardStreamTranslatesToAnthropicSSE(t *testing.T) {
 		`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 		`[DONE]`,
 	)
-	p := NewOpenCodeProvider(&Config{Name: "big-pickle", URL: srv.URL, Auth: NewStaticAuth("public")})
-	req := mustRequest(t, `{"model":"big-pickle","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	p := NewOpenCodeProvider(&Config{Name: "paid-model", URL: srv.URL, Auth: NewStaticAuth("test-paid-key")})
+	req := mustRequest(t, `{"model":"paid-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
 
 	var sb strings.Builder
 	if err := p.ForwardStream(context.Background(), req, &sb); err != nil {
@@ -157,8 +160,49 @@ func TestOpenCodeForwardStreamTranslatesToAnthropicSSE(t *testing.T) {
 // TestOpenCodeImplementsProviderInterfaces 是编译期断言的运行期对应：
 // OpenCodeProvider 必须同时满足 Provider 与 StreamProvider（路由层会做类型断言）。
 func TestOpenCodeImplementsProviderInterfaces(t *testing.T) {
-	var p Provider = NewOpenCodeProvider(&Config{Name: "big-pickle", URL: "http://example.invalid"})
+	var p Provider = NewOpenCodeProvider(&Config{Name: "paid-model", URL: "http://example.invalid"})
 	if _, ok := p.(StreamProvider); !ok {
 		t.Fatalf("OpenCodeProvider 必须实现 StreamProvider")
+	}
+}
+
+func TestOpenCodeFreeTierNeverAdvertisedAndPaidRequiresLogin(t *testing.T) {
+	for _, id := range []string{"big-pickle", "mimo-v2.6-flash-free"} {
+		p := NewOpenCodeProvider(&Config{Name: id, Auth: NewStaticAuth("test-paid-key"), URL: "http://example.invalid"})
+		if p.Available() {
+			t.Fatal("free tier advertised after login")
+		}
+		req := mustRequest(t, `{"model":"`+id+`","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+		for _, stream := range []bool{true, false} {
+			var err error
+			if stream {
+				err = p.ForwardStream(t.Context(), req, io.Discard)
+			} else {
+				_, err = p.ForwardRequest(t.Context(), req)
+			}
+			var pe *ProviderError
+			if !errors.As(err, &pe) || pe.StatusCode != 403 || !strings.Contains(pe.Message, "登录不会解除限制") {
+				t.Fatalf("wrong restriction error: %v", err)
+			}
+		}
+	}
+	for _, token := range []string{"", "public", "paid-key"} {
+		p := NewOpenCodeProvider(&Config{Name: "paid-model", Auth: NewStaticAuth(token)})
+		if p.Available() != (token == "paid-key") {
+			t.Fatalf("bad login state %q", token)
+		}
+	}
+}
+
+func TestOpenCodeRestrictionSurvivesBoundModelRouting(t *testing.T) {
+	r := NewRouter(log.New(io.Discard, "", 0))
+	p := NewOpenCodeProvider(&Config{Name: "mimo-v2.6-flash-free", Auth: NewStaticAuth("paid-key")})
+	r.RegisterProvider("bound", NewBoundModelProviderWrapper(p, "mimo-v2.6-flash-free", []string{"text"}))
+	r.RegisterChain("free-alias", []string{"bound"})
+	if r.ModelUsable("free-alias") {
+		t.Fatal("free model advertised")
+	}
+	if _, err := r.Route("free-alias"); err == nil || !strings.Contains(err.Error(), "登录不会解除限制") {
+		t.Fatalf("restriction lost: %v", err)
 	}
 }

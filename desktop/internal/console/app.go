@@ -69,6 +69,7 @@ type App struct {
 	chatInput, chatReply, chatUser, chatStatus, feedbackNote              string
 	connSelect                                                            string
 	chatModels                                                            []string
+	chatModelOptions                                                      map[string]ChatModelOption
 	chatModel, chatDefault                                                string
 	chatList                                                              ui.ScrollState
 	editorOpen                                                            bool
@@ -368,12 +369,17 @@ func (a *App) reload() {
 			}, err
 		case "assistant":
 			var m struct {
-				Default string   `json:"default"`
-				Models  []string `json:"models"`
+				Default string            `json:"default"`
+				Models  []string          `json:"models"`
+				Options []ChatModelOption `json:"model_options"`
 			}
 			err := c.JSON(ctx, "GET", "/assistant/models", nil, &m)
 			return func() {
 				a.chatModels = m.Models
+				a.chatModelOptions = map[string]ChatModelOption{}
+				for _, option := range m.Options {
+					a.chatModelOptions[option.ID] = option
+				}
 				a.chatDefault = m.Default
 				if a.chatModel != chatDefaultOption {
 					found := false
@@ -537,6 +543,7 @@ func (a *App) resetHost() {
 	a.chatUser = ""
 	a.chatStatus = ""
 	a.chatModels = nil
+	a.chatModelOptions = nil
 	a.chatModel = chatDefaultOption
 	a.chatDefault = ""
 	a.feedbackNote = ""
@@ -590,7 +597,7 @@ func (a *App) filteredChatModels() []string {
 		switch {
 		case strings.HasPrefix(l, q):
 			starts = append(starts, m)
-		case strings.Contains(l, q):
+		case strings.Contains(l, q) || strings.Contains(strings.ToLower(a.chatModelOptions[m].Provider), q) || strings.Contains(strings.ToLower(a.chatModelOptions[m].Channel), q):
 			contains = append(contains, m)
 		}
 	}

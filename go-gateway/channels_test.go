@@ -216,8 +216,8 @@ func TestBuildChannelProviderOpenCodeUsesOpenAIEndpoint(t *testing.T) {
 	if p.APIKey() != "" {
 		t.Fatalf("渠道 provider 不应带静态 api_key，得到 %q", p.APIKey())
 	}
-	if available, ok := p.(interface{ Available() bool }); ok && !available.Available() {
-		t.Fatalf("opencode 免费通道无需登录，provider 应始终报告可用")
+	if available, ok := p.(interface{ Available() bool }); ok && available.Available() {
+		t.Fatalf("opencode 免费档不能推荐给网关调用方")
 	}
 }
 

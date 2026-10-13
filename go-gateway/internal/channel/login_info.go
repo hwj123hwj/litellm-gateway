@@ -33,7 +33,7 @@ func LoginInfoFor(ch Channel) LoginInfo {
 	case "lobster", "gemini", "trae", "loomy", "raccoon":
 		info.LocalOnly = true
 	case "opencode":
-		info.Anonymous = true
+		info.SetupHint = "OpenCode 免费档仅供官方 OpenCode 客户端使用；登录不会解除限制。网关调用需添加并选择已授权的付费模型。"
 	}
 	return info
 }
