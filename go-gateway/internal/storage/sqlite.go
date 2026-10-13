@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -169,11 +170,20 @@ func ensureColumn(db *sql.DB, table, column, definition string) error {
 
 // SaveRecord 保存一条请求记录
 func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
+	return s.SaveRecordContext(context.Background(), r)
+}
+
+func (s *SQLiteStore) SaveRecordContext(ctx context.Context, r metrics.RequestRecord) error {
 	attempts, err := json.Marshal(r.ProviderAttempts)
 	if err != nil {
 		return fmt.Errorf("encode provider attempts: %w", err)
 	}
-	_, err = s.db.Exec(`
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO request_logs (timestamp, request_id, method, path, model, provider, provider_attempts, status_code, latency_ms, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cache_input_tokens, cache_usage_known, is_stream, error)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, r.Timestamp, r.RequestID, r.Method, r.Path, r.Model, r.Provider, string(attempts), r.StatusCode, r.Latency, r.InputTokens, r.OutputTokens, r.CacheReadInputTokens, r.CacheCreationInputTokens, r.CacheInputTokens, r.CacheUsageKnown, r.IsStream, r.Error)
@@ -199,7 +209,7 @@ func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
 		cacheUsageRequests = 1
 	}
 
-	_, err = s.db.Exec(`
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO daily_stats (date, model, provider, requests, successes, errors, total_tokens, total_latency_ms, cache_read_input_tokens, cache_creation_input_tokens, cache_input_tokens, cache_usage_requests)
 		VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(date, model) DO UPDATE SET
@@ -216,7 +226,10 @@ func (s *SQLiteStore) SaveRecord(r metrics.RequestRecord) error {
 		r.CacheReadInputTokens, r.CacheCreationInputTokens, r.CacheInputTokens, cacheUsageRequests,
 		success, 1-success, tokens, r.Latency, r.CacheReadInputTokens, r.CacheCreationInputTokens, r.CacheInputTokens, cacheUsageRequests)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetRecentLogs 获取最近的请求日志

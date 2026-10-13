@@ -77,3 +77,21 @@ func TestSQLiteStoreMigratesLegacyRequestLogsTable(t *testing.T) {
 		t.Fatalf("SaveRecord() after migration error = %v", err)
 	}
 }
+
+func TestSQLiteStoreRollsBackRecordWhenDailyStatsFail(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "metrics.db"), log.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.db.Exec(`CREATE TRIGGER fail_daily_stats BEFORE INSERT ON daily_stats BEGIN SELECT RAISE(ABORT, 'fixture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRecord(metrics.RequestRecord{Timestamp: time.Now(), Model: "mock"}); err == nil {
+		t.Fatal("injected daily stats failure was ignored")
+	}
+	logs, err := store.GetRecentLogs(10)
+	if err != nil || len(logs) != 0 {
+		t.Fatalf("partial transaction retained request log: logs=%v, err=%v", logs, err)
+	}
+}
