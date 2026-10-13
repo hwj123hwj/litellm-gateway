@@ -30,11 +30,17 @@ go run github.com/egoist/mygo/cmd/mygo build
 
 技能的项目路径、安装目录和客户端同步路径属于**当前连接的网关主机**。全局和项目范围分别加载；未保存的技能选择必须保存或撤销后再切换范围。同步报告显示保留项和错误。助理支持增量回复、工具状态、停止和反馈；连接中断会显示提示。
 
+助理成功显示「回复完成」；点击「取消」显示「已停止」并保留当前文字，随后可再次发送。上游错误会显示失败信息，已经显示的部分回复不等于成功。429 或额度耗尽时可从模型选择器切换其他已授权模型；按次选模不修改 `ASSISTANT_MODEL`。健康页可用不能代替真实模型调用验证，完整事件契约见 [助理 API](../go-gateway/README.md#助理接口与验证)。
+
 关闭窗口后应用留在托盘；点击 Dock 或托盘恢复窗口。`⌘/Ctrl+,` 管理连接，`⌘/Ctrl+1` 显示窗口；应用菜单或托盘可完全退出。窗口尺寸与位置会保存。
 
 ## macOS 安装与发布
 
 本机只维护 `/Applications/EasyGateway.app` 一份，通过替换这个固定路径更新。不要打开不同构建目录中的 `.app`，避免 Spotlight 和应用注册重复。构建目录使用 `.noindex` 后缀；单实例锁避免重复运行。
+
+按 main 更新桌面时，先核对源码提交与本地改动，在 `desktop/` 执行上述测试、vet 和构建。正常退出旧应用后，验证候选签名（`codesign --verify --deep --strict <应用路径>`）及二进制来源（`go version -m <应用路径>/Contents/MacOS/EasyGateway`），再替换固定入口并保留可恢复旧包。重新启动后验证原连接、助理流式、取消及重试；配置与网关数据保留。`.noindex` 不代替 LaunchServices 注册清理，测试及回滚副本退出后须按已核实路径撤销注册，保留正式入口。
+
+桌面版本来自 `mygo.json`；main 构建不自动增加版本或发布 tag，应通过 `vcs.revision` 核对最新代码。网关服务需另用仓库根目录的 `scripts/deploy-local-gateway.sh` 更新，两者不能互相代替。
 
 推送版本标签后，Release 流程会验证标签与 `mygo.json` 版本一致，并上传 macOS Apple Silicon 桌面 DMG、网关二进制及 `SHA256SUMS`；任一构建失败时不会发布缺少客户端的 Release。桌面安装包当前仅提供 macOS arm64，其他平台仍需单独验收。
 

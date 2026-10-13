@@ -231,7 +231,7 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 | `ROUTING_ATTEMPT_SECONDS` | 30 | 非流式单次完整响应上限 |
 | `ROUTING_FALLBACK_WAIT_SECONDS` | 180 | 同一请求所有尝试共用的等待预算 |
 
-流开始输出后只检查 idle 超时，不用总等待预算截断正在生成的长回答。客户端取消立即取消上游，不增加失败计数。普通超时按现有连续失败阈值熔断，不会因一次偶发慢响应永久删除模型。`provider_attempts` 中的 `first_output_ms` 记录实际首输出，排除响应头和心跳。
+流开始输出后只检查 idle 超时，不用总等待预算截断正在生成的长回答。客户端取消立即取消上游，不增加 Provider 熔断失败计数；请求日志仍按中断标记错误，即使响应头已是 HTTP 200。普通超时按现有连续失败阈值熔断，不会因一次偶发慢响应永久删除模型。`provider_attempts` 中的 `first_output_ms` 记录实际首输出，排除响应头和心跳。
 
 收到退出信号后，网关停止接收新请求，最多等待 15 秒让在途 HTTP 请求完成，再用共同的 15 秒清理窗口等待异步指标、归档写入，最后关闭数据库。超时会强制收尾并记录未完成的步骤，不保证超时后的全部写入成功。重启后的今日 Token 从完整日汇总恢复，不受最近 2,000 条日志窗口限制，缓存 Token 口径与模型统计一致。
 
@@ -247,6 +247,29 @@ Provider 熔断默认在连续 3 次可重试上游失败后打开，30 秒后�
 ```
 
 `--endpoint` 默认 `http://127.0.0.1:4001`。命令串行测指定模型，每个模型最多 10 次，遇到 HTTP 429 停止该模型剩余样本。输出 JSON 包含成功率、实际首输出、完成耗时、输出 token 数及从首输出到完成的平均 tokens/s（上游有 usage 时）。不保存提示词、回答和密钥，也不扫描整个模型目录。测 alias 时会走真实 fallback 链；比较模型要使用具体模型 ID。测速只反映该时刻、小提示词下的速度和可用性，不能代替代码能力、工具调用及长上下文评测；默认 `coding` 保留精简备用链，模型目录仍可用于手动选择。
+
+### 助理接口与验证
+
+`ASSISTANT_ENABLED=true` 且配置 `ASSISTANT_MODEL` 后启用。沿用管理接口的 Bearer 认证，LLM 默认回环经过网关；SDK 固定版本见 [go.mod](go.mod)。
+
+| 方法 | 端点 | 契约 |
+|---|---|---|
+| GET | `/admin/assistant/models` | 返回 `default` 和可选 `models` |
+| POST | `/admin/assistant/chat` | body 为 `{"message":"...","model":"可选模型 ID"}`；省略 model 使用默认值 |
+| GET / PUT | `/admin/assistant/prompt` | 查询 / 更新人设；空串恢复默认，更新会重建内存会话 |
+| GET / POST | `/admin/assistant/feedback` | 查询 / 提交回复反馈 |
+
+聊天 SSE 使用 `data: {"type":"...",...}`，没有具名 `event:`。`text_delta` 的 `content` 为增量；`tool_start` / `tool_end` 携带 `tool`；成功终态为 `done`（content 为最终文字），失败为 `error`（content 为错误摘要）。部分文字之后的错误仍是失败，HTTP 200 不代表成功。消费者应保留已展示文字；服务端会读完 SDK channel 再释放本轮，允许下一次请求。
+
+与 EasyAgent 的会话任务不同，此助理请求由 HTTP 上下文持有：关闭连接即取消本轮，断开后不保证收到终态帧。桌面「取消」会显示已停止，保留部分文字并恢复发送。按次选模不修改 `ASSISTANT_MODEL`；每个模型有独立内存历史，网关重启清空。
+
+部署后先检查 `/health` 与 `/readyz`，再用 `/admin/assistant/models` 中已有授权、额度可用的模型验证：
+
+1. 普通聊天持续收到增量并以 `done` 完成；
+2. 长回复途中断开连接，随后可以再次聊天；
+3. 请求助理调用只读 `gateway_status`，观察 `tool_start` / `tool_end` 后得到健康摘要。
+
+429 或订阅额度耗尽属于上游限制。保留原错误和重置时间，按需改选其他已授权模型；不要把熔断重置当成额度恢复。助理关闭时聊天、模型和人设端点返回 503；反馈接口独立依赖存储。记忆治理与工具边界见 [MEMORY_DESIGN.md](../docs/MEMORY_DESIGN.md)。
 
 ### Provider 探测
 
@@ -373,34 +396,18 @@ curl -N -X POST http://localhost:4001/v1/messages \
 
 ## 可用模型
 
-当前仓库 `providers.yaml` 默认提供以下路由（未配置对应 API key 的 Provider 会自动跳过）：
+Provider、模型能力和路由链见 [providers.yaml](providers.yaml)，运行时可用目录以带认证的 `GET /v1/models` 为准。未配置凭据或未启用的 Provider 可能被跳过，账号渠道还可动态增加模型。目录中存在某个 ID 不能证明当前订阅额度充足，仍需实际调用验证。
 
-| 模型名 | 默认上游 | 能力 |
-|--------|---------|------|
-| `coding` | `glm-5.3` → `glm-5.3-flash` → `gemini-3.8-flash-high` → `deepv-glm-5.3-flash` → `deepseek-flash` | 文本、工具调用、推理、流式；图片请求自动跳过 `glm-5.3` |
-| `glm-5.3` | 智谱 `glm-5.3` | 文本、工具调用、推理、流式（不支持图片） |
-| `glm-5.3-flash` | 智谱 `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
-| `gemini-3.8-flash-high` | Antigravity `gemini-3.8-flash-high`（本机 CLIProxyAPI 反代，`-high` 为思考档后缀） | 文本、图片、工具调用、推理、流式 |
+具体模型通常沿用上游 ID；跨供应商重名、账号渠道及兼容入口可能带前缀或映射。客户端使用 `/v1/models` 返回的完整 ID，不自行拼接 Provider 名。`coding` 等路由链是聚合入口，与直接调用具体模型区分。
 
-**命名规则：模型名就是上游模型 ID，不设别名。** 客户端要调哪个模型就写哪个名字，
-网关不再维护 `glm-opus` / `glm-haiku` / `ali-opus` 这类第二套代号。
-provider 实例名同样用上游模型 ID；只有不同供应商提供同名模型时（智谱与 DeepV
-都有 `glm-5.3-flash`）才加供应商前缀区分。
-
-**`coding` 是唯一的对外入口，也是唯一的降级链。** 链上按能力从强到弱排列，
-任一档失败都会自动降级到下一档，客户端始终只调用 `coding` 一个名字：
+`coding` 是配置中的聚合降级链；客户端也可以直接调用目录中的具体模型 ID。链的顺序由配置决定，按请求能力过滤后，只对可重试错误切换下一档，且已向客户端输出后不再 fallback：
 
 - 上游限流（429）、5xx、网络错误 → 换下一档重试
 - 账号无该模型权限（403）、凭据失效（401）、欠费（402）、模型不存在（404）→ 换下一档重试
 - 请求本身不合法（400/422）→ **不**降级，直接返回（换个 provider 也是同样的错误）
 - 请求带图片时，不具备视觉能力的档位会被自动跳过
 
-启用 `DEEPV_ENABLED=true`（EasyCode/DeepVCode 聚合服务，自动读本地 JWT 登录态）后，额外提供：
-
-| 模型名 | 上游绑定 | 能力 |
-|--------|---------|------|
-| `deepseek-flash`（兼容名 `deepseek-v4.1-flash`） | DeepV `deepseek-flash` | 文本、图片、工具调用、推理、流式 |
-| `deepv-glm-5.3-flash` | DeepV `glm-5.3-flash` | 文本、图片、工具调用、推理、流式 |
+启用 `DEEPV_ENABLED=true`（EasyCode/DeepVCode 聚合服务）后，网关读取本地 JWT 登录态注册相应模型；绑定与兼容 ID 以 Provider 实现和运行时目录为准。
 
 DeepV 工具调用适配会合并 JSON 字符串参数分片及同一调用 ID 的重复帧，完整参数收齐后再交给客户端执行；历史调用即使没有参数也保留 `args: {}`。不完整或非对象参数会明确报错，避免静默丢失后继续执行工具。
 

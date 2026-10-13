@@ -68,6 +68,8 @@ bash scripts/deploy-local-gateway.sh
 
 脚本要求当前分支包含本地已获取的 `origin/main`；更新源码后运行 `git fetch origin main` 再部署。它会构建 Go 二进制，在隔离端口及临时数据库中检查缓存统计 API、记忆/助理接口，以及旧浏览器入口已移除；检查通过后才切换 LaunchAgent，并确认 4001 端口由候选二进制提供服务。失败时会恢复之前的 LaunchAgent 配置并重新启动旧版本。每个版本目录记录源码提交、变更摘要和二进制校验和。新增关键功能或接口时，应同步扩展候选检查项。
 
+脚本只更新网关服务，不安装桌面端。它沿用 LaunchAgent 的工作目录及其中 `.env`、Provider 配置和数据；从当前工作副本构建，本地改动也可能进入二进制，部署前须核对。候选目录的 `deploy-info.txt` 记录提交、工作树状态和摘要，`go version -m <二进制>` 可核对来源提交。隔离预检不调用真实模型，上线后仍需验证流式、取消和助理工具；`/health` 与 `/readyz` 成功不代表上游账号额度充足。桌面更新见 [安装说明](desktop/README.md#macos-安装与发布)。
+
 ## 配置 Pi
 
 安装并启动本地网关后，执行：
@@ -113,7 +115,7 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 ### 服务器部署
 
-部署由用户手动执行。推送到 `main` 或提交 Pull Request 仅运行 CI 检查；版本标签继续触发 Release 构建和发布，不会自动部署到服务器或 Mini PC。
+本机部署由用户显式运行脚本；推送 `main` 或提交 PR 不会直接重启服务。已安装迷你主机更新器的主机则由 timer 每 10 分钟检查 main 的成功 CI 产物，校验并通过健康检查后自动切换；未安装更新器的主机不会更新。版本标签触发 Release 构建发布，详见 [服务器部署](go-gateway/README.md#服务器部署)。
 
 版本线自 `v0.1.0` 重新开始（2026-10-10，产品更名 EasyGateway）；旧 `v1.x` 标签与 Release 已移除，迷你主机更新器只部署与 main 一致的最新构建，不受影响。
 
@@ -144,25 +146,17 @@ MY_PROVIDER_API_KEY=sk-xxx
 
 ### GitHub Copilot
 
-| 模型名 | 实际转发模型 | 说明 |
-|----------|--------------|------|
-| `copilot` | `auto` | GitHub Copilot Chat (自动选择模型) |
+通过账号渠道完成授权后，使用网关返回的模型 ID；授权成功与模型调用成功需分别验证。可用模型以运行时目录为准。
 
 ### 外部提供商
 
-| 模型名 | 提供商 | 说明 |
-|--------|--------|------|
-| `coding` | 智谱 GLM → Antigravity → DeepV | **推荐**，唯一的持续降级链，OpenAI 风格 |
-| `glm-5.3` | 智谱 GLM coding 端点 | 最强文本模型，不支持图片 |
-| `glm-5.3-flash` | 智谱 GLM coding 端点 | 快速文本模型，兼有图片能力 |
-| `gemini-3.8-flash-high` | Antigravity（本机 CLIProxyAPI 反代） | Google Gemini 3.8 Flash（当前主力），兼有图片能力 |
+Provider、能力与 `coding` 降级链的配置见 [providers.yaml](go-gateway/providers.yaml)；启用状态、凭据和动态账号模型共同决定 `GET /v1/models` 的运行时结果。客户端可以调用具体模型 ID，也可以调用配置中的路由链；图片等多模态请求会按能力过滤上游。模型命名、重试边界与 Provider 集成说明见 [运行时文档](go-gateway/README.md#可用模型)。
 
-模型名即上游模型 ID，不设别名。智谱侧只保留 `glm-5.3` 与 `glm-5.3-flash`
-两个模型；`coding` 链为 `glm-5.3` → `glm-5.3-flash` → `gemini-3.8-flash-high`
-→ `deepv-glm-5.3-flash` → `deepseek-flash`，任一档失败自动降级到下一档。
-Antigravity 由本机 8317 端口的 CLIProxyAPI 服务反代（LaunchAgent `local.cliproxy`），
-Google 账号 OAuth 凭据在 CLIProxyAPI 侧维护。完整的模型与链定义见
-`go-gateway/README.md`。
+## 助理与流式排错
+
+启用 `ASSISTANT_ENABLED` 并配置 `ASSISTANT_MODEL` 后，桌面助理可按次选择 `/admin/assistant/models` 中的聊天模型，使用 `gateway_status` / `gateway_logs` 查询运行状态。选择模型不改写服务默认模型；额度耗尽或 429 时可选择其他已授权模型，具体额度需按上游错误与重置时间判断。
+
+流式连接返回 HTTP 200 后仍可能失败。缺少上游终态或收到错误帧时不补造成功结束；客户端取消会停止上游，并按中断记录请求。助理保留已经显示的文本，等待 SDK 本轮收尾后允许继续请求；桌面「取消」后可再次发送。API 和事件契约见 [助理接口](go-gateway/README.md#助理接口与验证) 与 [记忆和助理设计](docs/MEMORY_DESIGN.md)。
 
 ## 配置 Claude Code
 
