@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/ui"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/connection"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/console"
@@ -17,6 +18,7 @@ import (
 
 func main() {
 	app := mygo.App
+	app.SetLanguages("zh-Hans", "en")
 	app.SetName("EasyGateway")
 	dir, err := app.Path(mygo.PathUserData)
 	if err != nil {
@@ -39,7 +41,7 @@ func main() {
 	state.Version = app.Version()
 	show := func() {
 		if win == nil || win.IsDestroyed() {
-			win = mygo.NewWindow(mygo.WindowOptions{Title: "EasyGateway", Content: ui.View(state.View), Width: 1280, Height: 850, MinWidth: 900, MinHeight: 680, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 48, TrafficLightPosition: &mygo.Point{X: 18, Y: 18}, BackgroundColor: "light-dark(#f7f8fa, #18181b)", StateKey: "main"})
+			win = mygo.NewWindow(mygo.WindowOptions{Title: "EasyGateway", Content: ui.View(state.View), Width: 1180, Height: 860, MinWidth: 900, MinHeight: 640, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 48, TrafficLightPosition: &mygo.Point{X: 18, Y: 18}, Vibrancy: mygo.VibrancySidebar, BackgroundColor: "light-dark(#f7f8fa, #18181b)", StateKey: "main"})
 			current := win
 			state.SetDispatcher(func(fn func()) {
 				current.Update(func() {

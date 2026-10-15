@@ -108,8 +108,17 @@ const (
 )
 
 func (a *App) skillsView(c *ui.Context) {
+	sourceIdx := 0
+	if a.skillSource == skillSourceMarket {
+		sourceIdx = 1
+	}
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-		if ui.Select(c, &a.skillSource, []string{skillSourceRepo, skillSourceMarket}).Label("技能来源").Changed() {
+		if ui.Segmented(c, &sourceIdx, skillSourceRepo, skillSourceMarket).Label("技能来源").Changed() {
+			if sourceIdx == 1 {
+				a.skillSource = skillSourceMarket
+			} else {
+				a.skillSource = skillSourceRepo
+			}
 			a.loaded = false
 			a.savePrefs()
 			a.reload()
@@ -136,7 +145,7 @@ func (a *App) marketView(c *ui.Context) {
 		return
 	}
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.TextInput(c, &a.marketQuery).Label("搜索市场").Placeholder("输入技能名称或描述，点击搜索").Grow(1)
+		ui.SearchField(c, &a.marketQuery).Label("搜索市场").Grow(1)
 		if sections := a.marketSectionOptions(); len(sections) > 0 {
 			if ui.Select(c, &a.marketSection, sections).Label("分类").Disabled(a.busy != "").Changed() {
 				a.marketPage = 1
@@ -331,7 +340,7 @@ func (a *App) modelPickerModal(c *ui.Context) {
 	ui.Modal(c, &a.modelPickerOpen, func() {
 		ui.Column(c).Width(640).Gap(14).Children(func() {
 			ui.Text(c, "选择模型").FontSize(20).Bold()
-			if ui.TextInput(c, &a.modelPickerFilter).Label("搜索模型").Placeholder("输入模型、Provider 或渠道名称过滤").FillWidth().AutoFocus().Changed() {
+			if ui.SearchField(c, &a.modelPickerFilter).Label("搜索模型").FillWidth().AutoFocus().Changed() {
 				a.modelPickerList = ui.ListState{}
 			}
 			models := a.filteredChatModels()
@@ -376,7 +385,7 @@ func (a *App) repoSkillsView(c *ui.Context) {
 		return
 	}
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.TextInput(c, &a.skillFilter).Label("搜索技能").Placeholder("搜索名称、描述、标签或作者").Grow(1)
+		ui.SearchField(c, &a.skillFilter).Label("搜索技能").Grow(1)
 		if tags := a.skillTagOptions(); len(tags) > 0 {
 			ui.Select(c, &a.skillTag, tags).Label("标签筛选").Disabled(a.busy != "")
 		}
@@ -562,8 +571,8 @@ func (a *App) saveSkills() {
 	})
 }
 func (a *App) memoryView(c *ui.Context) {
-	ui.Row(c).Gap(12).Children(func() {
-		ui.Text(c, "状态筛选")
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "状态筛选").TextColor(c.Theme().TextMuted)
 		if ui.Select(c, &a.memoryFilter, []string{"all", "candidate", "active", "retired"}).Label("记忆状态").Disabled(a.busy != "").Changed() {
 			a.reload()
 		}
@@ -572,12 +581,13 @@ func (a *App) memoryView(c *ui.Context) {
 	})
 	ui.List(c, nil, len(a.memories), func(i int) {
 		m := a.memories[i]
-		ui.Column(c.Key(fmt.Sprint(m.ID))).Children(func() {
-			row(c, func() {
-				ui.Row(c).Gap(12).Children(func() {
+		ui.Column(c.Key(fmt.Sprint(m.ID))).Padding(4, 0).Children(func() {
+			card(c, func() {
+				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 					status(c, m.Status)
-					muted(c, m.Scope+" · "+m.ScopeKey)
+					muted(c, memoryScopeLabel(m))
 					ui.Spacer(c)
+					meta(c, m.Updated)
 					if m.Status == "candidate" {
 						ui.Button(c, "确认生效").Label(fmt.Sprintf("确认记忆 %d", m.ID)).Disabled(a.busy != "").OnClick(func() { a.mutate("正在确认记忆", "POST", fmt.Sprintf("/memories/%d/confirm", m.ID), nil) })
 					}
@@ -591,7 +601,7 @@ func (a *App) memoryView(c *ui.Context) {
 					})
 				})
 				ui.Text(c, m.Statement).Selectable()
-				meta(c, "来源 "+m.Source, fmt.Sprintf("置信度 %.2f", m.Confidence), fmt.Sprintf("命中 %d 次", m.Hits), m.Updated)
+				meta(c, "来源 "+m.Source, fmt.Sprintf("置信度 %.2f", m.Confidence), fmt.Sprintf("命中 %d 次", m.Hits))
 			})
 		})
 	}).Grow(1).Children(func() {
@@ -601,8 +611,17 @@ func (a *App) memoryView(c *ui.Context) {
 	})
 	card(c, func() {
 		ui.Text(c, "添加记忆").Bold()
-		ui.Row(c).Gap(10).Children(func() {
-			ui.Select(c, &a.memoryScope, []string{"global", "client", "project"}).Label("记忆范围").Disabled(a.busy != "")
+		scopeIdx := 0
+		switch a.memoryScope {
+		case "client":
+			scopeIdx = 1
+		case "project":
+			scopeIdx = 2
+		}
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			if ui.Segmented(c, &scopeIdx, "global", "client", "project").Label("记忆范围").Disabled(a.busy != "").Changed() {
+				a.memoryScope = []string{"global", "client", "project"}[scopeIdx]
+			}
 			switch a.memoryScope {
 			case "client":
 				ui.Combobox(c, &a.memoryKey, a.clientSuggestions()).Grow(1).Label("客户端")
@@ -621,7 +640,9 @@ func (a *App) memoryView(c *ui.Context) {
 			})
 		}
 		ui.TextInput(c, &a.memoryText).Label("记忆内容").Placeholder("输入希望助理记住的事实").Disabled(a.busy != "")
-		ui.PrimaryButton(c, "添加记忆").Disabled(a.busy != "" || strings.TrimSpace(a.memoryText) == "" || (a.memoryScope != "global" && strings.TrimSpace(a.memoryKey) == "")).OnClick(a.addMemory)
+		ui.Row(c).Justify(ui.End).Children(func() {
+			ui.PrimaryButton(c, "添加记忆").Disabled(a.busy != "" || strings.TrimSpace(a.memoryText) == "" || (a.memoryScope != "global" && strings.TrimSpace(a.memoryKey) == "")).OnClick(a.addMemory)
+		})
 	})
 }
 
@@ -736,20 +757,6 @@ func (a *App) settingsView(c *ui.Context) {
 				})
 			})
 		}
-		card(c, func() {
-			ui.Text(c, "最近的助理反馈").FontSize(18).Bold()
-			if len(a.feedback) == 0 {
-				muted(c, "暂无反馈")
-			}
-			for _, f := range a.feedback {
-				ui.Text(c, f.Rating+" · "+f.Created).Bold()
-				ui.Text(c, f.Excerpt).MaxLines(3).Selectable()
-				if f.Note != "" {
-					muted(c, f.Note)
-				}
-				ui.Divider(c)
-			}
-		})
 	})
 }
 func bubble(c *ui.Context, who, text string, user bool) {
@@ -766,7 +773,7 @@ func bubble(c *ui.Context, who, text string, user bool) {
 	})
 }
 func (a *App) assistantView(c *ui.Context) {
-	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Wrap().Gap(12).AlignItems(ui.Center).Children(func() {
 		// 模型目录上百条：搜索选择走弹窗（Combobox 点击后输入会追加
 		// 到当前值上，无匹配时弹层静默消失，体验不可接受）。
 		if a.chatModel == "" {
@@ -778,13 +785,20 @@ func (a *App) assistantView(c *ui.Context) {
 			a.modelPickerList = ui.ListState{}
 			a.modelPickerOpen = true
 		})
-		if a.chatDefault != "" {
+		if a.chatDefault != "" && a.chatModel == chatDefaultOption {
 			muted(c, "默认 "+a.chatDefault)
 		}
 		ui.Spacer(c)
-		muted(c, "助理可用 gateway_status / gateway_logs 查询实时运行状态")
+		if a.chatReply != "" {
+			ui.Button(c, "复制回复").OnClick(func() { c.WriteClipboard(a.chatReply) })
+		}
+		ui.Button(c, "清空对话").Disabled(a.busy != "" || (a.chatUser == "" && a.chatReply == "")).OnClick(func() {
+			a.chatUser, a.chatReply, a.chatStatus = "", "", ""
+			a.chatMarkdown = markdownDocument{}
+			a.chatList = ui.ScrollState{}
+		})
 	})
-	ui.Scroll(c).Grow(1).TrackScroll(&a.chatList).Gap(18).Selectable().Children(func() {
+	ui.Scroll(c).Key("assistant-transcript").Grow(1).TrackScroll(&a.chatList).Padding(8, 14, 8, 0).Gap(20).Selectable().Children(func() {
 		if a.chatUser == "" {
 			ui.Text(c, "你的网关助理").FontSize(22).Bold()
 			muted(c, "可以询问模型、路由与运行状态，或整理工作区记忆。")
@@ -799,33 +813,46 @@ func (a *App) assistantView(c *ui.Context) {
 			bubble(c, "你", a.chatUser, true)
 		}
 		if a.chatReply != "" {
-			bubble(c, "助理", a.chatReply, false)
-		}
-		if a.chatStatus != "" {
-			muted(c, a.chatStatus)
+			ui.Column(c).Key("assistant-reply").Gap(10).MinWidth(0).Children(func() {
+				ui.Text(c, "助理").Bold().FontSize(13).TextColor(c.Theme().TextMuted)
+				a.chatMarkdown.render(c, a.chatReply, a.busy == "助理回复中")
+			})
 		}
 	})
-	if a.chatReply != "" && a.busy == "" {
-		ui.Row(c).Gap(8).Children(func() {
-			ui.TextInput(c, &a.feedbackNote).Label("反馈备注").Placeholder("可选：反馈备注").Grow(1)
-			for _, rating := range []string{"up", "down"} {
-				label := "有帮助"
-				if rating == "down" {
-					label = "需改进"
+	// Let the native editor insert Shift+Enter at the caret, with selection and undo.
+	input := ui.TextArea(c.Key("assistant-composer"), &a.chatInput).Lines(2, 6).Label("助理消息").Placeholder("询问模型、路由或运行状态…").Disabled(a.busy != "")
+	composing := input.Composing()
+	input.OnTextKey(func(k ui.TextKey) bool {
+		if composing || a.busy != "" || k.Key != ui.KeyEnter || (k.Mods != 0 && k.Mods != ui.Cmd) {
+			return false
+		}
+		a.chatInput = k.Text()
+		a.sendChat()
+		k.SetText(a.chatInput)
+		return true
+	})
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		if a.chatStatus != "" {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				if a.busy == "助理回复中" {
+					ui.Spinner(c).Size(12, 12)
 				}
-				ui.Button(c, label).OnClick(func() {
-					a.mutate("正在提交反馈", "POST", "/assistant/feedback", map[string]string{"rating": rating, "reply": a.chatReply, "note": a.feedbackNote})
-				})
-			}
-		})
-	}
-	ui.TextArea(c, &a.chatInput).Height(88).Label("助理消息").Placeholder("输入消息；点击发送").Disabled(a.busy != "")
-	ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-		ui.Button(c, "清空对话").Disabled(a.busy != "").OnClick(func() { a.chatUser = ""; a.chatReply = ""; a.chatStatus = "" })
-		ui.PrimaryButton(c, "发送").Disabled(a.busy != "" || strings.TrimSpace(a.chatInput) == "").OnClick(a.sendChat)
+				ui.Text(c, a.chatStatus).FontSize(12).TextColor(c.Theme().TextMuted)
+			})
+		}
+		ui.Spacer(c)
+		ui.Text(c, "Enter 发送 · Shift+Enter 换行").FontSize(12).TextColor(c.Theme().TextMuted)
+		if a.busy == "助理回复中" {
+			ui.Button(c, "停止回复").OnClick(a.stop)
+		} else {
+			ui.PrimaryButton(c, "发送").Disabled(a.busy != "" || strings.TrimSpace(a.chatInput) == "").OnClick(a.sendChat)
+		}
 	})
 }
 func (a *App) sendChat() {
+	if a.busy != "" {
+		return
+	}
 	message := strings.TrimSpace(a.chatInput)
 	if message == "" {
 		return
