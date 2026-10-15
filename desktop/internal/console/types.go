@@ -187,12 +187,6 @@ type Prompt struct {
 	Custom  string `json:"custom"`
 	Default string `json:"default"`
 }
-type Feedback struct {
-	Rating  string `json:"rating"`
-	Excerpt string `json:"reply_excerpt"`
-	Note    string `json:"note"`
-	Created string `json:"created_at"`
-}
 type Event struct {
 	Type    string `json:"type"`
 	Content string `json:"content"`

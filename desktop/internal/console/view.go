@@ -21,7 +21,7 @@ var pages = []struct{ ID, Title, Subtitle string }{
 	{"skills", "技能", "搜索、启用并同步技能到全局与项目目录"},
 	{"memory", "记忆", "确认、停用和管理助理记忆"},
 	{"assistant", "助理", "与网关助理对话，实时查看回复和工具状态"},
-	{"settings", "设置", "客户端模型同步、助理人设与反馈"},
+	{"settings", "设置", "客户端模型同步与助理人设"},
 	{"connections", "网关连接", "管理本机与远程网关的连接"},
 }
 
@@ -41,9 +41,30 @@ func (a *App) View(c *ui.Context) {
 	}
 	theme.Radius = 8
 	c.SetTheme(&theme)
-	ui.Column(c).Fill().Background(theme.Background).Children(func() {
+	vibrant := c.Vibrancy()
+	if vibrant {
+		c.Root().Background(ui.Transparent)
+	}
+	if c.Shortcut(ui.Cmd, ui.KeyR) && a.busy == "" && !a.skillDirty && a.page != "connections" && a.page != "assistant" {
+		a.reload()
+	}
+	if a.notice != "" && a.notice != a.lastNotice {
+		c.Toast(a.notice)
+		a.lastNotice = a.notice
+	} else if a.notice == "" {
+		a.lastNotice = ""
+	}
+	root := ui.Column(c).Fill()
+	if !vibrant {
+		root = root.Background(theme.Background)
+	}
+	root.Children(func() {
 		bar := c.TitleBar()
-		ui.Row(c).Height(max(bar.Height, 48)).Padding(0, 16, 0, bar.Left+16).Gap(12).DragWindow().BorderWidth(0, 0, 1, 0).BorderColor(theme.Border).Children(func() {
+		topRow := ui.Row(c).Height(max(bar.Height, 48)).Padding(0, 16, 0, bar.Left+16).Gap(12).DragWindow().BorderWidth(0, 0, 1, 0).BorderColor(theme.Border)
+		if !vibrant {
+			topRow = topRow.Background(theme.Surface)
+		}
+		topRow.Children(func() {
 			ui.Box(c).Size(28, 28).Center().Radius(8).Background(theme.Accent).AlignSelf(ui.Center).Children(func() {
 				ui.Text(c, "E").Bold().FontSize(15).TextColor(theme.AccentText)
 			})
@@ -88,18 +109,54 @@ func (a *App) View(c *ui.Context) {
 				}
 			}
 		})
+		expiredChannels, expiringChannels := a.channelExpiryCounts()
+		candidateMemories := 0
+		for _, m := range a.memories {
+			if m.Status == "candidate" {
+				candidateMemories++
+			}
+		}
+		troubledProviders := 0
+		for _, pr := range a.providers {
+			if pr.Status == "offline" || pr.State == "open" {
+				troubledProviders++
+			}
+		}
 		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
-			ui.Column(c).Width(208).Background(theme.Surface).BorderWidth(0, 1, 0, 0).BorderColor(theme.Border).Children(func() {
+			sidebarCol := ui.Column(c).Width(208).BorderWidth(0, 1, 0, 0).BorderColor(theme.Border)
+			if !vibrant {
+				sidebarCol = sidebarCol.Background(theme.Surface)
+			}
+			sidebarCol.Children(func() {
 				current := a.page
 				sidebar := ui.Sidebar(c, &current, func() {
 					ui.SidebarSection(c, "控制台", nil, func() {
 						for _, p := range pages[:5] {
-							ui.SidebarItem(c, p.ID, nil, p.Title)
+							item := ui.SidebarItem(c, p.ID, nil, p.Title)
+							switch p.ID {
+							case "channels":
+								if expiredChannels > 0 {
+									item.Children(func() { ui.Badge(c, fmt.Sprint(expiredChannels)).Background(theme.Danger).TextColor(ui.Hex("#ffffff")) })
+								} else if expiringChannels > 0 {
+									item.Children(func() { ui.Badge(c, fmt.Sprint(expiringChannels)).Background(theme.Accent).TextColor(theme.AccentText) })
+								}
+							case "providers":
+								if troubledProviders > 0 {
+									item.Children(func() {
+										ui.Badge(c, fmt.Sprint(troubledProviders)).Background(theme.Danger).TextColor(ui.Hex("#ffffff"))
+									})
+								}
+							}
 						}
 					})
 					ui.SidebarSection(c, "个人工作区", nil, func() {
 						for _, p := range pages[5:9] {
-							ui.SidebarItem(c, p.ID, nil, p.Title)
+							item := ui.SidebarItem(c, p.ID, nil, p.Title)
+							if p.ID == "memory" && candidateMemories > 0 {
+								item.Children(func() {
+									ui.Badge(c, fmt.Sprint(candidateMemories)).Background(theme.Accent).TextColor(theme.AccentText)
+								})
+							}
 						}
 					})
 					ui.SidebarSection(c, "连接", nil, func() { ui.SidebarItem(c, "connections", nil, "网关连接") })
@@ -113,7 +170,9 @@ func (a *App) View(c *ui.Context) {
 				}
 				ui.Text(c, "原生桌面端 · "+a.Version).FontSize(12).TextColor(theme.TextMuted).Padding(16)
 			})
-			ui.Column(c).Grow(1).MinWidth(0).Padding(24, 28).Gap(16).Children(func() {
+			// 内容列限宽居中：管理后台的信息密度在 1000px 左右最舒适，
+			// 超宽屏下表单和列表拉满会稀疏难读（又宽又矮的观感主要来源）。
+			ui.Column(c).Grow(1).MinWidth(0).MaxWidth(1040).Margin(0, ui.Auto).Padding(24, 28).Gap(16).Background(theme.Background).Children(func() {
 				ui.Row(c).Gap(16).Children(func() {
 					ui.Column(c).Grow(1).Gap(4).Children(func() {
 						for _, p := range pages {
@@ -123,10 +182,10 @@ func (a *App) View(c *ui.Context) {
 							}
 						}
 					})
-					if a.page != "connections" {
+					if a.page != "connections" && a.page != "assistant" {
 						ui.Button(c, "刷新").Disabled(a.busy != "" || a.skillDirty).OnClick(a.reload)
 					}
-					if a.busy != "" {
+					if a.busy != "" && !(a.page == "assistant" && a.busy == "助理回复中") {
 						ui.Button(c, "取消").OnClick(a.stop)
 					}
 				})
@@ -151,7 +210,8 @@ func (a *App) View(c *ui.Context) {
 				// （技能页切来源、模型页换分类都能直接自愈），数据区由
 				// 各页的 unloadedOrEmpty 给出明确提示。
 				if a.page != "connections" && !a.loaded && a.busy != "" {
-					ui.Column(c).Grow(1).Center().Children(func() {
+					ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
+						ui.Spinner(c).Size(28, 28)
 						muted(c, "正在载入网关数据")
 					})
 					return
@@ -506,6 +566,14 @@ func status(c *ui.Context, value string) {
 	}
 	chip(c, text, statusColor(c, value))
 }
+
+// memoryScopeLabel 把记忆的范围与范围键拼成展示标签，global 无键时只显范围。
+func memoryScopeLabel(m Memory) string {
+	if m.ScopeKey == "" {
+		return m.Scope
+	}
+	return m.Scope + " · " + m.ScopeKey
+}
 func (a *App) overviewView(c *ui.Context) {
 	if a.notLoaded(c) {
 		return
@@ -523,9 +591,9 @@ func (a *App) overviewView(c *ui.Context) {
 			if i > 0 {
 				ui.Box(c).Width(1).AlignSelf(ui.Stretch).Background(theme.Border)
 			}
-			ui.Row(c.Key(metric.Title)).Grow(1).MinWidth(0).Gap(10).AlignItems(ui.Center).Padding(14, 18).Children(func() {
-				muted(c, metric.Title)
-				ui.Text(c, metric.Value).Bold().FontSize(17).SingleLine()
+			ui.Column(c.Key(metric.Title)).Grow(1).MinWidth(0).Padding(16, 20).Gap(6).Children(func() {
+				ui.Text(c, metric.Title).FontSize(13).TextColor(theme.TextMuted)
+				ui.Text(c, metric.Value).Bold().FontSize(22).SingleLine()
 			})
 		}
 	})
@@ -538,52 +606,149 @@ func (a *App) overviewView(c *ui.Context) {
 		if expiring > 0 {
 			parts = append(parts, fmt.Sprintf("%d 个 24 小时内过期", expiring))
 		}
-		ui.Row(c).Gap(12).Padding(12).Radius(8).Background(theme.Accent.Alpha(.08)).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(12).Padding(12, 16).Radius(10).Background(theme.Accent.Alpha(.08)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "渠道凭据提醒："+strings.Join(parts, "，")+"。").TextColor(theme.Accent).Grow(1)
 			ui.Button(c, "去处理").OnClick(func() { a.navigate("channels") })
 		})
 	}
-	ui.Row(c).Gap(20).Children(func() {
-		muted(c, "运行时间  "+s.Uptime)
-		muted(c, "缓存命中  "+percent(s.CacheHitRate))
-		muted(c, "缓存读取  "+shortNumber(s.CacheRead))
+
+	// 服务健康与缓存卡片
+	card(c, func() {
+		ui.Row(c).Gap(24).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).Gap(6).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "服务可用性").FontSize(13).TextColor(theme.TextMuted)
+					ui.Spacer(c)
+					ui.Textf(c, "%.1f%%", s.SuccessRate).FontSize(13).Bold()
+				})
+				ui.Meter(c, s.SuccessRate, 0, 100, &ui.MeterLevels{Critical: 80, Warning: 95}).Label("成功率").FillWidth()
+			})
+			if s.CacheHitRate != nil {
+				ui.Column(c).Grow(1).Gap(6).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "缓存命中率").FontSize(13).TextColor(theme.TextMuted)
+						ui.Spacer(c)
+						ui.Text(c, percent(s.CacheHitRate)).FontSize(13).Bold()
+					})
+					ui.Meter(c, *s.CacheHitRate, 0, 100, nil).Label("缓存命中率").FillWidth()
+				})
+			}
+		})
+		ui.Row(c).Gap(20).Children(func() {
+			muted(c, "运行时间  "+s.Uptime)
+			if s.CacheHitRate != nil {
+				muted(c, "缓存读取  "+shortNumber(s.CacheRead))
+			}
+			if s.ActiveModels > 0 {
+				muted(c, fmt.Sprintf("活跃模型  %d 个", s.ActiveModels))
+			}
+		})
 	})
+
+	tally := map[string]int{}
+	for _, p := range a.dashboard.Providers {
+		switch {
+		case p.Status == "online":
+			tally["online"]++
+		case p.Status == "offline":
+			tally["offline"]++
+		case p.Status == "degraded":
+			tally["degraded"]++
+		default:
+			tally["unknown"]++
+		}
+	}
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "上游健康").FontSize(18).Bold()
-		if count := len(a.dashboard.Providers); count > 0 {
-			tally := map[string]int{}
-			for _, p := range a.dashboard.Providers {
-				switch {
-				case p.Status == "online":
-					tally["online"]++
-				case p.Status == "offline":
-					tally["offline"]++
-				case p.Status == "degraded":
-					tally["degraded"]++
-				default:
-					tally["unknown"]++
-				}
-			}
-			if tally["online"] > 0 {
-				chip(c, fmt.Sprintf("%d 在线", tally["online"]), okGreen)
-			}
-			if tally["degraded"] > 0 {
-				chip(c, fmt.Sprintf("%d 降级", tally["degraded"]), theme.Accent)
-			}
-			if tally["offline"] > 0 {
-				chip(c, fmt.Sprintf("%d 离线", tally["offline"]), theme.Danger)
-			}
-			if tally["unknown"] > 0 {
-				chip(c, fmt.Sprintf("%d 未探测", tally["unknown"]), theme.TextMuted)
-			}
+		if tally["online"] > 0 {
+			chip(c, fmt.Sprintf("%d 在线", tally["online"]), okGreen)
 		}
+		if tally["degraded"] > 0 {
+			chip(c, fmt.Sprintf("%d 降级", tally["degraded"]), theme.Accent)
+		}
+		if tally["offline"] > 0 {
+			chip(c, fmt.Sprintf("%d 离线", tally["offline"]), theme.Danger)
+		}
+		if tally["unknown"] > 0 {
+			chip(c, fmt.Sprintf("%d 未探测", tally["unknown"]), theme.TextMuted)
+		}
+		ui.Spacer(c)
+		ui.SearchField(c, &a.overviewFilter).Placeholder("搜索 Provider...").Width(200)
 	})
+
 	if len(a.dashboard.Providers) == 0 {
 		empty(c, "网关暂未配置 Provider")
 		return
 	}
-	ui.Table(c, nil, []ui.TableColumn{{Title: "Provider"}, {Title: "状态", Width: 110}, {Title: "请求", Width: 90}, {Title: "延迟", Width: 110}}, len(a.dashboard.Providers), func(row, col int) {
-		p := a.dashboard.Providers[row]
+
+	var providers []Provider
+	filter := strings.ToLower(strings.TrimSpace(a.overviewFilter))
+	for _, p := range a.dashboard.Providers {
+		if filter != "" && !strings.Contains(strings.ToLower(p.Name), filter) && !strings.Contains(strings.ToLower(p.Status), filter) {
+			continue
+		}
+		providers = append(providers, p)
+	}
+
+	if len(providers) == 0 {
+		empty(c, "没有匹配的 Provider")
+		return
+	}
+
+	if a.overviewSort.Column != "" {
+		desc := a.overviewSort.Descending
+		sort.SliceStable(providers, func(i, j int) bool {
+			p1, p2 := providers[i], providers[j]
+			if desc {
+				p1, p2 = p2, p1
+			}
+			var less bool
+			switch a.overviewSort.Column {
+			case "Provider":
+				less = p1.Name < p2.Name
+			case "状态":
+				less = p1.Status < p2.Status
+			case "请求":
+				less = p1.Requests < p2.Requests
+			case "延迟":
+				less = p1.AvgLatency < p2.AvgLatency
+			default:
+				return false
+			}
+			return less
+		})
+	} else {
+		statusWeight := func(st string, req int) int {
+			if req > 0 {
+				return 4
+			}
+			switch st {
+			case "degraded", "offline":
+				return 3
+			case "online":
+				return 2
+			default:
+				return 1
+			}
+		}
+		sort.SliceStable(providers, func(i, j int) bool {
+			w1, w2 := statusWeight(providers[i].Status, providers[i].Requests), statusWeight(providers[j].Status, providers[j].Requests)
+			if w1 != w2 {
+				return w1 > w2
+			}
+			return providers[i].Name < providers[j].Name
+		})
+	}
+
+	overviewCols := []ui.TableColumn{
+		{Title: "Provider", Sortable: true},
+		{Title: "状态", Width: 110, Sortable: true},
+		{Title: "请求", Width: 90, Sortable: true},
+		{Title: "延迟", Width: 110, Sortable: true},
+	}
+	a.overviewTable.Sort = &a.overviewSort
+	ui.Table(c, &a.overviewTable, overviewCols, len(providers), func(row, col int) {
+		p := providers[row]
 		switch col {
 		case 0:
 			ui.Text(c, p.Name).Bold()
@@ -598,7 +763,7 @@ func (a *App) overviewView(c *ui.Context) {
 }
 func (a *App) modelsView(c *ui.Context) {
 	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.TextInput(c, &a.modelFilter).Placeholder("搜索模型或 Provider").Label("搜索模型").Grow(1)
+		ui.SearchField(c, &a.modelFilter).Label("搜索模型").Grow(1)
 		if ui.Select(c, &a.modelCategory, modelCategories).Label("能力分类").Changed() {
 			a.listViews.modelList = ui.ListState{}
 			a.savePrefs()
@@ -690,9 +855,17 @@ func (a *App) providersView(c *ui.Context) {
 	}).Grow(1)
 }
 func (a *App) logsView(c *ui.Context) {
-	ui.Row(c).Gap(12).Children(func() {
-		ui.TextInput(c, &a.logFilter).Label("搜索日志").Placeholder("搜索模型、Provider、请求 ID 或错误").Grow(1)
-		if ui.Select(c, &a.logLimit, []string{"50", "100", "200"}).Label("日志条数").Disabled(a.busy != "").Changed() {
+	limitIdx := 0
+	switch a.logLimit {
+	case "100":
+		limitIdx = 1
+	case "200":
+		limitIdx = 2
+	}
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.SearchField(c, &a.logFilter).Label("搜索日志").Grow(1)
+		if ui.Segmented(c, &limitIdx, "50", "100", "200").Label("日志条数").Disabled(a.busy != "").Changed() {
+			a.logLimit = []string{"50", "100", "200"}[limitIdx]
 			a.reload()
 		}
 	})
@@ -704,30 +877,82 @@ func (a *App) logsView(c *ui.Context) {
 	if a.unloadedOrEmpty(c, filtered.Len(), "暂无匹配的请求日志") {
 		return
 	}
+	cols := []ui.TableColumn{
+		{Title: "时间", Width: 170, Sortable: true},
+		{Title: "模型", Sortable: true},
+		{Title: "Provider", Width: 150, Sortable: true},
+		{Title: "状态", Width: 65, Sortable: true},
+		{Title: "延迟", Width: 100, Sortable: true},
+	}
+	order := make([]int, filtered.Len())
+	for i := range order {
+		order[i] = i
+	}
+	if a.logSort.Column != "" {
+		desc := a.logSort.Descending
+		sort.SliceStable(order, func(i, j int) bool {
+			aLog := filtered.At(order[i])
+			bLog := filtered.At(order[j])
+			if desc {
+				aLog, bLog = bLog, aLog
+			}
+			var less bool
+			switch a.logSort.Column {
+			case "时间":
+				less = aLog.Timestamp < bLog.Timestamp
+			case "模型":
+				less = aLog.Model < bLog.Model
+			case "Provider":
+				less = aLog.Provider < bLog.Provider
+			case "状态":
+				less = aLog.Code < bLog.Code
+			case "延迟":
+				less = aLog.Latency < bLog.Latency
+			default:
+				return false
+			}
+			return less
+		})
+	}
+	a.table.Sort = &a.logSort
 	a.table.Selected = &a.logSelected
 	a.table.Key = func(i int) any {
-		l := filtered.At(i)
-		return l.RequestID + l.Timestamp + fmt.Sprint(i)
+		l := filtered.At(order[i])
+		return l.RequestID + l.Timestamp + fmt.Sprint(order[i])
 	}
-	ui.Table(c, &a.table, []ui.TableColumn{{Title: "时间", Width: 170}, {Title: "模型"}, {Title: "Provider", Width: 150}, {Title: "状态", Width: 65}, {Title: "延迟", Width: 100}}, filtered.Len(), func(row, col int) {
-		l := filtered.At(row)
-		switch col {
-		case 0:
-			ui.Text(c, l.Timestamp).SingleLine()
-		case 1:
-			ui.Text(c, l.Model).SingleLine()
-		case 2:
-			ui.Text(c, l.Provider).SingleLine()
-		case 3:
-			ui.Text(c, fmt.Sprint(l.Code))
-		case 4:
-			ui.Text(c, formatLatency(l.Latency))
+	renderTable := func() {
+		ui.Table(c, &a.table, cols, filtered.Len(), func(row, col int) {
+			l := filtered.At(order[row])
+			switch col {
+			case 0:
+				ui.Text(c, l.Timestamp).SingleLine()
+			case 1:
+				ui.Text(c, l.Model).SingleLine()
+			case 2:
+				ui.Text(c, l.Provider).SingleLine()
+			case 3:
+				ui.Text(c, fmt.Sprint(l.Code))
+			case 4:
+				ui.Text(c, formatLatency(l.Latency))
+			}
+		}).Grow(1).MinHeight(130)
+	}
+	renderDetail := func() {
+		if a.logSelected < 0 || a.logSelected >= len(order) {
+			return
 		}
-	}).Grow(1).MinHeight(130)
-	if a.logSelected >= 0 && a.logSelected < filtered.Len() {
-		l := filtered.At(a.logSelected)
-		ui.Scroll(c).MaxHeight(220).Gap(6).Padding(12).Background(c.Theme().Surface).Radius(8).Selectable().Children(func() {
-			ui.Text(c, l.Method+" "+l.Path+" · "+l.RequestID).Bold()
+		l := filtered.At(order[a.logSelected])
+		ui.Scroll(c).Grow(1).Gap(6).Padding(12).Background(c.Theme().Surface).Radius(8).Selectable().Children(func() {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, l.Method+" "+l.Path+" · "+l.RequestID).Bold()
+				ui.Spacer(c)
+				ui.Button(c, "复制 ID").OnClick(func() {
+					if a.CopyText != nil {
+						a.CopyText(l.RequestID)
+						c.Toast("已复制 Request ID")
+					}
+				})
+			})
 			meta(c, "输入 "+shortNumber(l.Input), "输出 "+shortNumber(l.Output)+" tokens", "缓存读取 "+shortNumber(l.CacheRead), fmt.Sprintf("流式 %t", l.Stream))
 			if l.Error != "" {
 				ui.Text(c, l.Error).TextColor(c.Theme().Danger)
@@ -744,5 +969,13 @@ func (a *App) logsView(c *ui.Context) {
 				})
 			}
 		})
+	}
+	if a.logSelected >= 0 && a.logSelected < len(order) {
+		if a.logSplitHeight <= 0 {
+			a.logSplitHeight = 360
+		}
+		ui.SplitVertical(c, &a.logSplitHeight, renderTable, renderDetail).Grow(1)
+	} else {
+		renderTable()
 	}
 }

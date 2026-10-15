@@ -16,7 +16,8 @@ func (a *App) channelsView(c *ui.Context) {
 	muted(c, "先登录账号，再验证模型调用。无需额外应用密钥的渠道排在前面。")
 	if login := a.channelLogin; login != nil {
 		card(c, func() {
-			ui.Row(c).Gap(12).Children(func() {
+			ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Spinner(c).Size(16, 16)
 				ui.Text(c, "等待 "+channelTitle(login.Channel)+" 授权").Bold().Grow(1)
 				ui.Button(c, "取消授权").OnClick(a.stop)
 			})

@@ -39,6 +39,12 @@ type App struct {
 	logLimit, logFilter                                                   string
 	logSelected                                                           int
 	table                                                                 ui.ListState
+	logSort                                                               ui.SortOrder
+	logSplitHeight                                                        float32
+	overviewSort                                                          ui.SortOrder
+	overviewTable                                                         ui.ListState
+	overviewFilter                                                        string
+	lastNotice                                                            string
 	listViews                                                             listViewState
 	modelFilter, modelCategory                                            string
 	skills                                                                Skills
@@ -65,8 +71,8 @@ type App struct {
 	promptDraft                                                           string
 	configs                                                               map[string]ClientConfig
 	configSelection                                                       map[string]map[string]bool
-	feedback                                                              []Feedback
-	chatInput, chatReply, chatUser, chatStatus, feedbackNote              string
+	chatInput, chatReply, chatUser, chatStatus                            string
+	chatMarkdown                                                          markdownDocument
 	connSelect                                                            string
 	chatModels                                                            []string
 	chatModelOptions                                                      map[string]ChatModelOption
@@ -88,7 +94,8 @@ type App struct {
 
 func New(store *connection.Store) *App {
 	a := &App{store: store, profiles: store.State(), page: "connections", logLimit: "50", logSelected: -1,
-		memoryScope: "global", memoryFilter: "all", skillSelection: map[string]bool{}, skillTag: skillsTagAll,
+		logSplitHeight: 380,
+		memoryScope:    "global", memoryFilter: "all", skillSelection: map[string]bool{}, skillTag: skillsTagAll,
 		modelCategory: modelCategoryAll, marketSection: marketSectionAll,
 		skillExpanded: map[string]bool{}, skillSource: skillSourceRepo, marketSort: "推荐", marketPage: 1,
 		marketExpanded: map[string]bool{}, configs: map[string]ClientConfig{}, configSelection: map[string]map[string]bool{}}
@@ -355,18 +362,13 @@ func (a *App) reload() {
 				}
 				configs[target] = config
 			}
-			var f struct {
-				Feedback []Feedback `json:"feedback"`
-			}
-			err := c.JSON(ctx, "GET", "/assistant/feedback?limit=20", nil, &f)
 			return func() {
 				a.prompt = p
 				a.promptDraft = p.Custom
 				a.configs = configs
 				a.initConfigSelection()
-				a.feedback = f.Feedback
 				a.loaded = true
-			}, err
+			}, nil
 		case "assistant":
 			var m struct {
 				Default string            `json:"default"`
@@ -537,7 +539,7 @@ func (a *App) resetHost() {
 	a.promptDraft = ""
 	a.configs = map[string]ClientConfig{}
 	a.configSelection = map[string]map[string]bool{}
-	a.feedback = nil
+	a.chatMarkdown = markdownDocument{}
 	a.chatReply = ""
 	a.chatInput = ""
 	a.chatUser = ""
@@ -546,7 +548,6 @@ func (a *App) resetHost() {
 	a.chatModelOptions = nil
 	a.chatModel = chatDefaultOption
 	a.chatDefault = ""
-	a.feedbackNote = ""
 	a.table = ui.ListState{}
 	a.notice = ""
 	a.problem = ""
