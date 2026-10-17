@@ -42,17 +42,30 @@ func (c *Candidate) Secret() string { return c.secret }
 
 // ConvertOptions 提供转换所需的网关现状（用于排除自指、去重与命名冲突）。
 type ConvertOptions struct {
-	GatewayPort     int             // 网关自身端口，指向它的条目不导入
-	ExistingURLs    []string        // providers.yaml 已有 provider 的规范化端点
-	ExistingNames   map[string]bool // 已有 provider 名
-	ExistingEnvKeys map[string]bool // 已被占用的密钥变量名
+	GatewayPort       int                         // 网关自身端口，指向它的条目不导入
+	ExistingProviders map[string]ExistingProvider // 规范化端点 → 已有 provider（去重与密钥比对）
+	ExistingNames     map[string]bool             // 已有 provider 名
+	ExistingEnvKeys   map[string]bool             // 已被占用的密钥变量名
+	ExistingEnvValues map[string]string           // .env 已有变量的当前值（检测密钥变化）
+}
+
+// ExistingProvider 描述 providers.yaml 里已存在的一个 provider。
+type ExistingProvider struct {
+	Name      string
+	APIKeyEnv string
 }
 
 // LoadContext 读取网关现有的 providers.yaml 与 .env，构建转换去重上下文。
 // providers.yaml 不存在视为空配置；存在但解析失败返回错误（避免盲目追加
 // 破坏一份手工维护的配置）。
 func LoadContext(providersYAML, envFile string, gatewayPort int) (ConvertOptions, error) {
-	opts := ConvertOptions{GatewayPort: gatewayPort, ExistingNames: map[string]bool{}, ExistingEnvKeys: map[string]bool{}}
+	opts := ConvertOptions{
+		GatewayPort:       gatewayPort,
+		ExistingProviders: map[string]ExistingProvider{},
+		ExistingNames:     map[string]bool{},
+		ExistingEnvKeys:   map[string]bool{},
+		ExistingEnvValues: map[string]string{},
+	}
 
 	if fileExists(providersYAML) {
 		cfg, err := provider.LoadProvidersConfig(providersYAML)
@@ -61,7 +74,7 @@ func LoadContext(providersYAML, envFile string, gatewayPort int) (ConvertOptions
 		}
 		for _, p := range cfg.Providers {
 			if p.URL != "" {
-				opts.ExistingURLs = append(opts.ExistingURLs, NormalizeEndpoint(p.URL))
+				opts.ExistingProviders[NormalizeEndpoint(p.URL)] = ExistingProvider{Name: p.Name, APIKeyEnv: p.APIKeyEnv}
 			}
 			opts.ExistingNames[p.Name] = true
 			if p.APIKeyEnv != "" {
@@ -69,8 +82,9 @@ func LoadContext(providersYAML, envFile string, gatewayPort int) (ConvertOptions
 			}
 		}
 	}
-	for key := range parseEnvKeys(readFileOrDefault(envFile)) {
+	for key, value := range parseEnvKeys(readFileOrDefault(envFile)) {
 		opts.ExistingEnvKeys[key] = true
+		opts.ExistingEnvValues[key] = value
 	}
 	return opts, nil
 }
@@ -78,6 +92,18 @@ func LoadContext(providersYAML, envFile string, gatewayPort int) (ConvertOptions
 // Convert 把扫描到的条目转换为网关 provider 候选。不能迁移的条目保留在
 // 结果中并标注 skipped 原因，便于在面板与 CLI 里完整呈现。
 func Convert(entries []Entry, opts ConvertOptions) []Candidate {
+	if opts.ExistingNames == nil {
+		opts.ExistingNames = map[string]bool{}
+	}
+	if opts.ExistingEnvKeys == nil {
+		opts.ExistingEnvKeys = map[string]bool{}
+	}
+	if opts.ExistingEnvValues == nil {
+		opts.ExistingEnvValues = map[string]string{}
+	}
+	if opts.ExistingProviders == nil {
+		opts.ExistingProviders = map[string]ExistingProvider{}
+	}
 	usedNames := make(map[string]bool, len(opts.ExistingNames))
 	for name := range opts.ExistingNames {
 		usedNames[name] = true
@@ -86,19 +112,19 @@ func Convert(entries []Entry, opts ConvertOptions) []Candidate {
 	for key := range opts.ExistingEnvKeys {
 		usedEnvKeys[key] = true
 	}
-	seenURLs := make(map[string]bool, len(opts.ExistingURLs))
-	for _, u := range opts.ExistingURLs {
-		seenURLs[u] = true
+	seen := make(map[string]ExistingProvider, len(opts.ExistingProviders))
+	for url, existing := range opts.ExistingProviders {
+		seen[url] = existing
 	}
 
 	candidates := make([]Candidate, 0, len(entries))
 	for _, entry := range entries {
-		candidates = append(candidates, convertEntry(entry, opts, usedNames, usedEnvKeys, seenURLs))
+		candidates = append(candidates, convertEntry(entry, opts, usedNames, usedEnvKeys, seen))
 	}
 	return candidates
 }
 
-func convertEntry(entry Entry, opts ConvertOptions, usedNames, usedEnvKeys, seenURLs map[string]bool) Candidate {
+func convertEntry(entry Entry, opts ConvertOptions, usedNames, usedEnvKeys map[string]bool, seen map[string]ExistingProvider) Candidate {
 	c := Candidate{
 		CCName:    entry.Name,
 		AppType:   entry.AppType,
@@ -171,7 +197,19 @@ func convertEntry(entry Entry, opts ConvertOptions, usedNames, usedEnvKeys, seen
 	}
 
 	normalized := NormalizeEndpoint(c.URL)
-	if seenURLs[normalized] {
+	if existing, dup := seen[normalized]; dup {
+		// 端点已存在：cc-switch 里的密钥若有变化，转为 key-updated 而不是
+		// 直接跳过，让 Import 更新 .env 并重注册（密钥一致才真正跳过）。
+		if existing.APIKeyEnv != "" && entry.APIKey != "" && entry.APIKey != opts.ExistingEnvValues[existing.APIKeyEnv] {
+			c.Name = existing.Name
+			c.APIKeyEnv = existing.APIKeyEnv
+			c.Status = "key-updated"
+			c.Reason = "端点已存在，cc-switch 中密钥已变化，将更新 .env 并即时生效"
+			return c
+		}
+		if existing.APIKeyEnv != "" && entry.APIKey == opts.ExistingEnvValues[existing.APIKeyEnv] {
+			return skip("端点已存在且密钥一致，无需重复导入")
+		}
 		return skip("端点已存在于 providers.yaml，无需重复导入")
 	}
 	if len(entry.ModelHints) == 0 {
@@ -182,7 +220,7 @@ func convertEntry(entry Entry, opts ConvertOptions, usedNames, usedEnvKeys, seen
 	c.APIKeyEnv = uniqueEnvKey(c.Name, usedEnvKeys)
 	c.Models = append([]string(nil), entry.ModelHints...)
 	c.Status = "importable"
-	seenURLs[normalized] = true
+	seen[normalized] = ExistingProvider{Name: c.Name, APIKeyEnv: c.APIKeyEnv}
 	return c
 }
 
@@ -204,8 +242,9 @@ type ImportResult struct {
 	Candidates    []Candidate `json:"candidates"`
 	ProvidersYAML string      `json:"providers_yaml"`
 	EnvFile       string      `json:"env_file"`
-	Wrote         bool        `json:"wrote"`    // 是否已写入文件（DryRun 恒为 false）
-	Imported      []string    `json:"imported"` // 实际写入的网关 provider 名
+	Wrote         bool        `json:"wrote"`        // 是否已写入文件（DryRun 恒为 false）
+	Imported      []string    `json:"imported"`     // 实际写入的网关 provider 名
+	UpdatedKeys   []string    `json:"updated_keys"` // 端点已存在但密钥有变化、被更新的变量名
 
 	secrets map[string]string
 	configs []provider.ProviderConfig
@@ -264,23 +303,31 @@ func ImportEntries(options ImportOptions, source string, entries []Entry) (*Impo
 		secrets:       map[string]string{},
 	}
 
-	importable := make([]Candidate, 0, len(candidates))
+	selected := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.Status != "importable" {
+		if candidate.Status != "importable" && candidate.Status != "key-updated" {
 			continue
 		}
 		if len(options.Include) > 0 && !options.Include[candidate.CCName] && !options.Include[candidate.Name] {
 			continue
 		}
-		importable = append(importable, candidate)
+		selected = append(selected, candidate)
 	}
-	if len(importable) == 0 {
+	if len(selected) == 0 {
 		return result, nil
 	}
 
 	stamp := options.Now().Format("2006-01-02 15:04")
-	newProviders := make([]provider.ProviderConfig, 0, len(importable))
-	for _, candidate := range importable {
+	newProviders := make([]provider.ProviderConfig, 0, len(selected))
+	keyUpdates := map[string]string{} // 密钥有变化、需要覆写 .env 的变量
+	for _, candidate := range selected {
+		if candidate.Status == "key-updated" {
+			// 端点已在 providers.yaml：只覆写同名密钥变量并重注册，不动 yaml。
+			keyUpdates[candidate.APIKeyEnv] = candidate.secret
+			result.secrets[candidate.APIKeyEnv] = candidate.secret // RegisterLive 需要
+			result.UpdatedKeys = append(result.UpdatedKeys, candidate.APIKeyEnv)
+			continue
+		}
 		pc := provider.ProviderConfig{
 			Name:      candidate.Name,
 			Type:      candidate.Type,
@@ -288,18 +335,33 @@ func ImportEntries(options ImportOptions, source string, entries []Entry) (*Impo
 			APIKeyEnv: candidate.APIKeyEnv,
 		}
 		for _, id := range candidate.Models {
-			pc.Models = append(pc.Models, provider.ModelConfig{ID: id})
+			pc.Models = append(pc.Models, provider.ModelConfig{ID: id, Capabilities: guessModelCapabilities(id)})
 		}
 		newProviders = append(newProviders, pc)
 		result.secrets[candidate.APIKeyEnv] = candidate.secret
 		result.Imported = append(result.Imported, candidate.Name)
 	}
-	result.configs = newProviders
+
+	// key-updated 的 provider 以 providers.yaml 里的清单为准重注册（同名实例
+	// 覆盖，密钥即时生效），避免与人工编辑过的模型清单漂移。
+	if len(keyUpdates) > 0 {
+		if existing, err := provider.LoadProvidersConfig(options.ProvidersYAML); err == nil {
+			for _, p := range existing.Providers {
+				if _, changed := keyUpdates[p.APIKeyEnv]; changed {
+					result.configs = append(result.configs, p)
+					result.Imported = append(result.Imported, p.Name)
+				}
+			}
+		}
+	}
+	result.configs = append(result.configs, newProviders...)
 
 	yamlRaw := readFileOrDefault(options.ProvidersYAML)
 	envRaw := readFileOrDefault(options.EnvFile)
 	newYAML := appendProvidersYAML(yamlRaw, stamp, newProviders)
-	newEnv := appendEnvFile(envRaw, stamp, result.secrets)
+	// 先覆写有变化的密钥变量，再追加新变量（appendEnvFile 会跳过已存在的名字）。
+	newEnv := rewriteEnvValues(envRaw, keyUpdates)
+	newEnv = appendEnvFile(newEnv, stamp, result.secrets)
 
 	// 写入前先验证合并结果仍是合法 YAML 且包含全部条目，避免半写坏文件。
 	var verify provider.ProvidersConfig
@@ -562,6 +624,38 @@ func appendEnvFile(existing []byte, stamp string, secrets map[string]string) []b
 		existing = append(existing, '\n')
 	}
 	return append(existing, []byte(block.String())...)
+}
+
+// rewriteEnvValues 覆写 .env 中已存在变量的值（密钥轮换用），保持行位置与
+// 其余内容不变；不存在的变量名跳过。
+func rewriteEnvValues(raw []byte, updates map[string]string) []byte {
+	if len(updates) == 0 {
+		return raw
+	}
+	lines := strings.Split(string(raw), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if key, _, ok := strings.Cut(trimmed, "="); ok {
+			if value, changed := updates[strings.TrimSpace(key)]; changed {
+				lines[i] = key + "=" + quoteEnvValue(value)
+			}
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// guessModelCapabilities 按模型名做保守的能力启发：cc-switch 条目不带能力
+// 元数据，名字里的 vision/vl/4v 线索比默认全文本更接近事实。返回 nil 表示
+// 沿用装载器的默认能力。
+func guessModelCapabilities(id string) []string {
+	lower := strings.ToLower(id)
+	if strings.Contains(lower, "vision") || strings.Contains(lower, "-vl") || strings.Contains(lower, "vl-") || strings.Contains(lower, "4v") {
+		return []string{"text", "vision", "tool_calling", "streaming", "reasoning"}
+	}
+	return nil
 }
 
 // quoteEnvValue 按 godotenv 规则引用值：普通字符集裸写，其余单引号包裹。

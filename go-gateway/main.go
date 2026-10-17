@@ -518,8 +518,11 @@ func migrateCCSwitch(args []string) error {
 		}
 	}
 	if result.Wrote {
-		fmt.Printf("\n已导入 %d 个供应商：%s\n密钥写入：%s\n（原文件备份为 .pre-import.bak，重启网关后仍从 providers.yaml 装载）\n",
-			len(result.Imported), result.ProvidersYAML, result.EnvFile)
+		fmt.Printf("\n已导入 %d 个供应商：%s\n密钥写入：%s\n", len(result.Imported), result.ProvidersYAML, result.EnvFile)
+		if len(result.UpdatedKeys) > 0 {
+			fmt.Printf("密钥已更新（.env 覆写并即时生效）：%s\n", strings.Join(result.UpdatedKeys, ", "))
+		}
+		fmt.Printf("（原文件备份为 .pre-import.bak，重启网关后仍从 providers.yaml 装载）\n")
 		return nil
 	}
 	if len(result.Imported) > 0 {
