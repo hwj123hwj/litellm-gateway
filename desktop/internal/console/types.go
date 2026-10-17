@@ -89,6 +89,44 @@ type ClientConfig struct {
 	MissingEntries []string `json:"missing_entries"`
 	Error          string   `json:"error"`
 }
+
+// CCSwitchCandidate 是 cc-switch 迁移扫描里的一条候选（网关 Admin API 返回，
+// 不含密钥）。
+type CCSwitchCandidate struct {
+	CCName    string   `json:"cc_name"`
+	Name      string   `json:"name"`
+	AppType   string   `json:"app_type"`
+	Type      string   `json:"type"`
+	URL       string   `json:"url"`
+	APIKeyEnv string   `json:"api_key_env"`
+	Models    []string `json:"models"`
+	// Loopback 为 true 表示上游 base URL 是回环地址，仅在网关主机可达时有效。
+	Loopback bool   `json:"loopback"`
+	Status   string `json:"status"` // importable / skipped
+	Reason   string `json:"reason,omitempty"`
+}
+
+// CCSwitchScan 是 GET /admin/ccswitch 的响应。
+type CCSwitchScan struct {
+	Home       string              `json:"home"`
+	Source     string              `json:"source"`
+	Candidates []CCSwitchCandidate `json:"candidates"`
+	Importable int                 `json:"importable"`
+	Skipped    int                 `json:"skipped"`
+	Uploaded   bool                `json:"uploaded"`
+	Error      string              `json:"error"`
+}
+
+// CCSwitchImportResult 是 POST /admin/ccswitch/import 的响应。
+type CCSwitchImportResult struct {
+	Source        string              `json:"source"`
+	Candidates    []CCSwitchCandidate `json:"candidates"`
+	ProvidersYAML string              `json:"providers_yaml"`
+	EnvFile       string              `json:"env_file"`
+	Wrote         bool                `json:"wrote"`
+	Imported      []string            `json:"imported"`
+	Error         string              `json:"error"`
+}
 type Skill struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"displayName"`

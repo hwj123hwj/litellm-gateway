@@ -68,6 +68,35 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 			w.Write([]byte(`{"enabled":true,"job_id":"ij-1"}`))
 		case "/admin/skills/market/installed":
 			w.Write([]byte(`{"enabled":true,"skills_dir":"/tmp/skills","installed":[{"name":"installed-demo","display_name":"已安装示例","version":"0.9.0"}]}`))
+		case "/admin/ccswitch":
+			if r.URL.Query().Get("home") == "__fail__" {
+				w.WriteHeader(400)
+				w.Write([]byte(`{"error":"未找到 cc-switch 配置"}`))
+				return
+			}
+			w.Write([]byte(`{"home":"/Users/x/.cc-switch","source":"/Users/x/.cc-switch/cc-switch.db","importable":2,"skipped":1,"candidates":[` +
+				`{"cc_name":"MyGLM","name":"myglm","app_type":"claude","type":"anthropic","url":"https://glmx.example.com/v1/messages","api_key_env":"CCS_MYGLM_API_KEY","models":["glm-4.7"],"status":"importable"},` +
+				`{"cc_name":"Qwen","name":"qwen","app_type":"openclaw","type":"openai","url":"https://relay.example.com/v1/chat/completions","api_key_env":"CCS_QWEN_API_KEY","models":["qwen3.5-plus"],"status":"importable"},` +
+				`{"cc_name":"ChatGPT","name":"chatgpt","app_type":"codex","status":"skipped","reason":"OAuth 订阅凭据"}` +
+				`]}`))
+		case "/admin/ccswitch/remote-scan":
+			w.Write([]byte(`{"importable":2,"skipped":1,"uploaded":true,"source":"cc-switch config.json（桌面端上传）","candidates":[` +
+				`{"cc_name":"MyGLM","name":"myglm","app_type":"claude","type":"anthropic","url":"https://glmx.example.com/v1/messages","api_key_env":"CCS_MYGLM_API_KEY","models":["glm-4.7"],"status":"importable"},` +
+				`{"cc_name":"Loop Relay","name":"loop-relay","app_type":"claude","type":"anthropic","url":"http://localhost:3000/v1/messages","api_key_env":"CCS_LOOP_RELAY_API_KEY","models":["loop-model"],"loopback":true,"status":"importable"},` +
+				`{"cc_name":"ChatGPT","name":"chatgpt","app_type":"codex","status":"skipped","reason":"OAuth 订阅凭据"}` +
+				`]}`))
+		case "/admin/ccswitch/remote-import":
+			w.Write([]byte(`{"source":"cc-switch config.json（桌面端上传）","wrote":true,"imported":["myglm"],"providers_yaml":"providers.yaml","env_file":".env","candidates":[` +
+				`{"cc_name":"MyGLM","name":"myglm","app_type":"claude","status":"skipped","reason":"端点已存在于 providers.yaml，无需重复导入"},` +
+				`{"cc_name":"Loop Relay","name":"loop-relay","app_type":"claude","type":"anthropic","url":"http://localhost:3000/v1/messages","api_key_env":"CCS_LOOP_RELAY_API_KEY","models":["loop-model"],"loopback":true,"status":"importable"},` +
+				`{"cc_name":"ChatGPT","name":"chatgpt","app_type":"codex","status":"skipped","reason":"OAuth 订阅凭据"}` +
+				`]}`))
+		case "/admin/ccswitch/import":
+			w.Write([]byte(`{"source":"/Users/x/.cc-switch/cc-switch.db","wrote":true,"imported":["myglm"],"providers_yaml":"providers.yaml","env_file":".env","candidates":[` +
+				`{"cc_name":"MyGLM","name":"myglm","app_type":"claude","status":"skipped","reason":"端点已存在于 providers.yaml，无需重复导入"},` +
+				`{"cc_name":"Qwen","name":"qwen","app_type":"openclaw","type":"openai","url":"https://relay.example.com/v1/chat/completions","api_key_env":"CCS_QWEN_API_KEY","models":["qwen3.5-plus"],"status":"importable"},` +
+				`{"cc_name":"ChatGPT","name":"chatgpt","app_type":"codex","status":"skipped","reason":"OAuth 订阅凭据"}` +
+				`]}`))
 		case "/healthz":
 			w.Write([]byte(`{"status":"ok"}`))
 		default:
@@ -816,5 +845,100 @@ func TestAssistantModelPickerSearchesChannelWithoutRenamingModel(t *testing.T) {
 	tt.Frame()
 	if a.chatModel != "mimo-model" || a.modelPickerOpen {
 		t.Fatal("model ID changed")
+	}
+}
+
+func TestCCSwitchMigrationPanelImportsSelection(t *testing.T) {
+	a, queue, requests := fixture(t)
+	a.page = "settings"
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1100, 800)
+
+	if !tt.HasText("从 cc-switch 迁移") {
+		t.Fatal("迁移面板未渲染")
+	}
+	if !tt.HasText("2 可导入 · 1 跳过") {
+		t.Fatal("计数 chip 未渲染")
+	}
+	if !tt.HasText("OAuth 订阅凭据") {
+		t.Fatal("跳过原因未渲染")
+	}
+	if !tt.HasText("CCS_MYGLM_API_KEY") {
+		t.Fatal("密钥变量名未渲染")
+	}
+
+	// 清空后只勾 MyGLM，验证请求只包含所选条目。
+	click(t, tt, "清空")
+	click(t, tt, "MyGLM")
+	click(t, tt, "迁移所选（1）")
+	await(t, a, queue)
+	tt.Frame()
+	select {
+	case got := <-requests:
+		if got != `POST /admin/ccswitch/import {"include":["myglm"]}` {
+			t.Fatalf("import request = %s", got)
+		}
+	default:
+		t.Fatal("导入请求未发送")
+	}
+	if !tt.HasText("本次已导入：myglm") {
+		t.Fatal("导入结果未渲染")
+	}
+	if !tt.HasText("已导入") {
+		t.Fatal("已导入条目未渲染")
+	}
+}
+
+func TestCCSwitchRemoteUploadFlow(t *testing.T) {
+	a, queue, requests := fixture(t)
+	// 模拟远程网关：主机扫描失败 + 本机 cc-switch 目录指向测试夹具。
+	a.ccHomeDraft = "__fail__"
+	localHome := t.TempDir()
+	localLegacy := `{"apps":{"claude":{"current":"p1","providers":{"p1":{"id":"p1","name":"MyGLM",
+		"settingsConfig":{"env":{"ANTHROPIC_BASE_URL":"https://glmx.example.com","ANTHROPIC_AUTH_TOKEN":"sk-local","ANTHROPIC_MODEL":"glm-4.7"}},"meta":{}}}}}}`
+	if err := os.WriteFile(filepath.Join(localHome, "config.json"), []byte(localLegacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.ccLocalHome = localHome
+	a.page = "settings"
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1100, 1500)
+
+	if !tt.HasText("未就绪") {
+		t.Fatal("主机扫描失败状态未渲染")
+	}
+	click(t, tt, "从本机 cc-switch 上传")
+	await(t, a, queue)
+	tt.Frame()
+
+	select {
+	case got := <-requests:
+		if !strings.HasPrefix(got, "POST /admin/ccswitch/remote-scan") || !strings.Contains(got, "legacy_json") || !strings.Contains(got, "settingsConfig") {
+			t.Fatalf("remote scan request = %s", got)
+		}
+	default:
+		t.Fatal("remote scan not sent")
+	}
+	if !tt.HasText("本机上传") || !tt.HasText("回环地址") {
+		t.Fatal("远程模式标识或回环标记未渲染")
+	}
+
+	// 取消回环条目，只导 MyGLM。
+	click(t, tt, "Loop Relay")
+	click(t, tt, "迁移所选（1）")
+	await(t, a, queue)
+	tt.Frame()
+	select {
+	case got := <-requests:
+		if !strings.HasPrefix(got, "POST /admin/ccswitch/remote-import") || !strings.Contains(got, `"include":["myglm"]`) {
+			t.Fatalf("remote import request = %s", got)
+		}
+	default:
+		t.Fatal("remote import not sent")
+	}
+	if !tt.HasText("本次已导入：myglm") {
+		t.Fatal("远程导入结果未渲染")
 	}
 }

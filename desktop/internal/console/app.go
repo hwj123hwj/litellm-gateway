@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/hwj123hwj/litellm-gateway/desktop/internal/ccswitchlocal"
 	"github.com/hwj123hwj/litellm-gateway/desktop/internal/connection"
 )
 
@@ -69,8 +70,16 @@ type App struct {
 	memoryScope, memoryKey, memoryText                                    string
 	prompt                                                                Prompt
 	promptDraft                                                           string
+	promptErr                                                             string
 	configs                                                               map[string]ClientConfig
 	configSelection                                                       map[string]map[string]bool
+	ccswitch                                                              CCSwitchScan
+	ccHomeDraft                                                           string
+	ccSelection                                                           map[string]bool
+	ccImported                                                            []string
+	ccUpload                                                              *ccswitchlocal.Payload
+	ccRemote                                                              bool
+	ccLocalHome                                                           string // 本机 cc-switch 目录（空=默认 ~/.cc-switch，测试可注入）
 	chatInput, chatReply, chatUser, chatStatus                            string
 	chatMarkdown                                                          markdownDocument
 	connSelect                                                            string
@@ -350,10 +359,11 @@ func (a *App) reload() {
 			err := c.JSON(ctx, "GET", endpoint, nil, &d)
 			return func() { a.memories = d.Memories; a.loaded = true }, err
 		case "settings":
+			// 各面板尽力而为：助理人设拉取失败（如助理未启用返回 503）
+			// 只影响人设卡片，不拖垮整个设置页；客户端同步与 cc-switch
+			// 迁移扫描同样独立容错。
 			var p Prompt
-			if err := c.JSON(ctx, "GET", "/assistant/prompt", nil, &p); err != nil {
-				return nil, err
-			}
+			promptErr := c.JSON(ctx, "GET", "/assistant/prompt", nil, &p)
 			configs := map[string]ClientConfig{}
 			for _, target := range []string{"pi", "zcode", "harness"} {
 				var config ClientConfig
@@ -362,11 +372,22 @@ func (a *App) reload() {
 				}
 				configs[target] = config
 			}
+			scan := CCSwitchScan{}
+			if err := c.JSON(ctx, "GET", "/ccswitch"+ccswitchHomeQuery(a.ccHomeDraft), nil, &scan); err != nil {
+				scan = CCSwitchScan{Error: "扫描失败：" + err.Error()}
+			}
 			return func() {
 				a.prompt = p
 				a.promptDraft = p.Custom
+				a.promptErr = ""
+				if promptErr != nil {
+					a.promptErr = promptErr.Error()
+				}
 				a.configs = configs
 				a.initConfigSelection()
+				a.acceptCCSwitchScan(scan)
+				a.ccUpload = nil
+				a.ccRemote = false
 				a.loaded = true
 			}, nil
 		case "assistant":
@@ -726,6 +747,130 @@ func (a *App) initConfigSelection() {
 		}
 		a.configSelection[target] = choices
 	}
+}
+
+// ─── cc-switch 迁移 ─────────────────────────────────────────────────────────
+
+// ccswitchHomeQuery 把自定义 cc-switch 目录拼进扫描查询；空串用网关主机默认。
+func ccswitchHomeQuery(home string) string {
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return ""
+	}
+	return "?home=" + url.QueryEscape(home)
+}
+
+// acceptCCSwitchScan 应用一次扫描结果并重置勾选：可导入条目默认全选。
+func (a *App) acceptCCSwitchScan(scan CCSwitchScan) {
+	a.ccswitch = scan
+	a.ccSelection = map[string]bool{}
+	for _, candidate := range scan.Candidates {
+		if candidate.Status == "importable" {
+			a.ccSelection[candidate.Name] = true
+		}
+	}
+}
+
+// ccSelectedNames 按扫描顺序返回勾选的可导入条目名。
+func (a *App) ccSelectedNames() []string {
+	names := []string{}
+	for _, candidate := range a.ccswitch.Candidates {
+		if candidate.Status == "importable" && a.ccSelection[candidate.Name] {
+			names = append(names, candidate.Name)
+		}
+	}
+	return names
+}
+
+// uploadLocalCCSwitch 读取本机 cc-switch 配置并上传到网关预览。网关在远程
+// 主机、cc-switch 装在本机时走这条路；解析与转换仍在网关侧完成。
+func (a *App) uploadLocalCCSwitch() {
+	if a.busy != "" {
+		return
+	}
+	a.work("正在读取并上传本机 cc-switch", 35*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
+		home := a.ccLocalHome
+		if home == "" {
+			home = ccswitchlocal.DefaultHome()
+		}
+		payload, err := ccswitchlocal.Scan(home)
+		if err != nil {
+			return nil, err
+		}
+		var scan CCSwitchScan
+		if err := c.JSON(ctx, "POST", "/ccswitch/remote-scan", payload, &scan); err != nil {
+			return nil, err
+		}
+		label := payload.Label
+		return func() {
+			a.ccUpload = payload
+			a.ccRemote = true
+			scan.Home = home
+			scan.Source = label
+			a.acceptCCSwitchScan(scan)
+		}, nil
+	})
+}
+
+// importCCSwitch 迁移勾选条目并刷新扫描结果；网关侧写入 providers.yaml 与
+// .env 后即时注册，导入的模型立刻可路由。本机上传模式下走 remote-import，
+// 随请求重传上传数据（网关不在请求间保存任何状态）。
+func (a *App) importCCSwitch() {
+	include := a.ccSelectedNames()
+	if len(include) == 0 || a.busy != "" {
+		return
+	}
+	endpoint, body := "/ccswitch/import", any(map[string]any{"include": include})
+	if a.ccRemote && a.ccUpload != nil {
+		endpoint = "/ccswitch/remote-import"
+		body = struct {
+			ccswitchlocal.Payload
+			Include []string `json:"include"`
+		}{Payload: *a.ccUpload, Include: include}
+	}
+	a.work("正在迁移 cc-switch 供应商", 60*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
+		var result CCSwitchImportResult
+		if err := c.JSON(ctx, "POST", endpoint, body, &result); err != nil {
+			return nil, err
+		}
+		if result.Error != "" {
+			return nil, errors.New(result.Error)
+		}
+		if !result.Wrote || len(result.Imported) == 0 {
+			return nil, errors.New("网关没有写入变更：所选条目可能已被导入过")
+		}
+		return func() {
+			a.ccImported = result.Imported
+			a.acceptCCSwitchScan(CCSwitchScan{
+				Home:       a.ccswitch.Home,
+				Source:     result.Source,
+				Candidates: result.Candidates,
+				Importable: ccCountStatus(result.Candidates, "importable"),
+				Skipped:    ccCountStatus(result.Candidates, "skipped"),
+			})
+			a.notice = fmt.Sprintf("已从 cc-switch 导入 %d 个供应商，模型即刻可用", len(result.Imported))
+		}, nil
+	})
+}
+
+func ccCountStatus(candidates []CCSwitchCandidate, status string) int {
+	count := 0
+	for _, candidate := range candidates {
+		if candidate.Status == status {
+			count++
+		}
+	}
+	return count
+}
+
+// ccImportedNames 返回本次会话内已导入的条目名集合（导入后扫描里它们会
+// 变成「端点已存在」，用这个集合还原成功状态）。
+func (a *App) ccImportedNames() map[string]bool {
+	names := map[string]bool{}
+	for _, name := range a.ccImported {
+		names[name] = true
+	}
+	return names
 }
 func shortNumber(n int64) string {
 	if n >= 1000000 {
