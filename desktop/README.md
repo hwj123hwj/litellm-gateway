@@ -4,7 +4,7 @@
 
 ## 开发与构建
 
-需要 Go 1.27.1+。MyGo 固定到 `go.mod` 中的 v0.5.1。
+需要 Go 1.27.1+。MyGo 固定到 `go.mod` 中的 v0.5.5。
 
 ```bash
 go test -race ./...
