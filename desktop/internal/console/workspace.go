@@ -677,6 +677,9 @@ func (a *App) settingsView(c *ui.Context) {
 		card(c, func() {
 			ui.Text(c, "助理人设").FontSize(18).Bold()
 			muted(c, "留空使用默认提示词。配置保存在当前连接的网关主机。")
+			if a.promptErr != "" {
+				ui.Text(c, a.promptErr).TextColor(c.Theme().Danger)
+			}
 			ui.TextArea(c, &a.promptDraft).Height(150).Label("自定义助理提示词").Placeholder(a.prompt.Default).Disabled(a.busy != "")
 			ui.Row(c).Gap(8).Children(func() {
 				ui.Button(c, "恢复默认").Disabled(a.busy != "").OnClick(func() { a.promptDraft = "" })
@@ -690,6 +693,7 @@ func (a *App) settingsView(c *ui.Context) {
 				})
 			})
 		})
+		a.ccswitchView(c)
 		ui.Text(c, "同步模型到客户端").FontSize(18).Bold()
 		muted(c, "写入当前网关主机上的客户端配置；其他客户端配置按服务端规则保留。")
 		for _, target := range []string{"pi", "zcode", "harness"} {
@@ -757,6 +761,142 @@ func (a *App) settingsView(c *ui.Context) {
 				})
 			})
 		}
+	})
+}
+
+// ccswitchView 渲染「从 cc-switch 迁移」面板：扫描预览、勾选与一键导入。
+// 扫描在网关主机上执行（默认 ~/.cc-switch，可指定路径）；没有 cc-switch 或
+// 网关版本过低时给出明确指引而不是报错堆栈。
+func (a *App) ccswitchView(c *ui.Context) {
+	theme := c.Theme()
+	imported := a.ccImportedNames()
+	ui.Text(c, "从 cc-switch 迁移").FontSize(18).Bold()
+	muted(c, "读取网关主机上的 cc-switch 配置，把已配置的供应商与模型迁入网关；cc-switch 数据只读不动，密钥只写入网关 .env。")
+	card(c, func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "cc-switch 供应商").Bold()
+			if a.ccRemote {
+				chip(c, "本机上传", theme.Accent)
+			}
+			ui.Spacer(c)
+			if a.ccswitch.Error != "" {
+				chip(c, "未就绪", theme.Danger)
+			} else if a.ccswitch.Importable > 0 {
+				chip(c, fmt.Sprintf("%d 可导入 · %d 跳过", a.ccswitch.Importable, a.ccswitch.Skipped), okGreen)
+			} else {
+				chip(c, "没有可导入条目", theme.TextMuted)
+			}
+		})
+
+		if a.ccswitch.Error != "" {
+			ui.Text(c, a.ccswitch.Error).TextColor(theme.Danger)
+			muted(c, "扫描的是网关主机上的 ~/.cc-switch，那里没有找到 cc-switch。cc-switch 装在这台电脑上时可直接上传迁移；装在其他机器时，可在那台机器的网关目录运行 llm-gateway migrate cc-switch，或在下方填写网关主机上的配置目录重试。")
+			ui.Row(c).Gap(8).Children(func() {
+				ui.PrimaryButton(c, "从本机 cc-switch 上传").Disabled(a.busy != "").OnClick(func() { a.uploadLocalCCSwitch() })
+			})
+		} else if a.ccswitch.Source != "" {
+			ui.Text(c, a.ccswitch.Source).Selectable().TextColor(theme.TextMuted)
+			if a.ccRemote {
+				muted(c, "条目来自这台电脑的 cc-switch；带「回环地址」标记的上游仅在网关主机可达时有效。")
+			}
+		}
+
+		if len(imported) > 0 {
+			names := make([]string, 0, len(imported))
+			for name := range imported {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			ui.Text(c, "本次已导入："+strings.Join(names, "、")+"，模型即刻可用（见「模型」页）。").TextColor(okGreen)
+		}
+
+		importable := 0
+		for _, candidate := range a.ccswitch.Candidates {
+			candidate := candidate
+			if imported[candidate.Name] {
+				ui.Column(c.Key("imported-" + candidate.Name)).Children(func() {
+					ui.Text(c, "✓ "+candidate.CCName+" 已导入").TextColor(okGreen)
+					muted(c, candidate.URL)
+				})
+				continue
+			}
+			if candidate.Status != "importable" {
+				continue
+			}
+			importable++
+			ui.Column(c.Key(candidate.Name)).Children(func() {
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+					value := a.ccSelection[candidate.Name]
+					if ui.Checkbox(c.Key("check"), &value, candidate.CCName).Disabled(a.busy != "").Changed() {
+						a.ccSelection[candidate.Name] = value
+					}
+					chip(c, candidate.AppType, theme.TextMuted)
+					if candidate.Type != "" {
+						chip(c, candidate.Type, theme.Accent)
+					}
+					if candidate.Loopback {
+						chip(c, "回环地址", theme.Danger)
+					}
+					ui.Spacer(c)
+				})
+				ui.Text(c, candidate.URL).Selectable().TextColor(theme.TextMuted)
+				parts := []string{}
+				if len(candidate.Models) > 0 {
+					parts = append(parts, "模型："+strings.Join(candidate.Models, ", "))
+				}
+				if candidate.APIKeyEnv != "" {
+					parts = append(parts, "密钥："+candidate.APIKeyEnv)
+				}
+				if len(parts) > 0 {
+					muted(c, strings.Join(parts, " · "))
+				}
+			})
+		}
+
+		skipped := 0
+		for _, candidate := range a.ccswitch.Candidates {
+			if candidate.Status == "importable" || imported[candidate.Name] {
+				continue
+			}
+			skipped++
+			if skipped <= 8 {
+				muted(c, "✘ "+candidate.CCName+"："+candidate.Reason)
+			}
+		}
+		if skipped > 8 {
+			muted(c, fmt.Sprintf("……另有 %d 条跳过", skipped-8))
+		}
+
+		if importable > 0 || a.ccswitch.Error == "" {
+			ui.Row(c).Gap(8).Children(func() {
+				ui.Button(c, "全选").Disabled(a.busy != "").OnClick(func() {
+					for _, candidate := range a.ccswitch.Candidates {
+						if candidate.Status == "importable" {
+							a.ccSelection[candidate.Name] = true
+						}
+					}
+				})
+				ui.Button(c, "清空").Disabled(a.busy != "").OnClick(func() {
+					for name := range a.ccSelection {
+						a.ccSelection[name] = false
+					}
+				})
+				ui.PrimaryButton(c, fmt.Sprintf("迁移所选（%d）", len(a.ccSelectedNames()))).
+					Disabled(a.busy != "" || len(a.ccSelectedNames()) == 0).
+					OnClick(func() { a.importCCSwitch() })
+			})
+		}
+
+		ui.Row(c).Gap(8).Children(func() {
+			ui.TextInput(c, &a.ccHomeDraft).Grow(1).Label("cc-switch 目录（可选）").
+				Placeholder("默认网关主机 ~/.cc-switch；可填其他绝对路径").Disabled(a.busy != "")
+			ui.Button(c, "重新扫描").Disabled(a.busy != "").OnClick(func() {
+				a.ccImported = nil
+				a.ccUpload = nil
+				a.ccRemote = false
+				a.reload()
+			})
+		})
 	})
 }
 func bubble(c *ui.Context, who, text string, user bool) {
