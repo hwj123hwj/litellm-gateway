@@ -117,6 +117,14 @@ type CCSwitchScan struct {
 	Error      string              `json:"error"`
 }
 
+// CCSwitchHint 是概览页的迁移引导状态：网关刚起步、又能拿到 cc-switch
+// 配置（网关主机扫描或本机检测）时提示一键迁移。
+type CCSwitchHint struct {
+	Visible    bool
+	Importable int  // 网关侧扫描到的可导入数；本机检测时为 0
+	Remote     bool // true = 网关主机没有 cc-switch，检测来自本机
+}
+
 // CCSwitchImportResult 是 POST /admin/ccswitch/import 的响应。
 type CCSwitchImportResult struct {
 	Source        string              `json:"source"`
@@ -125,6 +133,7 @@ type CCSwitchImportResult struct {
 	EnvFile       string              `json:"env_file"`
 	Wrote         bool                `json:"wrote"`
 	Imported      []string            `json:"imported"`
+	UpdatedKeys   []string            `json:"updated_keys"`
 	Error         string              `json:"error"`
 }
 type Skill struct {

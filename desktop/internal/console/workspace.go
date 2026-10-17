@@ -699,10 +699,11 @@ func (a *App) settingsView(c *ui.Context) {
 		for _, target := range []string{"pi", "zcode", "harness"} {
 			cfg := a.configs[target]
 			choices := a.configSelection[target]
+			display := clientTargetNames[target]
 			ui.Column(c.Key(target)).Children(func() {
 				card(c, func() {
 					ui.Row(c).Children(func() {
-						ui.Text(c, strings.ToUpper(target)).FontSize(18).Bold()
+						ui.Text(c, display).FontSize(18).Bold()
 						ui.Spacer(c)
 						if configInSync(cfg, choices) {
 							chip(c, "已同步", okGreen)
@@ -736,17 +737,17 @@ func (a *App) settingsView(c *ui.Context) {
 						muted(c, "跳过缺失条目："+strings.Join(cfg.Skipped, ", "))
 					}
 					ui.Row(c).Gap(8).Children(func() {
-						ui.Button(c, "全选").Label("全选 " + target).Disabled(a.busy != "").OnClick(func() {
+						ui.Button(c, "全选").Label("全选 " + display).Disabled(a.busy != "").OnClick(func() {
 							for _, m := range cfg.Desired {
 								choices[m.ID] = true
 							}
 						})
-						ui.Button(c, "清空").Label("清空 " + target).Disabled(a.busy != "").OnClick(func() {
+						ui.Button(c, "清空").Label("清空 " + display).Disabled(a.busy != "").OnClick(func() {
 							for id := range choices {
 								choices[id] = false
 							}
 						})
-						ui.PrimaryButton(c, "同步 "+target).Disabled(a.busy != "" || len(sortedSelection(choices)) == 0).OnClick(func() {
+						ui.PrimaryButton(c, "同步 "+display).Disabled(a.busy != "" || len(sortedSelection(choices)) == 0).OnClick(func() {
 							ids := sortedSelection(choices)
 							a.work("正在同步 "+target, 35*time.Second, func(ctx context.Context, client *connection.Client) (func(), error) {
 								var result ClientConfig
@@ -762,6 +763,14 @@ func (a *App) settingsView(c *ui.Context) {
 			})
 		}
 	})
+}
+
+// clientTargetNames 是设置页客户端同步面板的显示名；pi 目标即自研
+// EasyAgent 的 models.json，按产品名展示。
+var clientTargetNames = map[string]string{
+	"pi":      "EasyAgent",
+	"zcode":   "ZCode",
+	"harness": "Harness",
 }
 
 // ccswitchView 渲染「从 cc-switch 迁移」面板：扫描预览、勾选与一键导入。
@@ -808,6 +817,17 @@ func (a *App) ccswitchView(c *ui.Context) {
 			}
 			sort.Strings(names)
 			ui.Text(c, "本次已导入："+strings.Join(names, "、")+"，模型即刻可用（见「模型」页）。").TextColor(okGreen)
+			if len(a.ccUpdatedKeys) > 0 {
+				ui.Text(c, "其中部分密钥与 cc-switch 不一致，已更新并即时生效。").TextColor(okGreen)
+			}
+			ui.Row(c).Gap(8).Children(func() {
+				ui.Button(c, "体检导入供应商").Disabled(a.busy != "" || len(a.ccImportedModels) == 0).OnClick(func() {
+					a.checkImportedProviders()
+				})
+				ui.Button(c, "一键同步客户端").Disabled(a.busy != "").OnClick(func() {
+					a.syncAllClients()
+				})
+			})
 		}
 
 		importable := 0
@@ -815,7 +835,24 @@ func (a *App) ccswitchView(c *ui.Context) {
 			candidate := candidate
 			if imported[candidate.Name] {
 				ui.Column(c.Key("imported-" + candidate.Name)).Children(func() {
-					ui.Text(c, "✓ "+candidate.CCName+" 已导入").TextColor(okGreen)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "✓ "+candidate.CCName+" 已导入").TextColor(okGreen)
+						if candidate.APIKeyEnv != "" && a.ccUpdatedKeys[candidate.APIKeyEnv] {
+							chip(c, "密钥已更新", theme.Accent)
+						}
+						if status := a.ccHealth[candidate.Name]; status != "" {
+							switch status {
+							case "online":
+								chip(c, "在线", okGreen)
+							case "offline":
+								chip(c, "离线", theme.Danger)
+							case "degraded":
+								chip(c, "降级", theme.Danger)
+							default:
+								chip(c, "未知", theme.TextMuted)
+							}
+						}
+					})
 					muted(c, candidate.URL)
 				})
 				continue
