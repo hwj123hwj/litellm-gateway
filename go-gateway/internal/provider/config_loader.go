@@ -192,13 +192,22 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 	if err != nil {
 		return nil, err
 	}
+	return RegisterProvidersFromConfig(router, cfg, logger), nil
+}
 
+// RegisterProvidersFromConfig 把一段 providers 配置注册进 Router（启动装载
+// 与运行时增量导入共用）。existingProviderNames 作为实例名去重种子：运行中
+// 增量注册时传入 router.ListProviders()，避免与既有实例同名互相覆盖。
+func RegisterProvidersFromConfig(router *Router, cfg *ProvidersConfig, logger interface{ Printf(string, ...interface{}) }, existingProviderNames ...string) map[string]string {
 	registry := NewProviderRegistry()
 	modelToProvider := make(map[string]string)
 	// provider 实例名默认直接用上游模型 ID（与上游一致，避免 glm-glm-4.7 这种
-	// 供应商名与模型名重复的双写）。若不同供应商声明了同名模型，则退回
-	// 供应商-模型 的限定形式，保证实例名仍然唯一。
+	// 供应商名与模型名重复的双写）。若不同供应商声明了同名模型，则退回 供应商-模型
+	// 的限定形式，保证实例名仍然唯一。
 	usedProviderNames := make(map[string]bool)
+	for _, name := range existingProviderNames {
+		usedProviderNames[name] = true
+	}
 
 	// 注册提供商
 	for _, pc := range cfg.Providers {
@@ -353,7 +362,7 @@ func SetupProvidersFromConfig(router *Router, configPath string, logger interfac
 		logger.Printf("Registered chain: %s -> %v", chainName, providers)
 	}
 
-	return modelToProvider, nil
+	return modelToProvider
 }
 
 // BoundModelProviderWrapper 包装一个 provider 并绑定特定模型

@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/weijian/go-llm-gateway/internal/archive"
 	"github.com/weijian/go-llm-gateway/internal/assistant"
 	"github.com/weijian/go-llm-gateway/internal/auth"
+	"github.com/weijian/go-llm-gateway/internal/ccswitchconfig"
 	"github.com/weijian/go-llm-gateway/internal/channel"
 	"github.com/weijian/go-llm-gateway/internal/config"
 	"github.com/weijian/go-llm-gateway/internal/handlers"
@@ -193,6 +196,7 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(router, collector, logger)
 	piConfigHandler := handlers.NewPiConfigHandler(defaultGatewayHome(), defaultPiHome(), logger, router)
 	clientConfigHandler := handlers.NewClientConfigHandler(defaultGatewayHome(), defaultZCodeHome(), defaultDshHome(), router, logger)
+	ccswitchHandler := handlers.NewCCSwitchHandler(defaultCCSwitchHome(), cfg.Port, router, logger)
 	archiveHandler := handlers.NewArchiveHandler(archiveStore, logger)
 	memoryAdminHandler := handlers.NewMemoryAdminHandler(memoryStore, logger)
 	memoryHandler := handlers.NewMemoryHandler(memoryStore, logger)
@@ -283,6 +287,10 @@ func main() {
 		admin.POST("/zcode/sync", clientConfigHandler.HandleZCodeSync)
 		admin.GET("/harness", clientConfigHandler.HandleHarnessStatus)
 		admin.POST("/harness/sync", clientConfigHandler.HandleHarnessSync)
+		admin.GET("/ccswitch", ccswitchHandler.HandleScan)
+		admin.POST("/ccswitch/import", ccswitchHandler.HandleImport)
+		admin.POST("/ccswitch/remote-scan", ccswitchHandler.HandleRemoteScan)
+		admin.POST("/ccswitch/remote-import", ccswitchHandler.HandleRemoteImport)
 		admin.GET("/stats", adminHandler.HandleStats)
 		admin.GET("/archives", archiveHandler.HandleList)
 		admin.GET("/archives/export", archiveHandler.HandleExport)
@@ -358,6 +366,11 @@ func runCommand(args []string) error {
 			return fmt.Errorf("usage: llm-gateway setup pi [--endpoint URL] [--dry-run]")
 		}
 		return setupPi(args[2:])
+	case "migrate":
+		if len(args) < 2 || args[1] != "cc-switch" {
+			return fmt.Errorf("usage: llm-gateway migrate cc-switch [--home PATH] [--include a,b] [--dry-run]")
+		}
+		return migrateCCSwitch(args[2:])
 	case "auth":
 		if len(args) != 2 || args[1] != "print-master-key" {
 			return fmt.Errorf("usage: llm-gateway auth print-master-key")
@@ -437,6 +450,107 @@ func defaultDshHome() string {
 		return ".dsh"
 	}
 	return filepath.Join(userHome, ".dsh")
+}
+
+func defaultCCSwitchHome() string {
+	if home := os.Getenv("CCSWITCH_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ".cc-switch"
+	}
+	return filepath.Join(userHome, ".cc-switch")
+}
+
+// migrateCCSwitch 把 cc-switch 里已配置的供应商迁移进当前目录的
+// providers.yaml 与 .env（与服务进程装载的是同一组文件）。
+func migrateCCSwitch(args []string) error {
+	flags := flag.NewFlagSet("migrate cc-switch", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	home := flags.String("home", "", "cc-switch 主目录（默认 ~/.cc-switch）")
+	include := flags.String("include", "", "只导入这些 cc-switch 条目（逗号分隔名称，默认全部可导入项）")
+	dryRun := flags.Bool("dry-run", false, "只预览，不写入 providers.yaml 与 .env")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+
+	includeSet := map[string]bool{}
+	for _, name := range strings.Split(*include, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			includeSet[name] = true
+		}
+	}
+
+	result, err := ccswitchconfig.Import(ccswitchconfig.ImportOptions{
+		Home:          *home,
+		ProvidersYAML: "providers.yaml",
+		EnvFile:       ".env",
+		GatewayPort:   cwdGatewayPort(),
+		Include:       includeSet,
+		DryRun:        *dryRun,
+	})
+	if err != nil {
+		return err
+	}
+
+	imported := map[string]bool{}
+	for _, name := range result.Imported {
+		imported[name] = true
+	}
+	keyNote := "（已写入 .env）"
+	if *dryRun {
+		keyNote = "（将写入 .env）"
+	}
+	for _, candidate := range result.Candidates {
+		switch {
+		case imported[candidate.Name]:
+			fmt.Printf("✔ %s → %s %s\n   模型: %s\n   密钥: %s%s\n",
+				candidate.CCName, candidate.Type, candidate.URL,
+				strings.Join(candidate.Models, ", "), candidate.APIKeyEnv, keyNote)
+		case candidate.Status == "importable":
+			fmt.Printf("· %s 可导入（未被 --include 选中，未写入）\n", candidate.CCName)
+		default:
+			fmt.Printf("✘ %s：%s\n", candidate.CCName, candidate.Reason)
+		}
+	}
+	if result.Wrote {
+		fmt.Printf("\n已导入 %d 个供应商：%s\n密钥写入：%s\n（原文件备份为 .pre-import.bak，重启网关后仍从 providers.yaml 装载）\n",
+			len(result.Imported), result.ProvidersYAML, result.EnvFile)
+		return nil
+	}
+	if len(result.Imported) > 0 {
+		fmt.Printf("\ndry-run：%d 个条目将写入 %s 与 %s（未修改任何文件）\n",
+			len(result.Imported), result.ProvidersYAML, result.EnvFile)
+	} else {
+		fmt.Println("\n没有可导入的条目。")
+	}
+	return nil
+}
+
+// cwdGatewayPort 返回网关自身端口：PORT 环境变量 → cwd .env → 4001。
+// 迁移用它排除指向本网关的 cc-switch 条目。
+func cwdGatewayPort() int {
+	if port := os.Getenv("PORT"); port != "" {
+		if n, err := strconv.Atoi(port); err == nil {
+			return n
+		}
+	}
+	raw, err := os.ReadFile(".env")
+	if err != nil {
+		return 4001
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "PORT="); ok {
+			if n, err := strconv.Atoi(strings.Trim(strings.TrimSpace(value), `"'`)); err == nil {
+				return n
+			}
+		}
+	}
+	return 4001
 }
 
 // skillsRepoPath 返回技能仓库（custom-skills）根目录。未设置 SKILLS_REPO_PATH

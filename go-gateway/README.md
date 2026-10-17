@@ -102,6 +102,29 @@ llm-gateway setup pi --endpoint https://gateway.example.com/v1
 
 - `http://localhost:4001/v1/chat/completions`
 
+## 从 cc-switch 迁移
+
+之前用 [cc-switch](https://github.com/farion1231/cc-switch) 管理 Claude Code / Codex 供应商的，可以直接把已有配置迁进网关：
+
+```bash
+llm-gateway migrate cc-switch --dry-run  # 只预览，不写任何文件
+llm-gateway migrate cc-switch            # 执行迁移
+llm-gateway migrate cc-switch --include "MyGLM,API Relay"   # 只迁指定条目
+llm-gateway migrate cc-switch --home /path/to/.cc-switch    # 指定 cc-switch 目录
+```
+
+行为与边界：
+
+- 兼容新版 cc-switch（v4+ 的 SQLite `~/.cc-switch/cc-switch.db`）与旧版 `config.json`；对 cc-switch 的数据只读，不做任何修改；
+- 可迁移：claude 条目（Anthropic 协议与 OpenAI chat 协议，按 meta 的 apiFormat 区分）、codex 的 API-Key 中转（wire_api=chat）、openclaw 条目（自带模型清单）。转换为 providers.yaml 的 provider 与模型，API Key 以 `CCS_<名称>_API_KEY` 变量写入 `.env`，不在终端与 API 响应中回显；
+- 跳过并说明原因：指向网关自身的条目、codex OAuth 订阅（网关 chatgpt 渠道直接读 `~/.codex/auth.json`，无需迁移）、Responses API 直连端点（暂不支持）、Gemini 协议条目（暂无原生 provider）、没有模型名的条目；
+- 写入前备份原文件（`providers.yaml.pre-import.bak` / `.env.pre-import.bak`），已导入过的端点不会重复导入，providers.yaml 既有注释与顺序保持原样；
+- 迁移的模型立即可路由（每个模型自带一条同名链），但不自动加入 `chains` 里的降级链，需要的话编辑 providers.yaml 后重启。
+
+同样能力也有 Admin API：`GET /admin/ccswitch` 预览、`POST /admin/ccswitch/import` 执行（请求体 `{"include":["MyGLM"]}` 可只导指定条目），导入后即时生效、无需重启。
+
+网关在远程主机（如迷你主机）而 cc-switch 装在本机时，桌面端走上传迁移：本机读出 cc-switch 配置后上传，解析与转换仍由网关完成。对应端点 `POST /admin/ccswitch/remote-scan`（预览）与 `POST /admin/ccswitch/remote-import`（执行），请求体为 `{"rows":[...]}`（新版 cc-switch.db 的 providers 行）或 `{"legacy_json":"..."}`（旧版 config.json 原文），可附 `include`。API Key 随管理信道（Bearer 主密钥）上传、仅写入网关 .env，响应与日志不回显；带 `loopback: true` 标记的条目是回环地址，仅在网关主机可达时有效。
+
 ---
 
 ## API 端点
