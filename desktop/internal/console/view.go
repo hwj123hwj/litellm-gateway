@@ -580,6 +580,23 @@ func (a *App) overviewView(c *ui.Context) {
 	}
 	s := a.dashboard.Summary
 	theme := c.Theme()
+	if a.ccHint.Visible {
+		card(c, func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "检测到 cc-switch 配置").Bold()
+				ui.Spacer(c)
+				chip(c, "一键迁移", theme.Accent)
+			})
+			if a.ccHint.Remote {
+				muted(c, "这台电脑上装有 cc-switch；网关刚起步，可以把已配置的供应商与模型直接迁入（设置页支持本机上传到远程网关）。")
+			} else {
+				muted(c, fmt.Sprintf("网关主机上有 %d 个 cc-switch 条目可导入：供应商、模型与密钥一步迁入，cc-switch 数据只读不动。", a.ccHint.Importable))
+			}
+			ui.Row(c).Gap(8).Children(func() {
+				ui.PrimaryButton(c, "去迁移").OnClick(func() { a.navigate("settings") })
+			})
+		})
+	}
 	metrics := []struct{ Title, Value string }{
 		{"今日请求", shortNumber(int64(s.TodayRequests))},
 		{"成功率", fmt.Sprintf("%.1f%%", s.SuccessRate)},

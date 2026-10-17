@@ -321,8 +321,11 @@ func TestConvert(t *testing.T) {
 		{
 			name:  "端点已存在",
 			entry: Entry{AppType: "claude", Name: "R", BaseURL: "https://x.com", APIKey: "sk", ModelHints: []string{"m"}},
-			opts:  ConvertOptions{ExistingURLs: []string{"https://x.com/v1/messages"}},
-			want:  Candidate{Status: "skipped"},
+			opts: ConvertOptions{
+				ExistingProviders: map[string]ExistingProvider{"https://x.com/v1/messages": {Name: "x", APIKeyEnv: "CCS_X_API_KEY"}},
+				ExistingEnvValues: map[string]string{"CCS_X_API_KEY": "sk"},
+			},
+			want: Candidate{Status: "skipped"},
 		},
 		{
 			name:    "default 名改用主机名",
@@ -368,8 +371,12 @@ func TestConvertDedupesAmongCandidates(t *testing.T) {
 		{AppType: "claude", Name: "B", BaseURL: "https://same.example.com/", APIKey: "sk2", ModelHints: []string{"m2"}},
 	}
 	candidates := Convert(entries, ConvertOptions{})
-	if candidates[0].Status != "importable" || candidates[1].Status != "skipped" {
+	// 同端点第二条视为对第一条的密钥轮换（key-updated），不再重复建 provider。
+	if candidates[0].Status != "importable" || candidates[1].Status != "key-updated" {
 		t.Fatalf("statuses = %s / %s (%s)", candidates[0].Status, candidates[1].Status, candidates[1].Reason)
+	}
+	if candidates[1].APIKeyEnv != candidates[0].APIKeyEnv {
+		t.Fatalf("key update should reuse the first env var: %s vs %s", candidates[0].APIKeyEnv, candidates[1].APIKeyEnv)
 	}
 }
 
@@ -662,4 +669,85 @@ func result2JSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func TestImportKeyRotation(t *testing.T) {
+	home := writeLegacyFixture(t)
+	gatewayDir := t.TempDir()
+	providersYAML := filepath.Join(gatewayDir, "providers.yaml")
+	envFile := filepath.Join(gatewayDir, ".env")
+	if err := os.WriteFile(envFile, []byte("LITELLM_MASTER_KEY=abc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := ImportOptions{Home: home, ProvidersYAML: providersYAML, EnvFile: envFile, GatewayPort: 4001}
+
+	first, err := Import(base)
+	if err != nil || !first.Wrote || len(first.Imported) != 3 {
+		t.Fatalf("first import: %v imported=%v", err, first.Imported)
+	}
+
+	// cc-switch 里 MyGLM 换了 key：改夹具后重导。
+	rotated := strings.Replace(legacyFixture, "sk-legacy-claude", "sk-rotated-claude", 1)
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(rotated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Import(base)
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if !second.Wrote {
+		t.Fatal("key rotation should write .env")
+	}
+	if len(second.UpdatedKeys) != 1 || second.UpdatedKeys[0] != "CCS_MYGLM_API_KEY" {
+		t.Fatalf("updated keys = %v", second.UpdatedKeys)
+	}
+	if len(second.Imported) != 1 {
+		t.Fatalf("rotated provider should be re-registered, imported = %v", second.Imported)
+	}
+
+	// .env 中同名变量被覆写，providers.yaml 不新增条目。
+	envRaw, _ := os.ReadFile(envFile)
+	if !strings.Contains(string(envRaw), "CCS_MYGLM_API_KEY=sk-rotated-claude") || strings.Contains(string(envRaw), "sk-legacy-claude") {
+		t.Fatalf(".env not rotated:\n%s", envRaw)
+	}
+	cfg, err := provider.LoadProvidersConfig(providersYAML)
+	if err != nil || len(cfg.Providers) != 3 {
+		t.Fatalf("providers.yaml should stay at 3 entries: %v (%d)", err, len(cfg.Providers))
+	}
+
+	// 密钥一致的三次导入：无事可做。
+	third, err := Import(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Wrote || len(third.UpdatedKeys) != 0 {
+		t.Fatalf("no-op import: wrote=%v updated=%v", third.Wrote, third.UpdatedKeys)
+	}
+
+	// 轮换后的 provider 能即时重注册（新密钥生效）。
+	os.Setenv("CCS_MYGLM_API_KEY", "sk-rotated-claude")
+	router := provider.NewRouter(log.New(os.Stderr, "", 0))
+	second.RegisterLive(router, log.New(os.Stderr, "", log.LstdFlags))
+	found := false
+	for _, name := range router.ListProviders() {
+		if name == "glm-4.7" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("rotated provider not registered live: %v", router.ListProviders())
+	}
+	os.Unsetenv("CCS_MYGLM_API_KEY")
+}
+
+func TestGuessModelCapabilities(t *testing.T) {
+	if guessModelCapabilities("doubao-seed-1-6-vision-250815") == nil {
+		t.Fatal("vision model should get vision capability")
+	}
+	if guessModelCapabilities("glm-4v-flash") == nil {
+		t.Fatal("4v model should get vision capability")
+	}
+	if guessModelCapabilities("qwen3.5-plus") != nil {
+		t.Fatal("plain model should use loader defaults")
+	}
 }

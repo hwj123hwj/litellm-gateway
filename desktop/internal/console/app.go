@@ -80,6 +80,10 @@ type App struct {
 	ccUpload                                                              *ccswitchlocal.Payload
 	ccRemote                                                              bool
 	ccLocalHome                                                           string // 本机 cc-switch 目录（空=默认 ~/.cc-switch，测试可注入）
+	ccHint                                                                CCSwitchHint
+	ccImportedModels                                                      map[string][]string
+	ccHealth                                                              map[string]string
+	ccUpdatedKeys                                                         map[string]bool
 	chatInput, chatReply, chatUser, chatStatus                            string
 	chatMarkdown                                                          markdownDocument
 	connSelect                                                            string
@@ -253,12 +257,24 @@ func (a *App) reload() {
 			}
 			// 渠道清单用于过期提醒；拉取失败不影响概览指标。
 			channelsErr := c.JSON(ctx, "GET", "/channels", nil, &channels)
+			// 迁移引导：网关刚起步（provider 很少）时看看 cc-switch 能不能
+			// 带来存量配置——先问网关主机，再退回本机检测（远程网关场景）。
+			hint := CCSwitchHint{}
+			if err == nil && len(d.Providers) <= 3 {
+				var scan CCSwitchScan
+				if scanErr := c.JSON(ctx, "GET", "/ccswitch", nil, &scan); scanErr == nil && scan.Importable > 0 {
+					hint = CCSwitchHint{Visible: true, Importable: scan.Importable}
+				} else if a.hasLocalCCSwitch() {
+					hint = CCSwitchHint{Visible: true, Remote: true}
+				}
+			}
 			return func() {
 				// 后台直接写渠道状态会与原生渲染竞态，并绕过主机切换的序列校验。
 				if channelsErr == nil {
 					a.channels = channels.Channels
 				}
 				a.dashboard = d
+				a.ccHint = hint
 				a.loaded = true
 			}, err
 		case "models":
@@ -828,6 +844,14 @@ func (a *App) importCCSwitch() {
 			Include []string `json:"include"`
 		}{Payload: *a.ccUpload, Include: include}
 	}
+	// 体检需要每个待导 provider 的模型实例名；导入后的扫描里这些条目会变
+	// 成「已存在」，模型清单丢失，所以在请求前先记下来。
+	importedModels := map[string][]string{}
+	for _, candidate := range a.ccswitch.Candidates {
+		if candidate.Status == "importable" && a.ccSelection[candidate.Name] {
+			importedModels[candidate.Name] = candidate.Models
+		}
+	}
 	a.work("正在迁移 cc-switch 供应商", 60*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
 		var result CCSwitchImportResult
 		if err := c.JSON(ctx, "POST", endpoint, body, &result); err != nil {
@@ -841,6 +865,12 @@ func (a *App) importCCSwitch() {
 		}
 		return func() {
 			a.ccImported = result.Imported
+			a.ccImportedModels = importedModels
+			a.ccHealth = nil
+			a.ccUpdatedKeys = map[string]bool{}
+			for _, env := range result.UpdatedKeys {
+				a.ccUpdatedKeys[env] = true
+			}
 			a.acceptCCSwitchScan(CCSwitchScan{
 				Home:       a.ccswitch.Home,
 				Source:     result.Source,
@@ -849,6 +879,89 @@ func (a *App) importCCSwitch() {
 				Skipped:    ccCountStatus(result.Candidates, "skipped"),
 			})
 			a.notice = fmt.Sprintf("已从 cc-switch 导入 %d 个供应商，模型即刻可用", len(result.Imported))
+		}, nil
+	})
+}
+
+// hasLocalCCSwitch 报告本机是否装有 cc-switch（概览引导用，只做存在性检查）。
+func (a *App) hasLocalCCSwitch() bool {
+	home := a.ccLocalHome
+	if home == "" {
+		home = ccswitchlocal.DefaultHome()
+	}
+	_, err := ccswitchlocal.Scan(home)
+	return err == nil
+}
+
+// checkImportedProviders 对刚导入的供应商逐个跑一次网关健康检查（每个
+// provider 用它绑定的第一个模型实例探测），把在线/降级/离线结果展示在
+// 导入成功卡上——坏密钥与不可达的回环端点当场现形。
+func (a *App) checkImportedProviders() {
+	if a.busy != "" || len(a.ccImportedModels) == 0 {
+		return
+	}
+	type healthResult struct{ name, status string }
+	targets := make([]struct{ name, model string }, 0, len(a.ccImportedModels))
+	for name, models := range a.ccImportedModels {
+		if len(models) > 0 {
+			targets = append(targets, struct{ name, model string }{name, models[0]})
+		}
+	}
+	a.work("正在体检导入的供应商", 60*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
+		results := map[string]string{}
+		for _, target := range targets {
+			var probe struct {
+				Status string `json:"probe_status"`
+			}
+			if err := c.JSON(ctx, "POST", "/providers/"+target.model+"/health-check", nil, &probe); err != nil {
+				results[target.name] = "unknown"
+				continue
+			}
+			if probe.Status == "" {
+				probe.Status = "unknown"
+			}
+			results[target.name] = probe.Status
+		}
+		return func() {
+			a.ccHealth = results
+			a.notice = "供应商体检完成"
+		}, nil
+	})
+}
+
+// syncAllClients 把当前模型选择一次性同步到全部客户端（复用设置页各目标
+// 的既有选择与 /sync 接口），导入完成后一键把模型分发下去。
+func (a *App) syncAllClients() {
+	if a.busy != "" {
+		return
+	}
+	type syncTarget struct {
+		id    string
+		model []string
+	}
+	targets := []syncTarget{}
+	for _, target := range []string{"pi", "zcode", "harness"} {
+		if ids := sortedSelection(a.configSelection[target]); len(ids) > 0 {
+			targets = append(targets, syncTarget{target, ids})
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	a.work("正在同步全部客户端", 60*time.Second, func(ctx context.Context, c *connection.Client) (func(), error) {
+		updated := map[string]ClientConfig{}
+		for _, target := range targets {
+			var result ClientConfig
+			if err := c.JSON(ctx, "POST", "/"+target.id+"/sync", map[string]any{"model_ids": target.model}, &result); err != nil {
+				result.Error = err.Error()
+			}
+			updated[target.id] = result
+		}
+		return func() {
+			for id, result := range updated {
+				a.configs[id] = result
+			}
+			a.notice = "已同步全部客户端"
 		}, nil
 	})
 }

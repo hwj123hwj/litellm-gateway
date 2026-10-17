@@ -68,6 +68,12 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 			w.Write([]byte(`{"enabled":true,"job_id":"ij-1"}`))
 		case "/admin/skills/market/installed":
 			w.Write([]byte(`{"enabled":true,"skills_dir":"/tmp/skills","installed":[{"name":"installed-demo","display_name":"已安装示例","version":"0.9.0"}]}`))
+		case "/admin/pi":
+			w.Write([]byte(`{"path":"/Users/x/.easyagent/models.json","file_exists":true,"in_sync":true,
+				"desired":[{"id":"glm-4.7"},{"id":"gpt-6.1-sol"}],"current_ids":["glm-4.7"]}`))
+		case "/admin/pi/sync":
+			w.Write([]byte(`{"path":"/Users/x/.easyagent/models.json","file_exists":true,"in_sync":true,
+				"desired":[{"id":"glm-4.7"},{"id":"gpt-6.1-sol"}],"current_ids":["glm-4.7"]}`))
 		case "/admin/ccswitch":
 			if r.URL.Query().Get("home") == "__fail__" {
 				w.WriteHeader(400)
@@ -79,6 +85,8 @@ func fixture(t *testing.T) (*App, chan func(), chan string) {
 				`{"cc_name":"Qwen","name":"qwen","app_type":"openclaw","type":"openai","url":"https://relay.example.com/v1/chat/completions","api_key_env":"CCS_QWEN_API_KEY","models":["qwen3.5-plus"],"status":"importable"},` +
 				`{"cc_name":"ChatGPT","name":"chatgpt","app_type":"codex","status":"skipped","reason":"OAuth 订阅凭据"}` +
 				`]}`))
+		case "/admin/providers/glm-4.7/health-check":
+			w.Write([]byte(`{"healthy":true,"probe_status":"online","detail":"200 OK","latency_ms":42.5}`))
 		case "/admin/ccswitch/remote-scan":
 			w.Write([]byte(`{"importable":2,"skipped":1,"uploaded":true,"source":"cc-switch config.json（桌面端上传）","candidates":[` +
 				`{"cc_name":"MyGLM","name":"myglm","app_type":"claude","type":"anthropic","url":"https://glmx.example.com/v1/messages","api_key_env":"CCS_MYGLM_API_KEY","models":["glm-4.7"],"status":"importable"},` +
@@ -662,12 +670,12 @@ func TestClientSyncBadgeTracksEditedSelection(t *testing.T) {
 	if tt.HasText("待同步") {
 		t.Fatal("matching selections should be synced")
 	}
-	click(t, tt, "清空 pi")
+	click(t, tt, "清空 EasyAgent")
 	tt.Frame()
 	if !tt.HasText("待同步") {
 		t.Fatal("changed selection still claims to be synced")
 	}
-	click(t, tt, "全选 pi")
+	click(t, tt, "全选 EasyAgent")
 	tt.Frame()
 	if tt.HasText("待同步") {
 		t.Fatal("restored selection should match the saved configuration")
@@ -853,7 +861,7 @@ func TestCCSwitchMigrationPanelImportsSelection(t *testing.T) {
 	a.page = "settings"
 	a.reload()
 	await(t, a, queue)
-	tt := ui.NewTester(a.View, 1100, 800)
+	tt := ui.NewTester(a.View, 1100, 1500)
 
 	if !tt.HasText("从 cc-switch 迁移") {
 		t.Fatal("迁移面板未渲染")
@@ -887,6 +895,52 @@ func TestCCSwitchMigrationPanelImportsSelection(t *testing.T) {
 	}
 	if !tt.HasText("已导入") {
 		t.Fatal("已导入条目未渲染")
+	}
+
+	// 导入后体检：对导入供应商的模型实例发起健康检查并回显在线状态。
+	click(t, tt, "体检导入供应商")
+	await(t, a, queue)
+	tt.Frame()
+	select {
+	case got := <-requests:
+		if !strings.HasPrefix(got, "POST /admin/providers/glm-4.7/health-check") {
+			t.Fatalf("health check request = %s", got)
+		}
+	default:
+		t.Fatal("health check not sent")
+	}
+	if !tt.HasText("在线") {
+		t.Fatal("体检结果未渲染")
+	}
+
+	// 一键同步客户端：按各目标当前选择分发模型。
+	click(t, tt, "一键同步客户端")
+	await(t, a, queue)
+	tt.Frame()
+	select {
+	case got := <-requests:
+		if got != `POST /admin/pi/sync {"model_ids":["glm-4.7"]}` {
+			t.Fatalf("sync-all request = %s", got)
+		}
+	default:
+		t.Fatal("sync-all not sent")
+	}
+}
+
+func TestOverviewShowsMigrationHint(t *testing.T) {
+	a, queue, _ := fixture(t)
+	a.page = "overview"
+	a.reload()
+	await(t, a, queue)
+	tt := ui.NewTester(a.View, 1280, 900)
+	if !tt.HasText("检测到 cc-switch 配置") || !tt.HasText("2 个 cc-switch 条目可导入") {
+		t.Fatal("迁移引导卡未渲染")
+	}
+	click(t, tt, "去迁移")
+	await(t, a, queue)
+	tt.Frame()
+	if a.page != "settings" || !tt.HasText("从 cc-switch 迁移") {
+		t.Fatalf("page = %s", a.page)
 	}
 }
 
